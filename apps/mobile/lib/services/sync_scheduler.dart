@@ -66,6 +66,16 @@ Future<void> scheduleKeepAlive() async {
 
 Future<void> cancelKeepAlive() => Workmanager().cancelByTag(kKeepAliveTag);
 
+/// One immediate heartbeat: opening the app should make the device appear on the dashboard
+/// now, not at the next 15-minute keepalive window.
+Future<void> announcePresence() async {
+  final SessionStore session = await SessionStore.open();
+  final String? deviceId = session.deviceId;
+  if (deviceId == null || !session.isLoggedIn) return;
+  final ApiClient api = ApiClient(session: session);
+  await _beat(api, deviceId, session, online: await ConnectivityAdapter().isOnline());
+}
+
 // ---------------------------------------------------------------------------
 // In-isolate catch-up upload (no full engine — just drain the offline buffer).
 // ---------------------------------------------------------------------------

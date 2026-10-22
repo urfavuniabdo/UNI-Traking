@@ -422,7 +422,10 @@ class HomeController extends StateNotifier<HomeState> {
 }
 
 /// Small helper so home can schedule the buffer keep-alive without importing workmanager.
-Future<void> initKeepAliveFromHome() => scheduleKeepAlive();
+Future<void> initKeepAliveFromHome() async {
+  await scheduleKeepAlive();
+  await announcePresence();
+}
 
 /// The API speaks CONTRACT codes; the driver speaks Arabic. Every screen funnels
 /// failures through here so a code never reaches the UI raw.
