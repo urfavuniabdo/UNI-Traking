@@ -2,6 +2,12 @@
 /**
  * e2e-smoke.mjs — سيناريو القبول الكامل مقابل docs/CONTRACT.md
  * يشغّل على API قائم بالفعل:  node tools/e2e-smoke.mjs [--base=http://localhost:3000/api/v1]
+ * اعتماديات: SMOKE_ADMIN_ID/SMOKE_ADMIN_PW و SMOKE_DRIVER_ID/SMOKE_DRIVER_PW (افتراضيهم
+ * ADMIN_INIT_PASSWORD أو ChangeMe123!). السييد ما بيرجّعش باسورد اتغيّر، فحساب عدّى شاشة
+ * «كلمة مرور جديدة» لازم يتداد باسوردُه الصريح.
+ * السواق لازم يكون لسه ما فتحش وردية النهارده: بدء الوردية مسموح مرة واحدة في اليوم، وكولداون
+ * التنبيه بيبلع الأنواع اللي اترفعت لحسابه قبل كده — إعادة نفس السواق في نفس اليوم تنقص عدد
+ * التنبيهات الحية من غير ما يكون في عطل في السيرفر.
  * يثبت إن: تشيك ان داخل/خارج النطاق · دفع نقاط · تجاوز سرعة · توقف 30د · قطع GPS ·
  * أوف لاين ثم replay (بنفس clientTs وبدون تكرار) · كل alert ليه محاولة توصيل مسجلة · تقارير.
  * مخرج: أسطر PASS/FAIL وكود خروج غير صفر عند أي فشل.
@@ -16,8 +22,9 @@ import { pathToFileURL } from 'node:url';
 const args = process.argv.slice(2);
 const base = (args.find((a) => a.startsWith('--base=')) || '--base=http://localhost:3000/api/v1').split('=')[1];
 const ADMIN_ID = process.env.SMOKE_ADMIN_ID || 'admin';
-const ADMIN_PW = process.env.ADMIN_INIT_PASSWORD || 'ChangeMe123!';
+const ADMIN_PW = process.env.SMOKE_ADMIN_PW || process.env.ADMIN_INIT_PASSWORD || 'ChangeMe123!';
 const DRIVER_ID = process.env.SMOKE_DRIVER_ID || 'D0201';
+const DRIVER_PW = process.env.SMOKE_DRIVER_PW || process.env.ADMIN_INIT_PASSWORD || 'ChangeMe123!';
 
 let token = '';
 let passed = 0;
@@ -115,7 +122,7 @@ async function main() {
   const radius = zone?.radiusM ?? 8000;
 
   // 1) تشيك ان خارج النطاق لسواق تجريبي (عن طريق admin impersonation غير متاح → نسجل مباشرة كـ driver)
-  const driverLogin = await req('POST', '/auth/login', { identifier: DRIVER_ID, password: ADMIN_PW }, { public: true });
+  const driverLogin = await req('POST', '/auth/login', { identifier: DRIVER_ID, password: DRIVER_PW }, { public: true });
   const driverToken = driverLogin.body?.accessToken;
   ok('driver login (seeded code + init password)', driverLogin.status === 200 && !!driverToken, `status=${driverLogin.status}`);
   const savedToken = token;
