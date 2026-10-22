@@ -9,11 +9,12 @@ import '../core/traccer_constants.dart';
 import '../data/batch_builder.dart';
 import '../data/position_dao.dart';
 import '../models/position.dart';
+import 'adapters/battery_adapter.dart';
 import 'adapters/connectivity_adapter.dart';
+import 'adapters/location_adapter.dart';
 
 /// Task identifiers.
 const String kTaskCatchUp = 'traccer.catchup';
-const String kTaskHeartbeat = 'traccer.heartbeat';
 const String kKeepAliveTag = 'traccer.keepalive';
 
 /// Top-level WorkManager dispatcher. Runs in its own isolate, so it re-opens everything.
@@ -25,8 +26,6 @@ void traccerBackgroundDispatcher() {
       switch (task) {
         case kTaskCatchUp:
           return await _catchUpUpload();
-        case kTaskHeartbeat:
-          return await _heartbeatOnly();
         default:
           return true;
       }
@@ -79,6 +78,11 @@ Future<bool> _catchUpUpload() async {
   final PositionDao dao = PositionDao();
   final ApiClient api = ApiClient(session: session);
   final bool online = await ConnectivityAdapter().isOnline();
+
+  // The heartbeat is what keeps a device visible on the dashboard, and an idle employee
+  // buffers no positions at all — so it has to run before both short-circuits below.
+  await _beat(api, deviceId, session, online: online);
+
   if (!online) return false;
 
   final List<TrackPosition> pending = await dao.takeBatch(limit: Buffer.takeBatchDefault);
@@ -106,19 +110,18 @@ Future<bool> _catchUpUpload() async {
   return true;
 }
 
-Future<bool> _heartbeatOnly() async {
-  final SessionStore session = await SessionStore.open();
-  final String? deviceId = session.deviceId;
-  if (deviceId == null || !session.isLoggedIn) return true;
-  final ApiClient api = ApiClient(session: session);
-  final bool online = await ConnectivityAdapter().isOnline();
-  await api.heartbeat(
-    deviceId: deviceId,
-    tracking: false,
-    gpsEnabled: false,
-    online: online,
-  );
-  return true;
+/// Report real device state; a hardcoded `gpsEnabled: false` would flip the dashboard's
+/// GPS indicator off for a phone that is sitting perfectly still.
+Future<void> _beat(ApiClient api, String deviceId, SessionStore session, {required bool online}) async {
+  try {
+    await api.heartbeat(
+      deviceId: deviceId,
+      tracking: session.isCheckedIn && (session.user?.isDriver ?? false),
+      gpsEnabled: await const LocationAdapter().isServiceEnabled(),
+      online: online,
+      battery: await BatteryAdapter().level(),
+    );
+  } on Exception {/* offline / expired token — the next cycle retries */}
 }
 
 /// Detect an unclean previous exit and report APP_KILLED (§2). Called once at app launch.

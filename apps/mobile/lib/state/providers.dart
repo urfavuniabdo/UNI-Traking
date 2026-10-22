@@ -252,13 +252,16 @@ class HomeController extends StateNotifier<HomeState> {
   Future<void> _bootstrap() async {
     await refreshToday();
     await _refreshPending();
-    final bool driver = _ref.read(sessionStoreProvider).user?.isDriver ?? false;
-    if (driver && _ref.read(sessionStoreProvider).isCheckedIn) {
+    final SessionStore session = _ref.read(sessionStoreProvider);
+    final bool driver = session.user?.isDriver ?? false;
+    if (driver && session.isCheckedIn) {
       // Cold start with an open shift: the foreground tracking service must resume.
       await BackgroundServiceAdapter.instance.startTracking();
-      await initKeepAliveFromHome();
       state = state.copyWith(tracking: true);
     }
+    // Any signed-in device, driver or not, owns the keepalive: an employee who never
+    // tracks still has to keep lastSeenAt fresh or the dashboard shows them as offline.
+    if (session.isLoggedIn) await initKeepAliveFromHome();
     _ref.listen<AsyncValue<TrackingUiEvent>>(trackingEventsProvider, (_, AsyncValue<TrackingUiEvent> next) {
       next.whenData(_applyEvent);
     });
@@ -329,8 +332,8 @@ class HomeController extends StateNotifier<HomeState> {
       // Auto-start tracking — the driver never presses a tracking button.
       if (user?.isDriver ?? false) {
         await BackgroundServiceAdapter.instance.startTracking();
-        await initKeepAliveFromHome();
       }
+      await initKeepAliveFromHome();
       state = state.copyWith(
         busy: false,
         checkedIn: true,
