@@ -1,12 +1,17 @@
+/**
+ * Jest config for the Traccer API. No committed config existed, so `npm test`
+ * (plain `jest`) could not transform TypeScript specs. This runs every `*.spec.ts`
+ * under src/ with ts-jest. forceExit avoids hangs from @Interval/@Cron timers and the
+ * Socket.IO gateway that keep the event loop alive in integration tests.
+ */
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
+  rootDir: '.',
   roots: ['<rootDir>/src'],
-  testRegex: '\\.spec\\.ts$|\\.e2e-spec\\.ts$',
-  moduleFileExtensions: ['ts', 'js', 'json'],
+  testMatch: ['**/*.spec.ts', '**/*.e2e-spec.ts'],
+  forceExit: true,
   transform: {
-    '^.+\\.ts$': ['ts-jest', { tsconfig: { target: 'ES2022', module: 'commonjs', experimentalDecorators: true, emitDecoratorMetadata: true, esModuleInterop: true, allowJs: false } }],
+    '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.json', isolatedModules: true }],
   },
-  testTimeout: 30000,
-  maxWorkers: 1,
 };

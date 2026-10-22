@@ -10,18 +10,16 @@
     "esModuleInterop": true,
     "sourceMap": true,
     "outDir": "./dist",
+    "rootDir": "./src",
     "baseUrl": "./",
-    "incremental": true,
+    "incremental": false,
     "skipLibCheck": true,
     "strict": true,
     "strictNullChecks": true,
     "noImplicitAny": false,
     "esModuleInterop": true,
-    "resolveJsonModule": true,
-    "paths": {
-      "@shared/*": ["../../packages/shared/src/*"]
-    }
+    "resolveJsonModule": true
   },
-  "include": ["src/**/*", "prisma/seed.ts", "../../packages/shared/src/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }
