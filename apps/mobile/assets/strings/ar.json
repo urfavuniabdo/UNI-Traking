@@ -66,5 +66,10 @@
   "pwRequirements": "متطلبات كلمة المرور",
   "pwMinLength": "٨ أحرف على الأقل",
   "pwMatch": "تطابق كلمتي المرور",
-  "pwMismatch": "كلمتا المرور غير متطابقتين"
+  "pwMismatch": "كلمتا المرور غير متطابقتين",
+  "greeting": "مرحبًا",
+  "trackingIdle": "— لم يبدأ التتبع بعد",
+  "autoIndicators": "مؤشرات تلقائية",
+  "fenceCheckInFailed": "فشل التشيك ان — خارج النطاق",
+  "allowedFencesLabel": "النطاقات المسموحة"
 }
