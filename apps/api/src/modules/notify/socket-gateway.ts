@@ -91,7 +91,11 @@ export class SocketGateway implements RealtimePublisher, OnGatewayConnection, On
   // ---- RealtimePublisher (fire-and-forget, never throws) ----
 
   position(p: LivePosition): void {
-    this.safeEmit('position:update', p, ['watch:admins', `watch:live:${p.userId}`, `user:${p.userId}`]);
+    // Live key is the employee id (dashboard cards); the driver's own socket sits in
+    // user:<authUserId>, so route to both or the app stops seeing its own positions.
+    const rooms = ['watch:admins', `watch:live:${p.userId}`, `user:${p.userId}`];
+    if (p.authUserId) rooms.push(`user:${p.authUserId}`, `watch:live:${p.authUserId}`);
+    this.safeEmit('position:update', p, rooms);
   }
 
   alert(alertPayload: unknown, audience: { userIds: string[]; roles: Role[] }): void {

@@ -21,8 +21,13 @@ import type { AuthUser } from '../../common/auth/jwt.strategy';
 import { PrismaService } from '../../common/prisma.service';
 import { parseJson } from '../../common/utils';
 import { REALTIME_PUBLISHER, type RealtimePublisher } from '../../common/contracts';
-import { ALERT_TYPES, DRIVER_VISIBLE_ALERTS, ROLES } from '../../shared/constants';
+import { ALERT_TYPES, DRIVER_VISIBLE_ALERTS, ROLES, SEVERITY } from '../../shared/constants';
 import { AlertDispatchService, type AlertPayload } from './alert-dispatch.service';
+
+const SEVERITIES = Object.values(SEVERITY) as readonly string[];
+
+/** AlertPayload + the whatsapp delivery flag the page needs (kept off the frozen dispatch type). */
+type AlertListItem = AlertPayload & { channel: { push: boolean; socket: boolean; whatsapp: string | null } };
 
 type AlertWithEmp = {
   id: string; type: string; severity: string; employeeId: string; userId: string | null;
@@ -47,6 +52,7 @@ export class AlertsController {
     @CurrentUser() user: AuthUser,
     @Query('status') status?: string,
     @Query('type') type?: string,
+    @Query('severity') severity?: string,
     @Query('userId') userId?: string,
     @Query('zoneId') zoneId?: string,
     @Query('zone') zone?: string,
@@ -54,13 +60,14 @@ export class AlertsController {
     @Query('to') to?: string,
     @Query('page') page = '1',
     @Query('pageSize') pageSize = '50',
-  ): Promise<{ data: AlertPayload[]; meta: { total: number; page: number; pageSize: number } }> {
+  ): Promise<{ alerts: AlertListItem[]; data: AlertListItem[]; meta: { total: number; page: number; pageSize: number } }> {
     const pg = Math.max(1, Number(page) || 1);
     const ps = Math.min(200, Math.max(1, Number(pageSize) || 50));
 
     const where: Record<string, unknown> = {};
     if (status) where.status = status;
     if (type && (ALERT_TYPES as readonly string[]).includes(type)) where.type = type;
+    if (severity && (SEVERITIES as readonly string[]).includes(severity)) where.severity = severity;
     const zid = zoneId ?? zone;
     if (zid) where.zoneId = zid;
     if (from || to) {
@@ -98,7 +105,9 @@ export class AlertsController {
         this.dispatch.toPayload(r, r.employee?.name ?? '', r.employee?.phone ?? null, r.employee?.orgUnitId ?? null),
       ),
     );
-    return { data: payloads, meta: { total, page: pg, pageSize: ps } };
+    const items = await this.withWhatsapp(payloads);
+    // `data` is kept for the e2e smoke (`data ?? items`); `alerts` is what the page reads.
+    return { alerts: items, data: items, meta: { total, page: pg, pageSize: ps } };
   }
 
   @Get('stream/summary')
@@ -223,5 +232,28 @@ export class AlertsController {
       for (const k of kids) queue.push(k.id);
     }
     return ids;
+  }
+
+  /**
+   * Attach the WHATSAPP delivery flag from NotificationLog rows so the Alerts page can show
+   * delivery health. Never fabricates a "sent" state: absent log row → `whatsapp: null`;
+   * otherwise the actual row status (SENT | PENDING | FAILED | NO_PROVIDER).
+   */
+  private async withWhatsapp(payloads: AlertPayload[]): Promise<AlertListItem[]> {
+    if (!payloads.length) return [];
+    const ids = payloads.map((p) => p.id);
+    const logs = await this.prisma.notificationLog
+      .findMany({
+        where: { alertId: { in: ids }, channel: 'WHATSAPP' },
+        select: { alertId: true, status: true },
+        orderBy: { updatedAt: 'desc' },
+      })
+      .catch(() => [] as { alertId: string | null; status: string }[]);
+    const whaByAlert = new Map<string, string>();
+    for (const l of logs) if (l.alertId && !whaByAlert.has(l.alertId)) whaByAlert.set(l.alertId, l.status);
+    return payloads.map((p) => ({
+      ...p,
+      channel: { push: p.channel.push, socket: p.channel.socket, whatsapp: whaByAlert.get(p.id) ?? null },
+    }));
   }
 }
