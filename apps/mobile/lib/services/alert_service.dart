@@ -3,7 +3,6 @@ import 'dart:ui' show DartPluginRegistrant;
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 
 import '../core/api_client.dart';
 import '../core/app_config.dart';

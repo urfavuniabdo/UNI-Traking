@@ -11,7 +11,7 @@ void main() {
     });
 
     test('fenceOffsetMeters: inside is positive, outside is negative', () {
-      final LatLng center = LatLng(30.0444, 31.2357);
+      const LatLng center = LatLng(30.0444, 31.2357);
       // ~111m north of centre, radius 500 -> inside by ~389m
       expect(Geo.fenceOffsetMeters(lat: 30.0454, lng: 31.2357, center: center, radiusM: 500),
           greaterThan(0));
@@ -21,7 +21,7 @@ void main() {
     });
 
     test('pointInPolygon ray casting', () {
-      final List<LatLng> square = <LatLng>[
+      const List<LatLng> square = <LatLng>[
         LatLng(30.0, 31.0),
         LatLng(30.0, 31.1),
         LatLng(30.1, 31.1),

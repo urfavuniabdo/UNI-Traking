@@ -104,7 +104,7 @@ class TodayState {
       TodayState(isCheckedIn: false);
 
   static TodayState fromJson(Map<String, Object?> json) {
-    final Object? rec = json['record'] ?? json;
+    final Object rec = json['record'] ?? json;
     final bool checkedIn = (json['isCheckedIn'] ??
             json['checkedIn'] ??
             (rec is Map && rec['checkOutAt'] == null && rec['checkInAt'] != null)) as bool;

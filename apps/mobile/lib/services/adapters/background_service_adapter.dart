@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 

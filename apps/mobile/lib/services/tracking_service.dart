@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:ui' show DartPluginRegistrant;
 
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../core/api_client.dart';
@@ -92,7 +91,7 @@ class TrackingEngine {
       (_) => _heartbeat(),
     );
 
-    _heartbeat(); // immediate, so the dashboard sees the driver instantly
+    unawaited(_heartbeat()); // immediate, so the dashboard sees the driver instantly
     _emit('STATUS', await _statusSnapshot());
   }
 
@@ -324,10 +323,12 @@ void trackingOnStart(ServiceInstance service) async {
 
   // Android: promote to a foreground service with the ongoing tracking notification.
   if (service is AndroidServiceInstance) {
-    service.setAsForegroundService();
-    service.setForegroundNotificationInfo(
-      title: 'Traccer',
-      content: 'التتبع يعمل تلقائيًا',
+    unawaited(service.setAsForegroundService());
+    unawaited(
+      service.setForegroundNotificationInfo(
+        title: 'Traccer',
+        content: 'التتبع يعمل تلقائيًا',
+      ),
     );
   }
 
@@ -347,7 +348,7 @@ void trackingOnStart(ServiceInstance service) async {
   service.on('START').listen((Map<String, dynamic>? _) async {
     await engine.start();
     if (service is AndroidServiceInstance && await service.isForegroundService()) {
-      service.setForegroundNotificationInfo(title: 'Traccer', content: 'التتبع يعمل تلقائيًا');
+      unawaited(service.setForegroundNotificationInfo(title: 'Traccer', content: 'التتبع يعمل تلقائيًا'));
     }
   });
 
@@ -355,13 +356,13 @@ void trackingOnStart(ServiceInstance service) async {
 
   service.on('STOP').listen((Map<String, dynamic>? _) async {
     await engine.stop();
-    if (service is AndroidServiceInstance) service.stopSelf();
+    if (service is AndroidServiceInstance) unawaited(service.stopSelf());
   });
 
   // The service is auto-started on boot (see BackgroundServiceAdapter autoStart), but it must
   // only actually track when a shift is open — otherwise stop and stay silent.
   if (!session.isCheckedIn) {
-    if (service is AndroidServiceInstance) service.stopSelf();
+    if (service is AndroidServiceInstance) unawaited(service.stopSelf());
     return;
   }
 

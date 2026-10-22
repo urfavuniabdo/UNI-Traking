@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:connectivity_plus/connectivity_plus.dart';
 
 /// Single seam for data/connectivity detection (connectivity_plus).

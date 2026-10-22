@@ -3,13 +3,13 @@ import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 
-import 'api_error.dart';
-import 'app_config.dart';
-import 'session_store.dart';
 import '../models/alert.dart';
 import '../models/attendance.dart';
 import '../models/position.dart';
 import '../models/user.dart';
+import 'api_error.dart';
+import 'app_config.dart';
+import 'session_store.dart';
 
 /// The only place that talks HTTP to apps/api. Everything else goes through this.
 ///
@@ -273,14 +273,14 @@ class ApiClient {
         if (newToken != null) {
           return _send<T>(action, retry: retry, attempt: attempt, allowRefresh: false);
         }
-        throw UnauthorizedException();
+        throw const UnauthorizedException();
       }
       if (retry && _isNetworkFailure(e)) {
         if (attempt < 4) {
           await _backoff(attempt);
           return _send<T>(action, retry: true, attempt: attempt + 1, allowRefresh: allowRefresh);
         }
-        throw NetworkException(message: 'تعذر الاتصال بالخادم');
+        throw const NetworkException(message: 'تعذر الاتصال بالخادم');
       }
       throw _toApiError(e);
     }

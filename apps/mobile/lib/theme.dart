@@ -18,7 +18,7 @@ class TraccerTheme {
 
   static List<BoxShadow> cardShadow(bool dark) => <BoxShadow>[
         BoxShadow(
-          color: brand.withOpacity(dark ? 0.18 : 0.08),
+          color: brand.withValues(alpha: dark ? 0.18 : 0.08),
           blurRadius: 18,
           offset: const Offset(0, 6),
         ),
@@ -67,7 +67,7 @@ class TraccerTheme {
         color: dark ? const Color(0xFF131C2E) : surfaceLight,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(cardRadius),
-          side: BorderSide(color: brand.withOpacity(dark ? 0.25 : 0.12)),
+          side: BorderSide(color: brand.withValues(alpha: dark ? 0.25 : 0.12)),
         ),
         margin: EdgeInsets.zero,
       ),
@@ -90,7 +90,7 @@ class TraccerTheme {
           textStyle: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w700),
         ),
       ),
-      dividerTheme: DividerThemeData(color: brand.withOpacity(0.12)),
+      dividerTheme: DividerThemeData(color: brand.withValues(alpha: 0.12)),
     );
   }
 }

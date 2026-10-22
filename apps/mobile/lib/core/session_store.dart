@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'app_config.dart';
 import '../models/user.dart';
+import 'app_config.dart';
 
 /// Lightweight session store backed by `shared_preferences`.
 ///

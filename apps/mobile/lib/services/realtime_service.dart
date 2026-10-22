@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:socket_io_client/socket_io_client.dart' as socket_io;
 
 import '../core/app_config.dart';
 import '../core/traccer_constants.dart';
@@ -19,7 +19,7 @@ class RealtimeService {
   final void Function(NotifyMePayload payload)? onNotifyMe;
   final void Function(bool connected)? onStatus;
 
-  IO.Socket? _socket;
+  socket_io.Socket? _socket;
   bool _connected = false;
 
   bool get isConnected => _connected;
@@ -27,9 +27,9 @@ class RealtimeService {
   void connect({required String accessToken, String? userId}) {
     if (_socket != null) return;
     final String url = '${AppConfig.socketUrl}/rt';
-    final IO.Socket socket = IO.io(
+    final socket_io.Socket socket = socket_io.io(
       url,
-      IO.OptionBuilder()
+      socket_io.OptionBuilder()
           .setTransports(<String>['websocket'])
           .enableReconnection()
           .disableAutoConnect()

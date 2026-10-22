@@ -15,7 +15,9 @@ class S {
     try {
       final String raw = await rootBundle.loadString('assets/strings/ar.json');
       final Map<String, dynamic> parsed = jsonDecode(raw) as Map<String, dynamic>;
-      parsed.forEach((String k, Object? v) => _strings[k] = v.toString());
+      for (final MapEntry<String, Object?> entry in parsed.entries) {
+        _strings[entry.key] = entry.value.toString();
+      }
     } catch (_) {
       // keep fallback
     }

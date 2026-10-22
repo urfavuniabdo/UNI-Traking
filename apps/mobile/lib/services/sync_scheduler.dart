@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:ui' show DartPluginRegistrant;
 
 import 'package:flutter/foundation.dart';
