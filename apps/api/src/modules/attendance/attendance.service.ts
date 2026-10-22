@@ -303,6 +303,29 @@ export class AttendanceService {
     };
   }
 
+  /** Own history for EMPLOYEE/DRIVER (never leaks another employee's rows). */
+  async meHistory(userId: string, f: AttendanceQueryDto) {
+    const emp = await this.resolveEmployee(userId);
+    const page = Math.max(1, Number(f.page ?? 1));
+    const pageSize = Math.min(200, Math.max(1, Number(f.pageSize ?? 50)));
+    const where: Record<string, unknown> = { employeeId: emp.id };
+    const dateRange: Record<string, string> = {};
+    if (f.from) dateRange.gte = f.from.slice(0, 10);
+    if (f.to) dateRange.lte = f.to.slice(0, 10);
+    if (Object.keys(dateRange).length) where.workDate = dateRange;
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.attendanceRecord.findMany({
+        where,
+        include: { site: { select: { id: true, name: true } } },
+        orderBy: [{ workDate: 'desc' }, { checkInAt: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.attendanceRecord.count({ where }),
+    ]);
+    return { items, total, page, pageSize };
+  }
+
   private async buildWhere(f: AttendanceQueryDto): Promise<Record<string, unknown>> {
     const where: Record<string, unknown> = {};
     const dateRange: Record<string, string> = {};

@@ -29,6 +29,11 @@ export class AttendanceController {
     return this.attendance.meToday(user.id);
   }
 
+  @Get('me/history')
+  meHistory(@CurrentUser() user: AuthUser, @Query() q: AttendanceQueryDto) {
+    return this.attendance.meHistory(user.id, q);
+  }
+
   // ---- management reads ----
   @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
   @Get('export')

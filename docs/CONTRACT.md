@@ -37,9 +37,11 @@ Base URL: `/api/v1` — كل الطلبات محمية بـ `Authorization: Bear
 | POST | `/attendance/check-in` | `{ lat, lng, accuracy?, deviceId }` |
 | POST | `/attendance/check-out` | `{ lat, lng, accuracy?, deviceId }` |
 | GET | `/attendance/me/today` | سجل اليوم + الحالة الحالية |
+| GET | `/attendance/me/history?from&to&page` | سجل الموظف/السواق الشخصي فقط — `{ items, total, page, pageSize }` |
 | GET | `/attendance` | فلترة: `from,to,userId,siteId,status,page` (إدارة) |
 
 قواعد التحقق: النقطة لازم تقع داخل نطاق العنصر (`Site` للموظف / `Zone` للسواق) حسب `GeoShape`.
+**صيغة المضلع:** canonical هي `[[lat,lng],…]`، والسيرفر بيتعامل مع `[[lng,lat],…]` (شكل GeoJSON اللي بيرسمه الداش بورد) تلقائيًا — الاتجاه يُحدّد بمطابقة مركز الحلقة مع `lat/lng` المُعلَن للنطاق (`GeoService.ringOf`)، وأي حلقة أقل من 3 نقاط أو بإحداثيات غير صحيحة تُرفض بـ `POLYGON_INVALID`. مخرج `GET /places/fences` هو GeoJSON بصيغة `[lng,lat]` كما هو متعارف.
 النتيجة `VALID` أو `OUT_OF_FENCE` — مع `fenceName`, `distanceToCenterM`, `allowedFences[]` في الـ response.
 `OUT_OF_FENCE` **لا يُرفض الطلب**؛ يُسجَّل مع رايات `exception: true` و`replayed: true` للدفعة المعاد بثها، ويُطلق تنبيه `CHECK_IN_OUT_OF_FENCE` للطرفين، إلا لو `settings.attendance.strictReject=true` ساعتها `422` بالكود `FENCE_VIOLATION`.
 ممنوع تشيك ان مزدوج: `ALREADY_CHECKED_IN` (`409`). نهاية الوردية بفترة سماح `shiftGraceMin=30` ثم `CHECKOUT_MISSING`.
@@ -106,7 +108,7 @@ IDLE_ALARM_MIN         = 30      // توقف > 30 دقيقة ⇒ STOP_EXCEEDED
   channel: { push: boolean, socket: boolean, whatsapp?: "PENDING"|"SENT"|"NO_PROVIDER" } }
 ```
 
-مسار التنبيهات: `GET /alerts?status&type&userId&from&to`, `POST /alerts/:id/ack`, `POST /alerts/:id/resolve` `{ note }`, `POST /alerts/:id/call-log` `{ called: boolean, note }` — وتسجيل مَن اتصل بالسواق ومتى.
+مسار التنبيهات: `GET /alerts?status&type&userId&from&to`، `GET /alerts/me` (الموظف/السواق — تنبيهاته الشخصية فقط)، `POST /alerts/:id/ack`, `POST /alerts/:id/resolve` `{ note }`, `POST /alerts/:id/call-log` `{ called: boolean, note }` — وتسجيل مَن اتصل بالسواق ومتى.
 
 ## 7. Realtime (Socket.IO, namespace `/rt`)
 

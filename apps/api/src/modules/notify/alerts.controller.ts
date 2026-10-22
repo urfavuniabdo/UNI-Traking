@@ -21,7 +21,7 @@ import type { AuthUser } from '../../common/auth/jwt.strategy';
 import { PrismaService } from '../../common/prisma.service';
 import { parseJson } from '../../common/utils';
 import { REALTIME_PUBLISHER, type RealtimePublisher } from '../../common/contracts';
-import { ALERT_TYPES, ROLES } from '../../shared/constants';
+import { ALERT_TYPES, DRIVER_VISIBLE_ALERTS, ROLES } from '../../shared/constants';
 import { AlertDispatchService, type AlertPayload } from './alert-dispatch.service';
 
 type AlertWithEmp = {
@@ -127,6 +127,27 @@ export class AlertsController {
       bySeverity: toMap(bySeverity as never, 'severity'),
       byStatus: toMap(byStatus as never, 'status'),
     };
+  }
+
+  @Get('me')
+  async mine(@CurrentUser() user: AuthUser): Promise<AlertPayload[]> {
+    const where: Record<string, unknown> = {
+      OR: [{ userId: user.id }, { employee: { user: { id: user.id } } }],
+    };
+    if (user.role === ROLES.DRIVER) {
+      where.type = { in: [...DRIVER_VISIBLE_ALERTS] };
+    }
+    const rows = (await this.prisma.alert.findMany({
+      where,
+      include: { employee: { select: { name: true, phone: true, orgUnitId: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    })) as unknown as AlertWithEmp[];
+    return Promise.all(
+      rows.map((r) =>
+        this.dispatch.toPayload(r, r.employee?.name ?? '', r.employee?.phone ?? null, r.employee?.orgUnitId ?? null),
+      ),
+    );
   }
 
   @Get(':id')
