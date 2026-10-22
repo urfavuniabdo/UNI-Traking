@@ -35,11 +35,15 @@ class AttendanceResult {
     final Object? fences = json['allowedFences'];
     return AttendanceResult(
       status: (json['status'] ?? AttendanceStatus.valid) as String,
-      recordId: json['id'] as String? ?? json['recordId'] as String?,
+      recordId: (json['id'] ?? json['recordId']) as String?,
       fenceName: json['fenceName'] as String?,
       distanceToCenterM: (json['distanceToCenterM'] as num?)?.toDouble(),
-      allowedFences:
-          fences is List ? fences.map((Object? e) => e.toString()).toList() : const <String>[],
+      allowedFences: fences is List
+          ? fences
+              .map((Object? e) => e is Map ? (e['name'] ?? e['id'] ?? '').toString() : e.toString())
+              .where((String s) => s.isNotEmpty)
+              .toList(growable: false)
+          : const <String>[],
       exception: (json['exception'] ?? false) as bool,
       replayed: (json['replayed'] ?? false) as bool,
       checkInAt: DateTime.tryParse((json['checkInAt'] ?? '') as String),
@@ -66,15 +70,20 @@ class AttendanceDay {
   final bool exception;
   final String? fenceName;
 
-  static AttendanceDay fromJson(Map<String, Object?> json) => AttendanceDay(
-        date: DateTime.tryParse((json['date'] ?? json['checkInAt'] ?? '') as String) ??
-            DateTime.now(),
-        checkInAt: DateTime.tryParse((json['checkInAt'] ?? '') as String),
-        checkOutAt: DateTime.tryParse((json['checkOutAt'] ?? '') as String),
-        status: json['status'] as String?,
-        exception: (json['exception'] ?? false) as bool,
-        fenceName: json['fenceName'] as String?,
-      );
+  static AttendanceDay fromJson(Map<String, Object?> json) {
+    final String? status = json['status'] as String?;
+    final Object? site = json['site'];
+    return AttendanceDay(
+      date: DateTime.tryParse((json['date'] ?? json['workDate'] ?? json['checkInAt'] ?? '') as String) ??
+          DateTime.now(),
+      checkInAt: DateTime.tryParse((json['checkInAt'] ?? '') as String),
+      checkOutAt: DateTime.tryParse((json['checkOutAt'] ?? '') as String),
+      status: status,
+      exception: (json['exception'] ?? (status == AttendanceStatus.outOfFence)) as bool,
+      fenceName: (json['fenceName'] as String?) ??
+          (site is Map ? site['name'] as String? : null),
+    );
+  }
 }
 
 /// "Today" snapshot: the current open record + live state (drives the home screen).

@@ -41,7 +41,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       appBar: AppBar(title: Text(S.t('history'))),
       body: FutureBuilder<List<AttendanceDay>>(
         future: _future,
-        builder: (BuildContext ctx, AsyncValue<List<AttendanceDay>> snap) {
+        builder: (BuildContext ctx, AsyncSnapshot<List<AttendanceDay>> snap) {
           if (snap.isLoading) return const Center(child: CircularProgressIndicator());
           final List<AttendanceDay> days = snap.data ?? const <AttendanceDay>[];
           if (days.isEmpty) {

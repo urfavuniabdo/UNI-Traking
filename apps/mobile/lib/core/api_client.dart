@@ -95,14 +95,17 @@ class ApiClient {
     await _guarded(
       () => _dio.post<Map<String, Object?>>(
         '/auth/change-password',
-        data: <String, Object?>{'oldPassword': oldPassword, 'newPassword': newPassword},
+        data: <String, Object?>{'currentPassword': oldPassword, 'newPassword': newPassword},
       ),
     );
   }
 
   Future<void> logout() async {
     try {
-      await _send(() => _dio.post<Map<String, Object?>>('/auth/logout'));
+      await _send(() => _dio.post<Map<String, Object?>>(
+            '/auth/logout',
+            data: <String, Object?>{'refreshToken': session.refreshToken},
+          ));
     } on ApiException {
       // best-effort — always clear locally
     }
@@ -110,7 +113,7 @@ class ApiClient {
   }
 
   Future<void> registerDevice({
-    required String token,
+    String? token,
     required String platform, // "android" | "ios"
     required String deviceId,
   }) async {
@@ -118,7 +121,7 @@ class ApiClient {
       () => _dio.post<Map<String, Object?>>(
         '/devices/register',
         data: <String, Object?>{
-          'token': token,
+          if (token != null && token.isNotEmpty) 'token': token,
           'platform': platform,
           'appVersion': AppConfig.appVersion,
           'deviceId': deviceId,
@@ -200,21 +203,27 @@ class ApiClient {
   }
 
   Future<List<AttendanceDay>> history({required DateTime from, required DateTime to}) async {
-    final List<Object?> rows = await _guarded(
-      () => _dio.get<List<Object?>>(
-        '/attendance',
+    final Map<String, Object?> data = await _guarded(
+      () => _dio.get<Map<String, Object?>>(
+        '/attendance/me/history',
         queryParameters: <String, Object?>{
-          'from': from.toUtc().toIso8601String(),
-          'to': to.toUtc().toIso8601String(),
+          'from': _dateOnly(from),
+          'to': _dateOnly(to),
           'page': 1,
+          'pageSize': 100,
         },
       ),
     );
-    return rows
+    final Object? items = data['items'];
+    if (items is! List) return const <AttendanceDay>[];
+    return items
         .whereType<Map<String, Object?>>()
         .map(AttendanceDay.fromJson)
         .toList(growable: false);
   }
+
+  String _dateOnly(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   // ===========================================================================
   // Position ingest (§4) — the ONLY position entrypoint
@@ -233,7 +242,7 @@ class ApiClient {
 
   Future<List<TraccerAlert>> myAlerts() async {
     final List<Object?> rows = await _guarded(
-      () => _dio.get<List<Object?>>('/alerts', queryParameters: <String, Object?>{}),
+      () => _dio.get<List<Object?>>('/alerts/me'),
     );
     return rows.whereType<Map<String, Object?>>().map(TraccerAlert.fromJson).toList(growable: false);
   }

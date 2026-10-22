@@ -21,6 +21,7 @@ class FenceViolationException extends ApiException {
     required this.fenceName,
     required this.distanceToCenterM,
     required this.allowedFences,
+    this.supervisorPhone,
     super.statusCode,
     super.data,
   }) : super(code: 'FENCE_VIOLATION');
@@ -28,14 +29,21 @@ class FenceViolationException extends ApiException {
   final String? fenceName;
   final double? distanceToCenterM;
   final List<String> allowedFences;
+  // NOTE: CONTRACT §3 doesn't yet return a supervisor number in the 422 body; if the backend
+  // adds `supervisorPhone` (or `phone`) the "اتصل بالمشرف" tel link lights up automatically.
+  final String? supervisorPhone;
 
   static FenceViolationException fromJson(Map<String, Object?> json) => FenceViolationException(
         message: (json['message'] ?? 'فشل التحقق من النطاق') as String,
         fenceName: json['fenceName'] as String?,
         distanceToCenterM: (json['distanceToCenterM'] as num?)?.toDouble(),
         allowedFences: (json['allowedFences'] is List)
-            ? (json['allowedFences'] as List).map((Object? e) => e.toString()).toList()
+            ? (json['allowedFences'] as List)
+                .map((Object? e) => e is Map ? (e['name'] ?? e['id'] ?? '').toString() : e.toString())
+                .where((String s) => s.isNotEmpty)
+                .toList()
             : const <String>[],
+        supervisorPhone: (json['supervisorPhone'] ?? json['phone']) as String?,
         statusCode: (json['statusCode'] as num?)?.toInt(),
         data: json,
       );

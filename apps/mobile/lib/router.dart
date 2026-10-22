@@ -17,7 +17,7 @@ class AppRefresh extends ChangeNotifier {
 }
 final AppRefresh appRefresh = AppRefresh();
 
-GoRouter buildRouter(Ref ref) {
+GoRouter buildRouter(WidgetRef ref) {
   return GoRouter(
     initialLocation: '/home',
     refreshListenable: appRefresh,

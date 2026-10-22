@@ -46,7 +46,7 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
       appBar: AppBar(title: Text(S.t('notifications'))),
       body: FutureBuilder<List<TraccerAlert>>(
         future: _future,
-        builder: (BuildContext ctx, AsyncValue<List<TraccerAlert>> snap) {
+        builder: (BuildContext ctx, AsyncSnapshot<List<TraccerAlert>> snap) {
           if (snap.isLoading) return const Center(child: CircularProgressIndicator());
           final List<TraccerAlert> alerts = snap.data ?? const <TraccerAlert>[];
           if (alerts.isEmpty) {

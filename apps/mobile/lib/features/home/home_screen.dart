@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../core/api_error.dart';
 import '../../core/app_strings.dart';
@@ -26,6 +27,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final HomeState home = ref.watch(homeControllerProvider);
     final AuthState auth = ref.watch(authControllerProvider);
+    final bool isDriver = auth.user?.isDriver ?? false;
     final bool isDark = Theme.of(context).brightness == Brightness.dark;
 
     // Show the hard fence-rejection dialog exactly once per violation.
@@ -54,7 +56,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           IconButton(
             tooltip: S.t('settings'),
             icon: const Icon(Icons.tune),
-            onPressed: () => showSettingsSheet(context, ref),
+            onPressed: () => showSettingsSheet(context),
           ),
         ],
       ),
@@ -70,7 +72,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 _AmberNotice(message: S.t('outOfFenceNotice')),
               ],
               const SizedBox(height: 20),
-              _AutoIndicators(home: home),
+              _AutoIndicators(home: home, isDriver: isDriver),
               const SizedBox(height: 20),
               if (home.tracking) _EmergencyStop(onHold: _emergencyStop),
               const SizedBox(height: 24),
@@ -121,9 +123,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ],
             const SizedBox(height: 20),
             FilledButton.icon(
-              onPressed: () {
+              onPressed: () async {
                 ref.read(homeControllerProvider.notifier).dismissFenceViolation();
-                Navigator.of(ctx).pop();
+                if (ctx.mounted) Navigator.of(ctx).pop();
+                final String? phone = e.supervisorPhone;
+                if (phone != null && phone.isNotEmpty) {
+                  try {
+                    await launchUrlString('tel:$phone', mode: LaunchMode.externalApplication);
+                  } catch (_) {/* no dialer — the alert already reached admins */}
+                }
               },
               icon: const Icon(Icons.call),
               label: Text(S.t('contactSupervisor')),
@@ -237,8 +245,9 @@ class _CheckButton extends StatelessWidget {
 
 /// Read-only automatic indicators — no controls (except the documented emergency stop below).
 class _AutoIndicators extends StatelessWidget {
-  const _AutoIndicators({required this.home});
+  const _AutoIndicators({required this.home, required this.isDriver});
   final HomeState home;
+  final bool isDriver;
 
   @override
   Widget build(BuildContext context) {
@@ -259,13 +268,14 @@ class _AutoIndicators extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: <Widget>[
-                _chip(context, home.tracking, S.t('trackingWorking'), S.t('trackingStopped'),
-                    home.tracking ? TraccerTheme.green : TraccerTheme.red),
+                if (isDriver)
+                  _chip(context, home.tracking, S.t('trackingWorking'), S.t('trackingStopped'),
+                      home.tracking ? TraccerTheme.green : TraccerTheme.red),
                 _chip(context, true, S.t('gpsOn'), S.t('gpsOff'),
                     home.gpsEnabled ? TraccerTheme.green : TraccerTheme.red),
                 _chip(context, true, S.t('dataConnected'), S.t('dataOffline'),
                     home.online ? TraccerTheme.green : TraccerTheme.amber),
-                _offlineChip(context, home.pendingCount),
+                if (isDriver) _offlineChip(context, home.pendingCount),
               ],
             ),
           ],

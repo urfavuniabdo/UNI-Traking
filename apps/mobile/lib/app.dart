@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'core/session_store.dart';
 import 'router.dart';
 import 'services/alert_service.dart';
 import 'services/realtime_service.dart';
@@ -20,20 +23,33 @@ class _TraccerAppState extends ConsumerState<TraccerApp> {
   late final GoRouter _router = buildRouter(ref);
   AlertService? _alerts;
   RealtimeService? _rt;
-  bool _bootstrapped = false;
+  String? _bootstrappedFor;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrapMessaging());
+    // Login/logout happens without restarting the app: rewire push + socket on user change.
+    ref.listenManual<AuthState>(authControllerProvider, (AuthState? prev, AuthState next) {
+      if (prev?.user?.id != next.user?.id) unawaited(_bootstrapMessaging());
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_bootstrapMessaging()));
   }
 
   /// Set up push (FCM) + the foreground socket once the user is authenticated.
   Future<void> _bootstrapMessaging() async {
-    if (_bootstrapped || !mounted) return;
-    _bootstrapped = true;
-    final session = ref.read(sessionStoreProvider);
-    if (!session.isLoggedIn) return;
+    if (!mounted) return;
+    final SessionStore session = ref.read(sessionStoreProvider);
+    final AuthState auth = ref.read(authControllerProvider);
+    final String? userId = auth.user?.id;
+
+    if (userId == null || !session.isLoggedIn) {
+      _teardownMessaging();
+      return;
+    }
+    if (_bootstrappedFor == userId) return;
+    _teardownMessaging();
+    _bootstrappedFor = userId;
+
     final String deviceId = await ref.read(deviceIdProvider.future);
     if (!mounted) return;
 
@@ -54,18 +70,33 @@ class _TraccerAppState extends ConsumerState<TraccerApp> {
       } catch (e) {
         debugPrint('[boot] alert init failed: $e');
       }
+    } else {
+      // No Firebase config: in-app socket alerts still need the local notification channel.
+      try {
+        await ref.read(notificationsProvider).init();
+        await ref.read(notificationsProvider).requestPermission();
+      } catch (e) {
+        debugPrint('[boot] local notifications init failed: $e');
+      }
     }
 
     // Foreground realtime (notify:me) while the app is open.
     final RealtimeService rt = RealtimeService(onNotifyMe: alerts.handleNotifyMe);
-    rt.connect(accessToken: session.accessToken ?? '', userId: session.user?.id);
+    rt.connect(accessToken: session.accessToken ?? '', userId: userId);
     _rt = rt;
+  }
+
+  void _teardownMessaging() {
+    _rt?.disconnect();
+    _rt = null;
+    unawaited(_alerts?.dispose() ?? Future<void>.value());
+    _alerts = null;
+    _bootstrappedFor = null;
   }
 
   @override
   void dispose() {
-    _rt?.disconnect();
-    _alerts?.dispose();
+    _teardownMessaging();
     super.dispose();
   }
 

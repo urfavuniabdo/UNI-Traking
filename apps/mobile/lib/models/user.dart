@@ -59,11 +59,17 @@ class AppUser {
 
 /// Result of `POST /auth/login` / `/auth/refresh`.
 class AuthTokens {
-  const AuthTokens({required this.accessToken, required this.refreshToken, this.user});
+  const AuthTokens({
+    required this.accessToken,
+    required this.refreshToken,
+    this.user,
+    this.mustChangePassword = false,
+  });
 
   final String accessToken;
   final String refreshToken;
   final AppUser? user;
+  final bool mustChangePassword;
 
   static AuthTokens fromJson(Map<String, Object?> json) => AuthTokens(
         accessToken: (json['accessToken'] ?? '') as String,
@@ -71,5 +77,7 @@ class AuthTokens {
         user: json['user'] is Map<String, Object?>
             ? AppUser.fromJson((json['user'] as Map<String, Object?>))
             : null,
+        mustChangePassword:
+            (json['mustChangePassword'] ?? json['changeOnLogin'] ?? false) as bool,
       );
 }

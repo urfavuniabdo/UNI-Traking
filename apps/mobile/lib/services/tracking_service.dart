@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../core/api_client.dart';
@@ -343,16 +345,16 @@ void trackingOnStart(ServiceInstance service) async {
         service.invoke('ui', <String, Object?>{'event': event, 'data': data}),
   );
 
-  service.on('START', (Map? _) async {
+  service.on('START', (dynamic _) async {
     await engine.start();
     if (service is AndroidServiceInstance && await service.isForegroundService()) {
       service.setForegroundNotificationInfo(title: 'Traccer', content: 'التتبع يعمل تلقائيًا');
     }
   });
 
-  service.on('SESSION_REFRESH', (Map? _) => engine.start());
+  service.on('SESSION_REFRESH', (dynamic _) => engine.start());
 
-  service.on('STOP', (Map? _) async {
+  service.on('STOP', (dynamic _) async {
     await engine.stop();
     if (service is AndroidServiceInstance) service.stopSelf();
   });

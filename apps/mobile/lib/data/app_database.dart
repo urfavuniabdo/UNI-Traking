@@ -15,6 +15,30 @@ class AppDatabase {
   static const String _name = 'traccer_positions.db';
   static const int _version = 1;
 
+  /// DDL, exposed so the (device-free) unit tests can build the same table via sqflite_common_ffi.
+  static const String createPositionsSql = '''
+      CREATE TABLE positions (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        clientTs   INTEGER NOT NULL,
+        lat        REAL    NOT NULL,
+        lng        REAL    NOT NULL,
+        speedKmh   REAL    NOT NULL,
+        bearing    REAL    NOT NULL,
+        accuracyM  REAL    NOT NULL,
+        altitudeM  REAL    NOT NULL DEFAULT 0,
+        batteryPct INTEGER NOT NULL DEFAULT 0,
+        provider   TEXT    NOT NULL,
+        buffered   INTEGER NOT NULL DEFAULT 0,
+        seq        INTEGER NOT NULL UNIQUE,
+        uploaded   INTEGER NOT NULL DEFAULT 0,
+        motionState TEXT
+      )
+    ''';
+  static const List<String> createIndexSql = <String>[
+    'CREATE INDEX idx_positions_uploaded ON positions (uploaded, clientTs)',
+    'CREATE INDEX idx_positions_seq ON positions (seq)',
+  ];
+
   Database? _db;
   Completer<Database>? _opening;
 
@@ -50,27 +74,10 @@ class AppDatabase {
   }
 
   Future<void> _onCreate(Database db, int v) async {
-    await db.execute('''
-      CREATE TABLE positions (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        clientTs   INTEGER NOT NULL,
-        lat        REAL    NOT NULL,
-        lng        REAL    NOT NULL,
-        speedKmh   REAL    NOT NULL,
-        bearing    REAL    NOT NULL,
-        accuracyM  REAL    NOT NULL,
-        altitudeM  REAL    NOT NULL DEFAULT 0,
-        batteryPct INTEGER NOT NULL DEFAULT 0,
-        provider   TEXT    NOT NULL,
-        buffered   INTEGER NOT NULL DEFAULT 0,
-        seq        INTEGER NOT NULL UNIQUE,
-        uploaded   INTEGER NOT NULL DEFAULT 0,
-        motionState TEXT
-      )
-    ''');
-    // Fast oldest-first scan for the drain loop.
-    await db.execute('CREATE INDEX idx_positions_uploaded ON positions (uploaded, clientTs)');
-    await db.execute('CREATE INDEX idx_positions_seq ON positions (seq)');
+    await db.execute(createPositionsSql);
+    for (final String sql in createIndexSql) {
+      await db.execute(sql);
+    }
   }
 
   Future<void> close() async {

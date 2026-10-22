@@ -8,19 +8,18 @@ import '../../state/providers.dart';
 import '../../theme.dart';
 
 /// Bottom sheet with the only real user controls: notifications/sound, dark mode, logout.
-Future<void> showSettingsSheet(BuildContext context, WidgetRef ref) {
-  return showModalBottomSheet<void>(
+void showSettingsSheet(BuildContext context) {
+  showModalBottomSheet<void>(
     context: context,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
-    builder: (BuildContext ctx) => _SettingsSheet(ref: ref),
+    builder: (BuildContext ctx) => const _SettingsSheet(),
   );
 }
 
 class _SettingsSheet extends ConsumerStatefulWidget {
-  const _SettingsSheet({required this.ref});
-  final WidgetRef ref;
+  const _SettingsSheet();
 
   @override
   ConsumerState<_SettingsSheet> createState() => _SettingsSheetState();
@@ -29,8 +28,8 @@ class _SettingsSheet extends ConsumerStatefulWidget {
 class _SettingsSheetState extends ConsumerState<_SettingsSheet> {
   @override
   Widget build(BuildContext context) {
-    final bool sound = widget.ref.read(sessionStoreProvider).soundEnabled;
-    final bool dark = widget.ref.watch(darkModeProvider);
+    final bool sound = ref.read(sessionStoreProvider).soundEnabled;
+    final bool dark = ref.watch(darkModeProvider);
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -45,7 +44,7 @@ class _SettingsSheetState extends ConsumerState<_SettingsSheet> {
               value: sound,
               activeColor: TraccerTheme.brand,
               onChanged: (bool v) async {
-                await widget.ref.read(sessionStoreProvider).setSoundEnabled(v);
+                await ref.read(sessionStoreProvider).setSoundEnabled(v);
                 setState(() {});
               },
             ),
@@ -54,14 +53,14 @@ class _SettingsSheetState extends ConsumerState<_SettingsSheet> {
               value: dark,
               activeColor: TraccerTheme.brand,
               onChanged: (bool v) async {
-                await widget.ref.read(sessionStoreProvider).setDarkMode(v);
-                widget.ref.read(darkModeProvider.notifier).state = v;
+                await ref.read(sessionStoreProvider).setDarkMode(v);
+                ref.read(darkModeProvider.notifier).state = v;
               },
             ),
             const Divider(),
             TextButton.icon(
               onPressed: () async {
-                await widget.ref.read(authControllerProvider.notifier).logout();
+                await ref.read(authControllerProvider.notifier).logout();
                 if (context.mounted) {
                   appRefresh.notify();
                   context.go('/login');

@@ -20,14 +20,14 @@ void main() {
     golden = jsonDecode(f.readAsStringSync()) as Map<String, Object?>;
   });
 
-  double num(Object? v) => (v! as num).toDouble();
+  double asNum(Object? v) => (v! as num).toDouble();
 
   test('MOTION thresholds match the golden', () {
     final Map<String, Object?> g = golden['MOTION']! as Map<String, Object?>;
     final Map<String, Object?> d = Motion.toGoldenMap();
     for (final String k in g.keys) {
       expect(d[k], isNotNull, reason: 'Dart missing MOTION.$k');
-      expect(num(d[k]), num(g[k]), reason: 'MOTION.$k mismatch');
+      expect(asNum(d[k]), asNum(g[k]), reason: 'MOTION.$k mismatch');
     }
     expect(d.length, g.length);
   });
@@ -37,7 +37,7 @@ void main() {
     final Map<String, Object?> d = RuleDefaults.toGoldenMap();
     for (final String k in g.keys) {
       expect(d[k], isNotNull, reason: 'Dart missing RULE_DEFAULTS.$k');
-      expect(num(d[k]), num(g[k]), reason: 'RULE_DEFAULTS.$k mismatch');
+      expect(asNum(d[k]), asNum(g[k]), reason: 'RULE_DEFAULTS.$k mismatch');
     }
     expect(d.length, g.length);
   });

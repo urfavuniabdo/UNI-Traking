@@ -5,16 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/api_client.dart';
 import '../core/api_error.dart';
 import '../core/session_store.dart';
-import '../core/traccer_constants.dart';
 import '../data/position_dao.dart';
 import '../models/attendance.dart';
 import '../models/user.dart';
 import '../services/adapters/background_service_adapter.dart';
-import '../services/adapters/connectivity_adapter.dart';
 import '../services/adapters/device_adapter.dart';
 import '../services/adapters/location_adapter.dart';
 import '../services/adapters/notifications_adapter.dart';
-import '../services/sync_scheduler.dart';
 import '../services/sync_scheduler.dart';
 
 // --- Overridden in main() with real instances once prefs are ready. ---
@@ -75,22 +72,40 @@ final StateNotifierProvider<AuthController, AuthState> authControllerProvider =
     StateNotifierProvider<AuthController, AuthState>((ref) => AuthController(ref));
 
 class AuthController extends StateNotifier<AuthState> {
-  AuthController(this._ref) : super(AuthState(user: _ref.read(sessionStoreProvider).user));
+  AuthController(this._ref) : super(const AuthState()) {
+    state = AuthState(user: _ref.read(sessionStoreProvider).user);
+    if (_ref.read(sessionStoreProvider).isLoggedIn) {
+      unawaited(_ensureDeviceRegistered());
+    }
+  }
 
   final Ref _ref;
+
+  Future<void> _ensureDeviceRegistered() async {
+    try {
+      final String id = await _ref.read(deviceIdProvider.future);
+      await _ref.read(apiClientProvider).registerDevice(
+            platform: DeviceAdapter().platform,
+            deviceId: id,
+          );
+    } on Exception {
+      // Offline or backend down — the push bootstrap retries after login.
+    }
+  }
 
   Future<bool> login(String identifier, String password) async {
     state = state.copyWith(busy: true, error: null);
     try {
       final ApiClient api = _ref.read(apiClientProvider);
       final AuthTokens t = await api.login(identifier: identifier, password: password);
-      final AppUser? user = t.user ?? await api.me();
+      final AppUser user = t.user ?? await api.me();
       await _ref.read(sessionStoreProvider).saveUser(user);
+      await _ensureDeviceRegistered();
       state = AuthState(
         user: user,
-        mustChangePassword: user.mustChangePassword,
+        mustChangePassword: t.mustChangePassword || user.mustChangePassword,
       );
-      return !user.mustChangePassword;
+      return !state.mustChangePassword;
     } on ApiException catch (e) {
       state = state.copyWith(busy: false, error: _ar(e));
       return false;
@@ -109,7 +124,7 @@ class AuthController extends StateNotifier<AuthState> {
       final AuthTokens t = await api.login(identifier: identifier, password: newPw);
       final AppUser user = t.user ?? await api.me();
       await _ref.read(sessionStoreProvider).saveUser(user);
-      state = AuthState(user: user);
+      state = AuthState(user: user, mustChangePassword: t.mustChangePassword);
       return true;
     } on ApiException catch (e) {
       state = state.copyWith(busy: false, error: _ar(e));
@@ -122,6 +137,7 @@ class AuthController extends StateNotifier<AuthState> {
       await _ref.read(apiClientProvider).logout();
     } catch (_) {/* local clear below */}
     await BackgroundServiceAdapter.instance.stopTracking();
+    await _ref.read(sessionStoreProvider).setCheckedIn(false);
     state = const AuthState();
   }
 }
@@ -195,7 +211,7 @@ class HomeState {
     String? motionState,
     bool? busy,
     String? notice,
-    FenceViolationException? fenceViolation,
+    Object? fenceViolation = _unset,
     bool? amberOutOfFence,
   }) =>
       HomeState(
@@ -210,17 +226,22 @@ class HomeState {
         motionState: motionState ?? this.motionState,
         busy: busy ?? this.busy,
         notice: notice ?? this.notice,
-        fenceViolation: fenceViolation ?? this.fenceViolation,
+        fenceViolation:
+            fenceViolation == _unset ? this.fenceViolation : fenceViolation as FenceViolationException?,
         amberOutOfFence: amberOutOfFence ?? this.amberOutOfFence,
       );
 }
+
+/// Sentinel so `copyWith(fenceViolation: null)` can actually clear the field.
+const Object _unset = Object();
 
 final StateNotifierProvider<HomeController, HomeState> homeControllerProvider =
     StateNotifierProvider<HomeController, HomeState>((ref) => HomeController(ref));
 
 /// The ONE button. Everything else on `/home` is read-only indicators.
 class HomeController extends StateNotifier<HomeState> {
-  HomeController(this._ref) : super(HomeState(checkedIn: _ref.read(sessionStoreProvider).isCheckedIn)) {
+  HomeController(this._ref) : super(const HomeState()) {
+    state = HomeState(checkedIn: _ref.read(sessionStoreProvider).isCheckedIn);
     _bootstrap();
   }
 
@@ -229,6 +250,13 @@ class HomeController extends StateNotifier<HomeState> {
   Future<void> _bootstrap() async {
     await refreshToday();
     await _refreshPending();
+    final bool driver = _ref.read(sessionStoreProvider).user?.isDriver ?? false;
+    if (driver && _ref.read(sessionStoreProvider).isCheckedIn) {
+      // Cold start with an open shift: the foreground tracking service must resume.
+      await BackgroundServiceAdapter.instance.startTracking();
+      await initKeepAliveFromHome();
+      state = state.copyWith(tracking: true);
+    }
     _ref.listen<AsyncValue<TrackingUiEvent>>(trackingEventsProvider, (_, AsyncValue<TrackingUiEvent> next) {
       next.whenData(_applyEvent);
     });
@@ -260,6 +288,7 @@ class HomeController extends StateNotifier<HomeState> {
         checkedIn: today.isCheckedIn,
         shiftStart: today.record?.checkInAt,
         fenceName: today.fenceName ?? state.fenceName,
+        insideFence: today.insideFence ?? state.insideFence,
       );
       await _ref.read(sessionStoreProvider).setCheckedIn(today.isCheckedIn);
     } on ApiException {
@@ -296,8 +325,10 @@ class HomeController extends StateNotifier<HomeState> {
           );
       await _ref.read(sessionStoreProvider).setCheckedIn(true);
       // Auto-start tracking — the driver never presses a tracking button.
-      await BackgroundServiceAdapter.instance.startTracking();
-      await initKeepAliveFromHome();
+      if (user?.isDriver ?? false) {
+        await BackgroundServiceAdapter.instance.startTracking();
+        await initKeepAliveFromHome();
+      }
       state = state.copyWith(
         busy: false,
         checkedIn: true,
@@ -313,7 +344,9 @@ class HomeController extends StateNotifier<HomeState> {
       state = state.copyWith(busy: false, fenceViolation: e);
     } on AlreadyCheckedInException {
       state = state.copyWith(busy: false, checkedIn: true, notice: 'أنت مسجّل بالفعل');
-      await BackgroundServiceAdapter.instance.startTracking();
+      if (_ref.read(sessionStoreProvider).user?.isDriver ?? false) {
+        await BackgroundServiceAdapter.instance.startTracking();
+      }
     } on NetworkException {
       state = state.copyWith(busy: false, notice: 'لا يوجد اتصال — حاول لاحقًا');
     } on ApiException catch (e) {
@@ -333,7 +366,9 @@ class HomeController extends StateNotifier<HomeState> {
             deviceId: await _ref.read(deviceIdProvider.future),
           );
       await _ref.read(sessionStoreProvider).setCheckedIn(false);
-      await BackgroundServiceAdapter.instance.stopTracking();
+      if (_ref.read(sessionStoreProvider).user?.isDriver ?? false) {
+        await BackgroundServiceAdapter.instance.stopTracking();
+      }
       state = state.copyWith(
         busy: false,
         checkedIn: false,
@@ -342,7 +377,9 @@ class HomeController extends StateNotifier<HomeState> {
       );
     } on NoOpenRecordException {
       await _ref.read(sessionStoreProvider).setCheckedIn(false);
-      await BackgroundServiceAdapter.instance.stopTracking();
+      if (_ref.read(sessionStoreProvider).user?.isDriver ?? false) {
+        await BackgroundServiceAdapter.instance.stopTracking();
+      }
       state = state.copyWith(busy: false, checkedIn: false, notice: 'لا توجد وردية مفتوحة');
     } on NetworkException {
       state = state.copyWith(busy: false, notice: 'لا يوجد اتصال — حاول لاحقًا');
