@@ -8,6 +8,12 @@ import { AppModule } from './app.module';
 
 /** Paths the SPA fallback must never swallow: the API itself and engine.io's polling transport. */
 const NON_SPA = /^\/(api\/|socket\.io|rt\b)/;
+/**
+ * A request for a file (`.js`, `.css`, `.webmanifest`, ...) that express.static did not serve is a
+ * missing asset, not a client-side route. Returning index.html for it answers 200 with the wrong
+ * MIME type, so a stale hashed chunk after a redeploy fails as a script error instead of a 404.
+ */
+const FILE_REQUEST = /\.[a-z0-9]{1,8}$/i;
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: false });
@@ -39,6 +45,10 @@ async function bootstrap() {
     http.use(express.static(distDir, { index: false, maxAge: '1h' }));
     http.use((req: Request, res: Response, next: NextFunction) => {
       if (req.method !== 'GET' || NON_SPA.test(req.path)) return next();
+      if (FILE_REQUEST.test(req.path)) {
+        res.status(404).json({ statusCode: 404, message: `Cannot GET ${req.path}` });
+        return;
+      }
       res.sendFile(indexHtml);
     });
   }
