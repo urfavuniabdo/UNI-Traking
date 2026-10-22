@@ -54,9 +54,9 @@ points at `http://192.168.1.186:3000/api/v1`, so the phone must be on the same W
 4. Grant location + notification permission, including **"Allow all the time"** for drivers
    so tracking survives the app being backgrounded.
 
-> The release build is signed with the Android **debug key** so it installs directly.
-> For a private signature, create `android/key.properties` + a keystore (both git-ignored);
-> the Gradle config picks them up automatically and falls back to the debug key when absent.
+> `dist/traccer-0.1.0.apk` is signed with the project release key (`CN=Traccer`). Keep
+> `android/key.properties` and `android/traccer-release.keystore` backed up and private —
+> both are git-ignored. On a fresh clone without them, the build falls back to the debug key.
 
 ## Firebase / push (optional)
 
