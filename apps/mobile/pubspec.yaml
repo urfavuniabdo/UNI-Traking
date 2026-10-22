@@ -41,7 +41,7 @@ dependencies:
   # --- Connectivity (data-offline detection) ---
   connectivity_plus: ^6.0.3
   device_info_plus: ^10.1.0
-  battery_plus: ^5.0.2           # added beyond brief: drives `battery` in heartbeat/positions (§2/§4)
+  battery_plus: ^7.0.0           # added beyond brief: drives `battery` in heartbeat/positions (§2/§4)
 
   # --- Messaging / notifications ---
   firebase_core: ^2.31.1
