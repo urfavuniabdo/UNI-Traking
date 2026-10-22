@@ -28,13 +28,13 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Brand mark */}
         <div className="mb-6 text-center text-white">
-          <div
-            className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-white/15 text-3xl font-extrabold backdrop-blur"
+          <img
+            src="/logo.png"
+            alt=""
+            className="mx-auto mb-3 h-16 w-16 rounded-2xl"
             style={{ boxShadow: '0 8px 20px rgba(0,0,0,.25)' }}
-          >
-            T
-          </div>
-          <h1 className="text-2xl font-extrabold">Traccer</h1>
+          />
+          <h1 className="text-2xl font-extrabold">UNI Tracking</h1>
           <p className="mt-1 font-semibold text-blue-100" style={{ fontSize: '.85rem' }}>
             مراقبة الموظفين والسواقين
           </p>
@@ -80,7 +80,7 @@ export default function LoginPage() {
           </Btn>
 
           <p className="muted text-center" style={{ fontSize: '.75rem' }}>
-            Uni Group Egypt — <Num>Uni Track</Num> · Traccer
+            Uni Group Egypt — <Num>Uni Track</Num> · UNI Tracking
           </p>
         </form>
       </div>

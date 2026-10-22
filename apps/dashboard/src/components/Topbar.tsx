@@ -11,7 +11,7 @@ export default function Topbar() {
   const critical = useAlertFeed((s) => s.unreadCritical);
   const ui = useUi();
   const user = useAuth((s) => s.user);
-  const title = NAV_ITEMS.find((n) => pathname.startsWith(n.to))?.label ?? 'Traccer';
+  const title = NAV_ITEMS.find((n) => pathname.startsWith(n.to))?.label ?? 'UNI Tracking';
 
   return (
     // 60px plain bar on desktop; floating rounded card on small screens

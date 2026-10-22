@@ -21,14 +21,14 @@ export default function Sidebar({ mobile }: { mobile?: boolean }) {
     <aside className="sidebar-glass flex h-full w-[228px] shrink-0 flex-col border-e lg:w-[252px]" style={{ borderColor: 'var(--line)' }}>
       {/* Brand mark */}
       <div className="flex items-center gap-3 px-4 py-4">
-        <div
-          className="flex h-10 w-10 items-center justify-center rounded-xl font-extrabold text-white"
-          style={{ background: 'linear-gradient(to left,#3b82f6,#1d4ed8)', boxShadow: '0 8px 20px rgba(59,130,246,.28)' }}
-        >
-          T
-        </div>
+        <img
+          src="/logo.png"
+          alt=""
+          className="h-10 w-10 shrink-0 rounded-xl"
+          style={{ boxShadow: '0 8px 20px rgba(59,130,246,.28)' }}
+        />
         <div className="leading-tight">
-          <div className="font-extrabold">Traccer</div>
+          <div className="font-extrabold">UNI Tracking</div>
           <div className="muted font-semibold" style={{ fontSize: '.7rem' }}>
             مراقبة الموظفين والسواقين
           </div>
