@@ -22,3 +22,5 @@ _references/
 apps/api/prisma/tmp-*.db
 apps/api/tmp-*.db
 apps/api/dist-smoke/
+# the patterns above only match the repo root; apps/_data holds the running SQLite files
+apps/_data/
