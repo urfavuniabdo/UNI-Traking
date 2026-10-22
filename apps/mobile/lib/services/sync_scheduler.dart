@@ -39,7 +39,7 @@ void traccerBackgroundDispatcher() {
 }
 
 Future<void> initSyncScheduler() async {
-  await Workmanager().initialize(traccerBackgroundDispatcher, isInDebugMode: kDebugMode);
+  await Workmanager().initialize(traccerBackgroundDispatcher);
 }
 
 /// Kick a one-off catch-up whenever we (re)connect or the app launches.
@@ -61,7 +61,7 @@ Future<void> scheduleKeepAlive() async {
     kTaskCatchUp,
     frequency: const Duration(minutes: 15),
     constraints: Constraints(networkType: NetworkType.connected),
-    existingWorkPolicy: ExistingWorkPolicy.update,
+    existingWorkPolicy: ExistingPeriodicWorkPolicy.update,
   );
 }
 
