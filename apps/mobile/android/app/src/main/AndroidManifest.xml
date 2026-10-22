@@ -1,8 +1,8 @@
 <!--
   Android manifest for Traccer (UNI Track).
   Placeholders that the real Flutter toolchain generates around this file are noted.
-  NOTE (ic_launcher): replace `@mipmap/ic_launcher` with the branded launcher set; a plain
-  Flutter template ships adaptive icons — swap them for the Traccer mark before release.
+  NOTE (ic_launcher): branded adaptive set lives in res/mipmap-* (legacy PNGs +
+  res/mipmap-anydpi-v26/ic_launcher.xml over @color/ic_launcher_background).
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
