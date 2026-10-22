@@ -34,14 +34,17 @@ class LocationAdapter {
   Future<bool> openLocationSettings() => Geolocator.openLocationSettings();
 
   /// The live tracking stream, tuned per CONTRACT §5 / task brief:
-  ///   interval 5s · distanceFilter 25m · highest accuracy.
+  ///   interval 5s · distanceFilter 10m · highest accuracy.
   ///
   /// `intervalDuration` is what keeps a stationary driver emitting fixes — without it
   /// FusedLocationProvider only reports on movement and the route looks like a stop.
+  /// The filter stays at 10m because a walking person covers 25m in ~20s, and the motion
+  /// classifier needs three samples to commit a state — at 25m a short walk never reads
+  /// as walking.
   Stream<Position> positionStream() {
     final AndroidSettings settings = AndroidSettings(
       accuracy: LocationAccuracy.best,
-      distanceFilter: 25, // metres
+      distanceFilter: 10, // metres
       intervalDuration: const Duration(seconds: 5),
     );
     return Geolocator.getPositionStream(locationSettings: settings);

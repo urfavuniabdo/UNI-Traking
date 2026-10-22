@@ -148,7 +148,13 @@ class TrackingEngine {
       accuracyM: p.accuracy,
       ts: now,
       computedSpeedKmh: speed,
+      lat: p.latitude,
+      lng: p.longitude,
     );
+    // Upload the speed the classifier actually judged. A phone carried at walking pace reports
+    // a Doppler speed of ~0.3 km/h, and the backend derives its own motion state from this
+    // number — so the metres covered since the last fix have to travel with the fix.
+    if (_classifier.lastRawSpeedKmh > speed) speed = _classifier.lastRawSpeedKmh;
 
     final int seq = await session.nextSeq();
     final int? batteryPct = await battery.level();

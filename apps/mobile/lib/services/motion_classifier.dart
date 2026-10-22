@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+
+import '../core/geo.dart';
 import '../core/traccer_constants.dart';
 
 /// Dart port of the API/shared motion classifier (CONTRACT §5).
@@ -28,9 +31,17 @@ class MotionClassifier {
   String _candidate = MotionStates.unknown;
   int _candidateCount = 0;
   DateTime? _lastTs;
+  _Fix? _lastPoint;
 
   String get state => _committed;
   double? get smoothedSpeedKmh => _ema;
+
+  /// The best speed (km/h) the classifier used for the last accepted sample — Doppler or the
+  /// metres actually covered, whichever is higher. Callers upload this so the backend judges
+  /// the same number the phone did instead of a walking phone's near-zero Doppler reading.
+  double get lastRawSpeedKmh => _lastRaw;
+
+  double _lastRaw = 0;
 
   void reset() {
     _ema = null;
@@ -38,6 +49,8 @@ class MotionClassifier {
     _candidate = MotionStates.unknown;
     _candidateCount = 0;
     _lastTs = null;
+    _lastPoint = null;
+    _lastRaw = 0;
   }
 
   /// Band a *smoothed* speed maps to, per §5 thresholds.
@@ -53,20 +66,43 @@ class MotionClassifier {
     required double accuracyM,
     required DateTime ts,
     double? computedSpeedKmh,
+    double? lat,
+    double? lng,
   }) {
     // 1) accuracy gate
     if (accuracyM > accuracyRejectM || accuracyM <= 0) {
+      _lastRaw = 0;
       return MotionStates.unknown;
     }
 
     // 2) min-interval gate (uses real timestamp of the fix)
     if (_lastTs != null && ts.difference(_lastTs!).inMilliseconds < minIntervalS * 1000) {
+      _lastRaw = 0; // nothing was judged for this fix — don't let a stale reading travel with it
       return _committed;
     }
     _lastTs = ts;
 
-    // 3) EMA on speed
-    final double raw = computedSpeedKmh ?? speedKmh;
+    // 3) EMA on the best reading of this fix. A phone carried at walking pace reports a
+    //    GPS-Doppler speed near zero, so what the fixes actually cover wins when it is larger;
+    //    a shift inside the accuracy circle is drift, not walking, so it is not counted.
+    final _Fix? prev = _lastPoint;
+    double derived = 0;
+    if (prev != null && lat != null && lng != null) {
+      final double movedM = Geo.distanceMeters(prev.lat, prev.lng, lat, lng);
+      if (movedM > accuracyM) {
+        derived = Geo.speedKmhFromFixes(
+          lat1: prev.lat,
+          lng1: prev.lng,
+          t1: prev.ts,
+          lat2: lat,
+          lng2: lng,
+          t2: ts,
+        );
+      }
+    }
+    final double raw = <double>[speedKmh, computedSpeedKmh ?? 0, derived].reduce(math.max);
+    _lastRaw = raw;
+    if (lat != null && lng != null) _lastPoint = _Fix(lat, lng, ts);
     _ema = _ema == null ? raw : (alpha * raw + (1 - alpha) * _ema!);
 
     // 4) candidate band + 5) hysteresis commit
@@ -89,4 +125,13 @@ class MotionClassifier {
     }
     return _committed;
   }
+}
+
+/// The previous fix's position and time, used to measure what the device actually covered.
+class _Fix {
+  const _Fix(this.lat, this.lng, this.ts);
+
+  final double lat;
+  final double lng;
+  final DateTime ts;
 }
