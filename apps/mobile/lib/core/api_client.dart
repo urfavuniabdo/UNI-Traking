@@ -81,7 +81,13 @@ class ApiClient {
 
   Future<AppUser> me() async {
     final Map<String, Object?> data = await _getJson('/auth/me');
-    return AppUser.fromJson(data);
+    // GET /auth/me is wrapped: {user, profile, permissions, mustChangePassword}.
+    // Reading the body flat used to yield an empty user.
+    final Map<String, Object?> user = <String, Object?>{
+      ...?data['user'] as Map<String, Object?>?,
+      'mustChangePassword': data['mustChangePassword'] ?? false,
+    };
+    return AppUser.fromJson(user);
   }
 
   /// Forced password change for first-login accounts (`changeOnLogin=true`, §8).
