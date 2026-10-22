@@ -358,7 +358,11 @@ export class PositionsService {
         track.openTrip = { id: trip.id, workDate, startedAt: p.ts, distanceM: 0, maxSpeed: null, lastMoveTs: p.ts, replayed: p.buffered };
       }
       if (track.openTrip) {
-        if (track.last) track.openTrip.distanceM += distanceFromLast;
+        if (track.last)
+          track.openTrip.distanceM += this.geo.credibleDistanceM(
+            { lat: track.last.lat, lng: track.last.lng, at: track.last.ts },
+            { lat: p.lat, lng: p.lng, at: p.ts },
+          );
         if (speed !== null) track.openTrip.maxSpeed = track.openTrip.maxSpeed === null ? speed : Math.max(track.openTrip.maxSpeed, speed);
         track.openTrip.lastMoveTs = p.ts;
         if (p.buffered) track.openTrip.replayed = true;
@@ -756,9 +760,13 @@ export class PositionsService {
       orderBy: { startedAt: 'asc' },
     });
 
-    // distance (km): sum of haversine over consecutive clientTs-ordered points.
+    // distance (km): sum of haversine over consecutive clientTs-ordered points — credible steps only.
     let distanceM = 0;
-    for (let i = 1; i < rows.length; i++) distanceM += this.geo.distanceM({ lat: rows[i - 1].lat, lng: rows[i - 1].lng }, { lat: rows[i].lat, lng: rows[i].lng });
+    for (let i = 1; i < rows.length; i++)
+      distanceM += this.geo.credibleDistanceM(
+        { lat: rows[i - 1].lat, lng: rows[i - 1].lng, at: rows[i - 1].clientTs.getTime() },
+        { lat: rows[i].lat, lng: rows[i].lng, at: rows[i].clientTs.getTime() },
+      );
 
     const points = rows.map((p) => ({
       clientTs: p.clientTs.toISOString(),

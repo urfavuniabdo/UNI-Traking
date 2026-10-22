@@ -74,7 +74,7 @@ export class MotionClassifierService {
 
   /** Absurd-jump guard: a GPS jump larger than accuracyDriftM within <2s is not credible. */
   isAbsurd(speedKmh: number | null, distanceM: number, dtS: number | null, accuracyDriftM: number): boolean {
-    if (speedKmh !== null && speedKmh > 250) return true;
+    if (speedKmh !== null && speedKmh > MOTION.MAX_CREDIBLE_SPEED_KMH) return true;
     if (dtS !== null && dtS < 2 && distanceM > accuracyDriftM) return true;
     return false;
   }

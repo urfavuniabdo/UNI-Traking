@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { MOTION } from '../../shared/constants';
 import { bbox, lineString, simplify } from '@turf/turf';
 import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
 import { point as turfPoint, polygon } from '@turf/helpers';
@@ -55,6 +56,19 @@ export class GeoService {
     const dt = (b.at - a.at) / 1000;
     if (!(dt > 0) || dt > 120) return null;
     return (this.distanceM(a, b) / dt) * 3.6;
+  }
+
+  /**
+   * مسافة خطوة تدخل مجموع الأميال، أو صفر لو مش أرض مقطوعة فعلًا:
+   * زمن راجع/صفرة = مسافة مش مُسندة، والسرعة اللازمة للخطوة لو بتتجاوز سقف المعقول
+   * (نفس السقف اللي بيرفض بيه حارس القفزة الشاذة العينة) = قفزة GPS — نفق أو إعادة تثبيت
+   * أو نقل بين موقعين. من غير الفلتر ده قفزة واحدة بتضيف عشرات الكيلومترات لتقرير اليوم.
+   */
+  credibleDistanceM(a: LatLng & { at: number }, b: LatLng & { at: number }): number {
+    const dtS = (b.at - a.at) / 1000;
+    if (!(dtS > 0)) return 0;
+    const m = this.distanceM(a, b);
+    return (m / dtS) * 3.6 > MOTION.MAX_CREDIBLE_SPEED_KMH ? 0 : m;
   }
 
   /** التسارع بـ m/s² من سرعتين (km/h) وفاصل زمني بالثواني. */

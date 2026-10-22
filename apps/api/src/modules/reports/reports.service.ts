@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { GeoService } from '../../common/geo/geo.service';
 import { PrismaService } from '../../common/prisma.service';
 import { round, workDateOf } from '../../common/utils';
 import { RULE_DEFAULTS } from '../../shared/constants';
@@ -60,7 +61,7 @@ function ridingMinutesBy(
 
 @Injectable()
 export class ReportsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly geo: GeoService) {}
 
   private async employeeIdForUser(userId: string): Promise<string | null> {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { employeeId: true } });
@@ -227,7 +228,7 @@ export class ReportsService {
     for (let i = 0; i < positions.length - 1; i++) {
       const a = positions[i];
       const b = positions[i + 1];
-      distanceM += this.haversine(a.lat, a.lng, b.lat, b.lng);
+      distanceM += this.geo.credibleDistanceM({ lat: a.lat, lng: a.lng, at: a.clientTs.getTime() }, { lat: b.lat, lng: b.lng, at: b.clientTs.getTime() });
     }
     interface StopRow { startedAt: string; endedAt: Cell; durationS: number; kind: string; lat: number; lng: number }
     const stopRows: StopRow[] = stops.map((s) => ({ startedAt: s.startedAt.toISOString(), endedAt: s.endedAt ? s.endedAt.toISOString() : '', durationS: s.durationS, kind: s.kind, lat: s.lat, lng: s.lng }));
@@ -245,15 +246,6 @@ export class ReportsService {
       rows: t.rows,
       body: { userId, employeeId, date, stops: t.data, meta: { distanceKm: round(distanceM / 1000, 2), pointCount: positions.length, replayed: positions.some((p) => p.buffered || p.stale) } },
     };
-  }
-
-  private haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
-    const R = 6371008.8;
-    const toRad = (d: number) => (d * Math.PI) / 180;
-    const dLat = toRad(lat2 - lat1);
-    const dLng = toRad(lng2 - lng1);
-    const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-    return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
   }
 
   /** GET /reports/timesheet?from&to&userId — CSV stays the detail list; JSON body is the page's rows[]. */

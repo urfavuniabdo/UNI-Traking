@@ -57,6 +57,18 @@ describe('GeoService', () => {
     expect(svc.accelerationMs2(80, 20, 120)).toBeNull();
   });
 
+  it('credibleDistanceM drops a GPS teleport but keeps a real drive', () => {
+    const a = { lat: 30.06, lng: 31.33, at: Date.parse('2026-10-22T08:00:00.000Z') };
+    // ~23.8 km in 3.8 s = 22,500 km/h — the exact step that used to inflate a day to 5,471 km.
+    const teleport = { lat: 30.2654, lng: 31.33, at: a.at + 3802 };
+    expect(svc.credibleDistanceM(a, teleport)).toBe(0);
+    // 40 km/h for 2 min is a normal step and must still count in full.
+    const drive = { lat: 30.0721, lng: 31.33, at: a.at + 120_000 };
+    expect(svc.credibleDistanceM(a, drive)).toBeCloseTo(svc.distanceM(a, drive), 6);
+    // clock went backwards / duplicate timestamp → no distance, never a negative sum
+    expect(svc.credibleDistanceM(a, { lat: 30.07, lng: 31.33, at: a.at - 1000 })).toBe(0);
+  });
+
   it('simplify keeps shape and collapses duplicates', () => {
     const line = Array.from({ length: 200 }, (_, i) => ({ lat: 30 + i * 0.0002, lng: 31.2 }));
     const out = svc.simplify(line, 25);

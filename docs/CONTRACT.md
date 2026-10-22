@@ -95,10 +95,17 @@ Base URL: `/api/v1` — كل الطلبات محمية بـ `Authorization: Bear
 STATIONARY_SPEED_KMH   = 1.5    WALK_MAX_KMH = 7.0     RIDE_MIN_KMH = 7.0
 SPEED_EMA_ALPHA        = 0.35    HYSTERESIS_SAMPLES = 3
 ACCURACY_REJECT_M      = 35      MIN_INTERVAL_S = 2
+MAX_CREDIBLE_SPEED_KMH = 250     // سقف الخطوة الواحدة في الأميال (انظر أدناه)
 IDLE_ALARM_MIN         = 30      // توقف > 30 دقيقة ⇒ STOP_EXCEEDED
 ```
 
 `STOPPED` ≤1.5 · `WALKING` 1.5–7 · `RIDING` >7 · `UNKNOWN` (دقة سيئة/لا بيانات). نقطة التحول تُخزن في `MotionSegment` وتظهر للإدارة كـ «ماشي / في رحلة / واقف».
+
+**الأميال لا تجمع قفزات الـ GPS.** أي مجموع مسافة (`/positions/route`، `Trip.distanceKm`،
+تقرير `mileage`) يمر عبر `GeoService.credibleDistanceM(a, b)`: الخطوة تُعدّ صفر كيلو متر لو
+السرعة اللازمة لها تتجاوز `MAX_CREDIBLE_SPEED_KMH` (أو لو الزمن راجع/مكرّر). ده نفس السقف اللي
+بيرفض بيه حارس القفزة الشاذة العينةَ نفسها، فالـ trip والحساب اليومي والشاشة كلها متفقين.
+بدونه نفق أو إعادة تثبيت إشارة أو نقل بين موقعين كان بيضيف عشرات الكيلومترات لتقرير يوم واحد.
 
 ## 6. Rules engine → Alerts
 

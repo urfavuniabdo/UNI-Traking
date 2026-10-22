@@ -50,6 +50,12 @@ export const MOTION = {
   HYSTERESIS_SAMPLES: 3,
   ACCURACY_REJECT_M: 35,
   MIN_INTERVAL_S: 2,
+  /**
+   * Ceiling on any single GPS step — the same bound the absurd-jump guard rejects a sample with.
+   * Distance aggregation uses it so a tunnel re-fix or a teleport between sites counts as a gap
+   * instead of travelled ground (one teleport used to be able to add tens of km to a day).
+   */
+  MAX_CREDIBLE_SPEED_KMH: 250,
 } as const;
 
 export const RULE_DEFAULTS = {
