@@ -16,6 +16,11 @@ class TraccerTheme {
 
   static const double cardRadius = 16;
 
+  /// Cairo's Arabic marks (shadda, kasratan, superscript alef) sit outside Material's
+  /// default line box and clip on tight rows, so every themed style carries 1.3 leading.
+  /// Screens that declare their own `TextStyle` inherit it through the default style.
+  static const double arabicLineHeight = 1.3;
+
   static List<BoxShadow> cardShadow(bool dark) => <BoxShadow>[
         BoxShadow(
           color: brand.withValues(alpha: dark ? 0.18 : 0.08),
@@ -38,9 +43,23 @@ class TraccerTheme {
 
     final TextTheme base = ThemeData(brightness: brightness, fontFamily: 'Cairo').textTheme;
     final Color ink = dark ? Colors.white : inkLight;
+    TextStyle? lead(TextStyle? style) => style?.copyWith(height: arabicLineHeight);
     final TextTheme text = base.copyWith(
-      bodyLarge: base.bodyLarge?.copyWith(color: ink),
-      titleLarge: base.titleLarge?.copyWith(color: ink),
+      displayLarge: lead(base.displayLarge),
+      displayMedium: lead(base.displayMedium),
+      displaySmall: lead(base.displaySmall),
+      headlineLarge: lead(base.headlineLarge),
+      headlineMedium: lead(base.headlineMedium),
+      headlineSmall: lead(base.headlineSmall),
+      titleLarge: lead(base.titleLarge)?.copyWith(color: ink),
+      titleMedium: lead(base.titleMedium),
+      titleSmall: lead(base.titleSmall),
+      bodyLarge: lead(base.bodyLarge)?.copyWith(color: ink),
+      bodyMedium: lead(base.bodyMedium),
+      bodySmall: lead(base.bodySmall),
+      labelLarge: lead(base.labelLarge),
+      labelMedium: lead(base.labelMedium),
+      labelSmall: lead(base.labelSmall),
     );
 
     return ThemeData(
