@@ -79,3 +79,4 @@ flutter:
           weight: 800
   assets:
     - assets/strings/
+    - assets/brand/logo.png

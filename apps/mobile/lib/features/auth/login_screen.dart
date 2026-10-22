@@ -115,15 +115,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       const Spacer(),
                       Center(
                         child: Container(
-                          width: 72,
-                          height: 72,
                           decoration: BoxDecoration(
-                            color: TraccerTheme.brand,
                             borderRadius: BorderRadius.circular(20),
                             boxShadow:
                                 TraccerTheme.cardShadow(theme.brightness == Brightness.dark),
                           ),
-                          child: const Icon(Icons.location_on, color: Colors.white, size: 40),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(20),
+                            child: Image.asset(
+                              'assets/brand/logo.png',
+                              width: 72,
+                              height: 72,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 16),
