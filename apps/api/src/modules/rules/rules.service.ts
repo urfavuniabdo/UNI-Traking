@@ -39,14 +39,21 @@ export interface EmployeeContext {
   thresholds: EffectiveThresholds;
 }
 
-interface GlobalOverrides {
+export interface GlobalOverrides {
   maxSpeedKmh?: number;
   stopAlertMin?: number;
   geofenceGraceS?: number;
+  speedingCriticalS?: number;
   cooldownS?: number;
   heartbeatIntervalS?: number;
   replayMaxAgeHours?: number;
   gapMinMin?: number;
+  shiftGraceMin?: number;
+  harshBrakingMs2?: number;
+  harshAccelMs2?: number;
+  speedSamples?: number;
+  accuracyDriftM?: number;
+  [key: string]: number | boolean | undefined;
 }
 
 const asNum = (v: unknown): number | undefined => {
@@ -80,6 +87,14 @@ export class RulesService {
     }
     this.settingsCache = { at: now, value };
     return value;
+  }
+
+  /**
+   * Drop the in-memory 30s Setting cache so the next ingest/dispatch re-reads
+   * `rules.global` from the DB. Call after any write to that Setting (PATCH /settings).
+   */
+  invalidate(): void {
+    this.settingsCache = null;
   }
 
   /** Resolve numeric thresholds for an employee, honoring per-driver and per-zone overrides. */
