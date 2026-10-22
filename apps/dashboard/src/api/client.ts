@@ -110,7 +110,8 @@ async function rawFetch(method: string, url: string, body: unknown, token: strin
 /** Single-flight refresh queue: parallel 401s share one refresh call. */
 let refreshInFlight: Promise<string | null> | null = null;
 
-async function refreshOnce(): Promise<string | null> {
+/** Also used by the realtime socket, which authenticates outside this request path. */
+export async function refreshOnce(): Promise<string | null> {
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
       const { refreshToken } = readTokens();
