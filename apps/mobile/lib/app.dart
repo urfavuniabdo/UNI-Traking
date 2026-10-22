@@ -82,7 +82,10 @@ class _TraccerAppState extends ConsumerState<TraccerApp> {
 
     // Foreground realtime (notify:me) while the app is open.
     final RealtimeService rt = RealtimeService(onNotifyMe: alerts.handleNotifyMe);
-    rt.connect(accessToken: session.accessToken ?? '', userId: userId);
+    rt.connect(
+      tokenProvider: ref.read(apiClientProvider).freshAccessToken,
+      userId: userId,
+    );
     _rt = rt;
   }
 

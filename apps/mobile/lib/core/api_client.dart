@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
@@ -73,6 +74,38 @@ class ApiClient {
   // ===========================================================================
   // Auth & devices (§2)
   // ===========================================================================
+
+  /// A usable access token for out-of-band auth (the `/rt` socket handshake).
+  ///
+  /// The socket never sees the 401-triggered refresh below because it authenticates with a
+  /// token baked into its query string, so it must ask for one here. `force: true` mints a
+  /// new pair even if the cached token still looks valid.
+  Future<String?> freshAccessToken({required bool force}) async {
+    final String? current = session.accessToken;
+    if (!force && current != null && current.isNotEmpty && !_isExpired(current)) {
+      return current;
+    }
+    if (force) _refreshFlight = null;
+    return _ensureRefreshed();
+  }
+
+  /// True when the JWT's `exp` has passed (or lands within 30s), or it can't be read at all.
+  static bool _isExpired(String jwt) {
+    final List<String> parts = jwt.split('.');
+    if (parts.length < 2) return true;
+    try {
+      final String padded = parts[1].padRight((parts[1].length + 3) ~/ 4 * 4, '=');
+      final Map<String, Object?> claims =
+          jsonDecode(utf8.decode(base64Url.decode(padded))) as Map<String, Object?>;
+      final Object? exp = claims['exp'];
+      if (exp is! num) return true;
+      final DateTime expiresAt =
+          DateTime.fromMillisecondsSinceEpoch(exp.toInt() * 1000, isUtc: true);
+      return DateTime.now().toUtc().add(const Duration(seconds: 30)).isAfter(expiresAt);
+    } catch (_) {
+      return true;
+    }
+  }
 
   Future<AuthTokens> login({required String identifier, required String password}) async {
     final Map<String, Object?> data = await _postJson(
@@ -317,8 +350,11 @@ class ApiClient {
         if (rt == null) return null;
         final AuthTokens t = await refresh(rt);
         return t.accessToken;
-      } catch (_) {
-        await session.clear();
+      } catch (e) {
+        // Only the server rejecting the refresh token ends the session. A network blip must
+        // not log a driver out mid-shift — the buffered rows and the retry loop handle it.
+        final int? status = e is ApiException ? e.statusCode : null;
+        if (status != null && status < 500) await session.clear();
         return null;
       } finally {
         // allow the next 401 burst after this one settles

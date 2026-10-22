@@ -250,6 +250,11 @@ class SocketEvents {
   static const String notifyMe = 'notify:me';
   static const String subscribeLive = 'subscribe:live';
   static const String subscribeRoute = 'subscribe:route';
+
+  /// Handshake outcomes. A bad token still *connects* — the server then sends [rtError] and
+  /// disconnects with "io server disconnect", which the client never auto-retries.
+  static const String rtReady = 'rt:ready';
+  static const String rtError = 'rt:error';
 }
 
 /// Buffer / ingest tuning that lives only on the client (CONTRACT §4, §5).
