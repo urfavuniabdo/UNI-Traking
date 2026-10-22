@@ -1,0 +1,16 @@
+{
+  // Deploy-only build config. The repo tsconfig.json is being edited by hand, and its
+  // `include` reaches outside apps/api (prisma/seed.ts, packages/shared), which makes tsc
+  // infer the repo root as the common root and emit dist/apps/api/src/main.js — a path no
+  // start command looks for. Pinning rootDir here guarantees `dist/main.js`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "declaration": false,
+    "sourceMap": false,
+    "incremental": false
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.spec.ts"]
+}

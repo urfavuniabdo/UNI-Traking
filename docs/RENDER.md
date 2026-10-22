@@ -36,10 +36,13 @@ GitHub ← Settings ← Developer settings ← Personal access tokens (scope: `r
 
 | الخطوة | الأمر |
 |---|---|
-| build | `npm ci` في `apps/api`، و`npm ci && npm run build` في `apps/dashboard`، ثم `npm run prisma:prod && npm run build` |
+| build | `npm ci --include=dev` في `apps/api`، و`npm ci --include=dev && npm run build` في `apps/dashboard`، ثم `npm run prisma:prod && npm run build` |
 | قبل التشغيل | `npx prisma db push --skip-generate --accept-data-loss` ثم `npx ts-node prisma/seed.ts` |
 | تشغيل | `node dist/main.js` على `PORT` بتاع Render، مربوط على `0.0.0.0` |
 | health | `GET /api/v1/ping` (ما يلمسش الداتابيز، فمافيش فرصة يفشل الـ probe) |
+
+`--include=dev` مش رفاهية: وجود `NODE_ENV=production` بيخلي `npm ci` يتجاهل devDependencies،
+و`nest build` و`vite` و`prisma` و`ts-node` كلهم هناك — من غيرها الـ build يفشل في أول ثانية.
 
 السييد idempotent (كل حاجة upsert)، فإعادة النشر ما ترجّعش باسورد اتغيّر.
 

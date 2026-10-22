@@ -12,10 +12,15 @@ services:
     autoDeployTrigger: commit
     healthCheckPath: /api/v1/ping
     # rootDir is apps/api, so the dashboard build has to step out of it and back in.
+    # `--include=dev` is not optional: NODE_ENV=production makes npm ci skip devDependencies,
+    # and nest build / vite / the prisma CLI / ts-node all live there.
     buildCommand: >-
-      npm ci
-      && cd ../../apps/dashboard && npm ci && npm run build
-      && cd ../../apps/api && npm run prisma:prod && npm run build
+      npm ci --include=dev
+      && cd ../../apps/dashboard && npm ci --include=dev && npm run build
+      && cd ../../apps/api && npm run prisma:prod
+      && npx nest build -p tsconfig.deploy.json
+    # Explicit so a change to apps/api's `start` script can't silently move the entry point.
+    startCommand: node dist/main.js
     # Runs on every deploy, before the new instance takes traffic. `db push` (not
     # `migrate deploy`) because this project keeps no migration history yet, and the
     # seed is all upserts so re-running it never resets a changed password.
