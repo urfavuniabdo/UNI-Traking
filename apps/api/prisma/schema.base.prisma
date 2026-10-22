@@ -89,13 +89,14 @@ model Employee {
   devices     Device[]
   rule        RuleOverride?
   shifts      ShiftAssignment[]
+  leaves      LeaveRequest[]
 }
 
 model User {
   id             String   @id @default(cuid())
   identifier     String   @unique // login: employee externalId أو email
   passwordHash   String
-  role           String   // ADMIN | SUPERVISOR | EMPLOYEE | DRIVER
+  role           String   // ADMIN | SUPERVISOR | HR | EMPLOYEE | DRIVER
   name           String
   employeeId     String?  @unique
   employee       Employee? @relation(fields: [employeeId], references: [id])
@@ -111,6 +112,7 @@ model User {
   alertAcks      Alert[]  @relation("AlertAck")
   preferences    UserPreference[]
   callLogs       CallLog[]
+  leaveDecisions LeaveRequest[] @relation("LeaveDecision")
 }
 
 model Session {
@@ -168,6 +170,27 @@ model AttendanceRecord {
   @@unique([employeeId, workDate])
   @@index([workDate])
   @@index([status])
+}
+
+// طلب إجازة لموظف/سواق — يوافق عليه HR أو ADMIN. الموافقة لا تكتب حضورًا،
+// هي بتحوّل اليوم من «غياب» إلى «إجازة» في التقارير وتقفّل زر بدء اليوم.
+model LeaveRequest {
+  id          String   @id @default(cuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  dateFrom    String   // YYYY-MM-DD
+  dateTo      String   // YYYY-MM-DD — يوم واحد ⇒ يساوي dateFrom
+  reason      String?
+  status      String   @default("PENDING") // PENDING | APPROVED | REJECTED | CANCELLED
+  requestedAt DateTime @default(now())
+  decidedById String?
+  decidedBy   User?    @relation("LeaveDecision", fields: [decidedById], references: [id])
+  decidedAt   DateTime?
+  decisionNote String?
+
+  @@unique([employeeId, dateFrom, dateTo])
+  @@index([status, requestedAt])
+  @@index([employeeId, dateFrom])
 }
 
 model ShiftSchedule {

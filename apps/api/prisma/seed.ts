@@ -133,6 +133,12 @@ async function main() {
     update: { name: 'Ops Supervisor', role: 'SUPERVISOR', scopeOrgUnitId: ouCairo.id },
     create: { identifier: 'supervisor', name: 'Ops Supervisor', role: 'SUPERVISOR', passwordHash: PW_HASH, mustChangePassword: true, scopeOrgUnitId: ouCairo.id },
   });
+  // HR owns attendance + leave approvals; it never sees trips or live tracking.
+  await prisma.user.upsert({
+    where: { identifier: 'hr' },
+    update: { name: 'HR Manager', role: 'HR', scopeOrgUnitId: ou.id },
+    create: { identifier: 'hr', name: 'HR Manager', role: 'HR', passwordHash: PW_HASH, mustChangePassword: true, scopeOrgUnitId: ou.id },
+  });
 
   // Sync source (CSV master) — the sync agent owns import; this row + sample CSV are the contract target.
   await prisma.syncSource.upsert({
@@ -157,6 +163,7 @@ async function main() {
     schedules: await prisma.shiftSchedule.count(),
     shiftAssignments: await prisma.shiftAssignment.count(),
     syncSources: await prisma.syncSource.count(),
+    leaveRequests: await prisma.leaveRequest.count(),
   };
   // eslint-disable-next-line no-console
   console.log('seed complete:', counts);

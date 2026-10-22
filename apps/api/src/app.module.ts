@@ -9,6 +9,7 @@ import { UsersModule } from './modules/users/users.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { PlacesModule } from './modules/places/places.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
+import { LeaveModule } from './modules/leave/leave.module';
 import { DevicesModule } from './modules/devices/devices.module';
 import { TrackingModule } from './modules/tracking/tracking.module';
 import { RulesModule } from './modules/rules/rules.module';
@@ -30,6 +31,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     EmployeesModule,
     PlacesModule,
     AttendanceModule,
+    LeaveModule,
     DevicesModule,
     TrackingModule,
     RulesModule,
