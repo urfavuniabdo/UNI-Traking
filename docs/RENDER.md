@@ -41,9 +41,14 @@ git push origin master
 | الخطوة | الأمر |
 |---|---|
 | build | `npm ci --include=dev` في `apps/api`، و`npm ci --include=dev && npm run build` في `apps/dashboard`، ثم `npm run prisma:prod && npm run build` |
-| قبل التشغيل | `npx prisma db push --skip-generate --accept-data-loss` ثم `npx ts-node prisma/seed.ts` |
-| تشغيل | `node dist/main.js` على `PORT` بتاع Render، مربوط على `0.0.0.0` |
+| تشغيل | `npx prisma db push --skip-generate --accept-data-loss` ثم `npx ts-node prisma/seed.ts` ثم `node dist/main.js` على `PORT` بتاع Render، مربوط على `0.0.0.0` |
 | health | `GET /api/v1/ping` (ما يلمسش الداتابيز، فمافيش فرصة يفشل الـ probe) |
+
+السييد والـ `db push` في الـ **startCommand** مش في `preDeployCommand`: Render بيقدّم
+الـ pre-deploy command للخدمات المدفوعة فقط ("available for paid web services, private
+services, and background workers"), وعلى خطة Free كان الهيكل ده هيتتجاهل والخدمة بتقوم
+على داتابيز فاضية — مفيش حساب يسجّل دخول. الاتنين idempotent، فتكرارهم مع كل صحوة
+للخدمة بيكلّف ثانيات بس.
 
 `--include=dev` مش رفاهية: وجود `NODE_ENV=production` بيخلي `npm ci` يتجاهل devDependencies،
 و`nest build` و`vite` و`prisma` و`ts-node` كلهم هناك — من غيرها الـ build يفشل في أول ثانية.

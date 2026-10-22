@@ -20,11 +20,13 @@ services:
       && cd ../../apps/api && npm run prisma:prod
       && npx nest build -p tsconfig.deploy.json
     # Explicit so a change to apps/api's `start` script can't silently move the entry point.
-    startCommand: node dist/main.js
-    # Runs on every deploy, before the new instance takes traffic. `db push` (not
-    # `migrate deploy`) because this project keeps no migration history yet, and the
-    # seed is all upserts so re-running it never resets a changed password.
-    preDeployCommand: npx prisma db push --skip-generate --accept-data-loss && npx ts-node prisma/seed.ts
+    #
+    # The schema push and the seed run here rather than in a `preDeployCommand`, because Render
+    # only offers pre-deploy commands on paid web services — on plan: free that key is ignored
+    # and the service would boot against an empty database, i.e. no login would ever work.
+    # Both steps are idempotent (`db push` no-ops when the schema already matches, the seed is
+    # all upserts), so paying them again on every free-tier wake is what keeps this deployable.
+    startCommand: npx prisma db push --skip-generate --accept-data-loss && npx ts-node prisma/seed.ts && node dist/main.js
     envVars:
       - key: DATABASE_URL
         fromDatabase:
