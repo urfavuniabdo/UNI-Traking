@@ -1,6 +1,6 @@
 # UNI Tracking — mobile (Flutter)
 
-تطبيق Flutter لموظفي وسوّاقي Uni Group. **واجهة السوّاق = زر تشيك ان / تشيك أوت فقط**؛
+تطبيق Flutter لموظفي وسوّاقي Uni Group. **واجهة السوّاق = زر بدء وردية / إنهاء وردية فقط**؛
 كل التتبع والتخزين أوف‑لاين والتنبيهات يعمل تلقائيًا في الخلفية. الموظف نفس الزر لكن على نطاق موقعه.
 
 The app is **built and verified** on this machine: `flutter analyze` reports no issues,

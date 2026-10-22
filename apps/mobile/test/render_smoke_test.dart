@@ -293,7 +293,7 @@ void main() {
       severity: 'WARNING',
       userId: 'emp-2',
       userName: 'مصطفى أمين',
-      title: 'تشيك ان خارج النطاق',
+      title: 'بدء وردية خارج النطاق',
       body: 'تم التسجيل على بعد 480 متر من النطاق',
       createdAt: DateTime.now(),
       status: 'OPEN',

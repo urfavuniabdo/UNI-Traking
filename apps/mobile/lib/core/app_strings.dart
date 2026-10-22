@@ -24,14 +24,14 @@ class S {
     _loaded = true;
   }
 
-  /// t('checkIn') → "تشيك ان". Missing keys return the key itself (easy to spot).
+  /// t('checkIn') → "بدء وردية". Missing keys return the key itself (easy to spot).
   static String t(String key) => _strings[key] ?? key;
 
   static const Map<String, String> _fallback = <String, String>{
     'appName': 'UNI Tracking',
-    'checkIn': 'تشيك ان',
+    'checkIn': 'بدء وردية',
     'dismiss': 'إخفاء',
-    'checkOut': 'تشيك أوت',
+    'checkOut': 'إنهاء وردية',
     'insideFence': 'داخل النطاق',
     'outsideFence': 'خارج النطاق',
     'fenceUnknown': 'جارٍ التحقق من النطاق',

@@ -18,7 +18,7 @@
 
 	<!-- Location: in-use and always (background tracking for drivers) -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>يحتاج UNI Tracking موقعك لتسجيل حضورك داخل نطاق الموقع والتحقق من النطاق عند التشيك ان/أوت.</string>
+	<string>يحتاج UNI Tracking موقعك لتسجيل حضورك داخل نطاق الموقع والتحقق من النطاق عند بدء الوردية أو إنهائها.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>يستمر UNI Tracking في تسجيل خط السير في الخلفية أثناء عملك، حتى والشاشة مقفلة، ليعرض المسار والحضور للمشرفين تلقائيًا.</string>
 	<key>NSLocationAlwaysUsageDescription</key>

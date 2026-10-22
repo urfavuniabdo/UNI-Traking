@@ -396,7 +396,7 @@ class HomeController extends StateNotifier<HomeState> {
           .read(locationAdapterProvider)
           .requestPermissions(background: user?.isDriver ?? false);
       if (perm == PermissionResult.denied) {
-        state = state.copyWith(busy: false, notice: 'لا يمكن التشيك ان بدون إذن الموقع');
+        state = state.copyWith(busy: false, notice: 'لا يمكن بدء الوردية بدون إذن الموقع');
         return;
       }
       final fix = await _ref.read(locationAdapterProvider).currentFix();
@@ -441,8 +441,8 @@ class HomeController extends StateNotifier<HomeState> {
       state = state.copyWith(
         busy: false,
         notice: open
-            ? 'دوامك مفتوح بالفعل — اضغط تشيك أوت لإنهائه'
-            : 'تم تسجيل حضورك وانتهى اليوم — لا يمكن بدء دوام آخر بنفس التاريخ',
+            ? 'وردتك مفتوحة بالفعل — اضغط إنهاء وردية لإنهائها'
+            : 'تم بدء ورديتك وانتهى اليوم — لا يمكن بدء وردية أخرى بنفس التاريخ',
       );
     } on NetworkException {
       state = state.copyWith(busy: false, notice: 'لا يوجد اتصال — حاول لاحقًا');
