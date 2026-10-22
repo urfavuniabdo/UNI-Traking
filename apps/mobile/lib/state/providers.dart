@@ -5,10 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/api_client.dart';
 import '../core/api_error.dart';
 import '../core/session_store.dart';
+import '../core/traccer_constants.dart';
 import '../data/position_dao.dart';
 import '../models/attendance.dart';
 import '../models/user.dart';
 import '../services/adapters/background_service_adapter.dart';
+import '../services/adapters/connectivity_adapter.dart';
 import '../services/adapters/device_adapter.dart';
 import '../services/adapters/location_adapter.dart';
 import '../services/adapters/notifications_adapter.dart';
@@ -248,9 +250,12 @@ class HomeController extends StateNotifier<HomeState> {
   }
 
   final Ref _ref;
+  StreamSubscription<bool>? _gpsSwitchSub;
+  StreamSubscription<bool>? _dataSub;
 
   Future<void> _bootstrap() async {
     await refreshToday();
+    await _watchSensors();
     await _refreshPending();
     final SessionStore session = _ref.read(sessionStoreProvider);
     final bool driver = session.user?.isDriver ?? false;
@@ -303,6 +308,67 @@ class HomeController extends StateNotifier<HomeState> {
 
   Future<void> _refreshPending() async {
     state = state.copyWith(pendingCount: await _ref.read(positionDaoProvider).pendingCount());
+  }
+
+  /// The GPS/data chips used to be driven only by the tracking isolate, so for anyone who
+  /// isn't tracking they sat on HomeState's optimistic defaults and lied. Read the device.
+  Future<void> _watchSensors() async {
+    final LocationAdapter loc = _ref.read(locationAdapterProvider);
+    final ConnectivityAdapter conn = ConnectivityAdapter();
+    try {
+      state = state.copyWith(
+        gpsEnabled: await loc.isServiceEnabled(),
+        online: await conn.isOnline(),
+      );
+      _gpsSwitchSub = loc.serviceOnOff().listen(
+            (bool on) => _onSensor('GPS', on),
+            onError: (Object _) {/* plugin gone mid-session */},
+          );
+      _dataSub = conn.onChange().listen(
+            (bool on) => _onSensor('DATA', on),
+            onError: (Object _) {/* plugin gone mid-session */},
+          );
+    } catch (_) {
+      // No platform (unit tests, or a plugin that failed to bind): keep the optimistic chips
+      // rather than showing a fault that isn't there.
+    }
+  }
+
+  void _onSensor(String kind, bool on) {
+    final bool wasOn = kind == 'GPS' ? state.gpsEnabled : state.online;
+    if (on == wasOn) return;
+    // The chip flips on the same frame the OS tells us — no server round-trip in the way.
+    state = kind == 'GPS' ? state.copyWith(gpsEnabled: on) : state.copyWith(online: on);
+    final String eventType = '${kind}_${on ? 'ON' : 'OFF'}';
+    if (!on) unawaited(_notifyLocal(eventType));
+    unawaited(_postToggle(eventType));
+  }
+
+  Future<void> _notifyLocal(String type) async {
+    final ({String title, String body})? copy = ArAlertText.byType[type];
+    if (copy == null) return;
+    try {
+      await _ref
+          .read(notificationsProvider)
+          .showAlert(id: type.hashCode & 0x7fffffff, title: copy.title, body: copy.body, playSound: true);
+    } on Exception {/* notifications channel unavailable */}
+  }
+
+  /// §2 toggle-event: this is what raises the admin's GPS_OFF/DATA_OFF alert server-side.
+  Future<void> _postToggle(String kind) async {
+    if (!_ref.read(sessionStoreProvider).isLoggedIn) return;
+    try {
+      await _ref
+          .read(apiClientProvider)
+          .toggleEvent(deviceId: await _ref.read(deviceIdProvider.future), kind: kind);
+    } on Exception {/* offline — the heartbeat still carries the real gpsEnabled flag */}
+  }
+
+  @override
+  void dispose() {
+    unawaited(_gpsSwitchSub?.cancel());
+    unawaited(_dataSub?.cancel());
+    super.dispose();
   }
 
   /// تشيك ان — request permissions → read location → POST → auto-start tracking.

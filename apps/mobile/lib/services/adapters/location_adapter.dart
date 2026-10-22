@@ -12,6 +12,9 @@ class LocationAdapter {
   /// Emits enabled/disabled as the user toggles GPS in system settings.
   Stream<ServiceStatus> serviceStatus() => Geolocator.getServiceStatusStream();
 
+  /// The same signal flattened to what the UI actually needs: is the switch on right now?
+  Stream<bool> serviceOnOff() => serviceStatus().map((ServiceStatus s) => s == ServiceStatus.enabled);
+
   /// Ask the OS for the permission tiers we need. Returns granted status.
   Future<PermissionResult> requestPermissions({required bool background}) async {
     final ph.PermissionStatus whenInUse = await ph.Permission.locationWhenInUse.request();
