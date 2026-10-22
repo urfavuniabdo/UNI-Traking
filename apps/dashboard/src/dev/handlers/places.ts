@@ -78,10 +78,31 @@ export const placesRoutes: MockRoute[] = [
         radiusM: body.radiusM !== undefined ? Number(body.radiusM) : z.radiusM,
         polygon: body.polygon !== undefined ? (body.polygon as [number, number][]) : z.polygon,
         shape: body.shape !== undefined ? (body.shape === 'POLYGON' ? 'POLYGON' : 'CIRCLE') : z.shape,
-        maxSpeedKmh: body.maxSpeedKmh !== undefined ? Number(body.maxSpeedKmh) : z.maxSpeedKmh,
-        stopAlertMin: body.stopAlertMin !== undefined ? Number(body.stopAlertMin) : z.stopAlertMin,
+        // `null` clears a zone rule — the real DTO takes `number | null`, so the mock must not coerce it to 0.
+        maxSpeedKmh: body.maxSpeedKmh !== undefined ? (body.maxSpeedKmh === null ? null : Number(body.maxSpeedKmh)) : z.maxSpeedKmh,
+        stopAlertMin: body.stopAlertMin !== undefined ? (body.stopAlertMin === null ? null : Number(body.stopAlertMin)) : z.stopAlertMin,
       });
       return ok(z);
+    },
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/places\/sites\/([^/]+)$/,
+    handler: ({ params }) => {
+      const i = sites.findIndex((x) => x.id === params[0]);
+      if (i < 0) return err(404, 'NOT_FOUND', 'موقع غير موجود');
+      sites.splice(i, 1);
+      return ok({ deleted: params[0] });
+    },
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/places\/zones\/([^/]+)$/,
+    handler: ({ params }) => {
+      const i = zones.findIndex((x) => x.id === params[0]);
+      if (i < 0) return err(404, 'NOT_FOUND', 'نطاق غير موجود');
+      zones.splice(i, 1);
+      return ok({ deleted: params[0] });
     },
   },
 ];

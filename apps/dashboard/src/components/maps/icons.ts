@@ -1,5 +1,5 @@
 import L from 'leaflet';
-import type { MotionState } from '@/api/types';
+import type { AlertType, MotionState } from '@/api/types';
 
 export const MOTION_COLORS: Record<MotionState, string> = {
   WALKING: '#f59e0b',
@@ -39,3 +39,53 @@ export const centerIcon = L.divIcon({
   iconAnchor: [10, 10],
   html: '<div style="width:20px;height:20px;border-radius:99px;background:#f59e0b;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.4)"></div>',
 });
+
+/** Grab handle sitting on the circle's edge: dragging it rewrites the radius. */
+export const radiusHandleIcon = L.divIcon({
+  className: '',
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
+  html: '<div style="width:18px;height:18px;border-radius:99px;background:#fff;border:3px solid #1d4ed8;box-shadow:0 1px 6px rgba(0,0,0,.45);cursor:grab"></div>',
+});
+
+/** One glyph per problem type, so a marker on the route line is readable without opening anything. */
+const EVENT_GLYPHS: Record<string, string> = {
+  SPEEDING: '🔴',
+  HARSH_BRAKING: '🛑',
+  HARSH_ACCELERATION: '🚀',
+  STOP_EXCEEDED: '⏸',
+  GEOFENCE_EXIT: '🚪',
+  GEOFENCE_ENTER: '🚶',
+  CHECK_IN_OUT_OF_FENCE: '📍',
+  ROUTE_GAP: '✂️',
+  IDLE_LONG: '😴',
+  GPS_OFF: '📵',
+  DATA_OFF: '📵',
+  APP_OFFLINE: '📴',
+  HEARTBEAT_MISSING: '📡',
+  BUFFER_REPLAYED: '📥',
+  CHECKOUT_MISSING: '🕐',
+};
+
+export function eventGlyph(type: AlertType | string): string {
+  return EVENT_GLYPHS[type] ?? '❗';
+}
+
+export function eventIcon(type: AlertType | string, color: string): L.DivIcon {
+  const key = `${type}-${color}`;
+  const cached = iconCache.get(`e${key}`);
+  if (cached) return cached;
+  const icon = L.divIcon({
+    className: '',
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+    html:
+      `<div style="width:24px;height:24px;border-radius:99px;background:#fff;border:2px solid ${color};` +
+      `display:flex;align-items:center;justify-content:center;font-size:13px;line-height:1;` +
+      'box-shadow:0 1px 5px rgba(0,0,0,.4)">' +
+      eventGlyph(type) +
+      '</div>',
+  });
+  iconCache.set(`e${key}`, icon);
+  return icon;
+}

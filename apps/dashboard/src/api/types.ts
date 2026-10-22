@@ -74,6 +74,17 @@ export interface LivePosition {
   gpsEnabled: boolean;
   dataEnabled: boolean;
   lastSeen: string;
+  // The API enriches the live record from the employee/zone joins (CONTRACT §7).
+  employeeId?: string;
+  name?: string;
+  externalId?: string;
+  driver?: boolean;
+  insideZone?: boolean;
+  zoneId?: string | null;
+  zoneName?: string | null;
+  siteId?: string | null;
+  siteName?: string | null;
+  replayed?: boolean;
 }
 
 export interface RoutePoint {
@@ -93,6 +104,9 @@ export interface RouteStop {
   lat: number;
   lng: number;
   durationMin: number;
+  /** StopEvent identity from `GET /positions/route`; the mock feed omits it. */
+  id?: string;
+  kind?: 'PLANNED' | 'UNPLANNED' | 'UNKNOWN';
 }
 
 export interface RouteGap {
@@ -111,9 +125,29 @@ export interface RouteResponse {
   gaps: RouteGap[];
   distanceKm: number;
   replayedPoints: number;
+  pointCount?: number;
+  replayed?: boolean;
 }
 
 export type GeoShape = 'CIRCLE' | 'POLYGON';
+
+/** An alert that knows where it happened, so the map can put a symbol on the exact spot. */
+export interface MapEvent {
+  id: string;
+  type: AlertType;
+  lat: number;
+  lng: number;
+  title: string;
+  ts: string;
+  severity: Severity;
+}
+
+/** `GET /alerts` answers with `alerts` on the current API and `data` on the older one. */
+export interface AlertsResponse {
+  alerts?: AlertPayload[];
+  data?: AlertPayload[];
+  meta?: { total: number; page: number; pageSize: number };
+}
 
 export interface Site {
   id: string;

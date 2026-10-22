@@ -52,6 +52,23 @@ async function main(): Promise<void> {
   const zonePatch = await send('PATCH', `/places/zones/${(zoneCreate.json as { id: string }).id}`, { strictReject: true });
   check('PATCH /places/zones/:id strictReject', (zonePatch.json as { strictReject: boolean }).strictReject === true);
 
+  // what the on-map fence panel sends: geometry + name in one write, then delete
+  const geoPatch = await send('PATCH', '/places/sites/s-cairo', { name: 'مقر القاهرة', lat: 30.05, lng: 31.24, radiusM: 260 });
+  const gj = geoPatch.json as { name: string; lat: number; radiusM: number };
+  check('PATCH /places/sites/:id moves+renames+resizes', gj.name === 'مقر القاهرة' && gj.lat === 30.05 && gj.radiusM === 260);
+  const zoneRules = await send('PATCH', `/places/zones/${(zoneCreate.json as { id: string }).id}`, { maxSpeedKmh: null, stopAlertMin: null });
+  const zr = zoneRules.json as { maxSpeedKmh: number | null; stopAlertMin: number | null };
+  check('PATCH /places/zones/:id clears zone rules', zr.maxSpeedKmh === null && zr.stopAlertMin === null);
+  const delSite = await send('DELETE', '/places/sites/s-giza');
+  const afterDel = await get('/places/fences');
+  const ad = afterDel.json as { sites: { id: string }[]; zones: { id: string }[] };
+  check('DELETE /places/sites/:id drops it from the feed', delSite.status === 200 && !ad.sites.some((s) => s.id === 's-giza'));
+  const delZone = await send('DELETE', `/places/zones/${(zoneCreate.json as { id: string }).id}`);
+  const afterZoneDel = await get('/places/fences');
+  check('DELETE /places/zones/:id drops it', (afterZoneDel.json as { zones: { id: string }[] }).zones.every((z) => z.id !== (zoneCreate.json as { id: string }).id) && delZone.status === 200);
+  const missingDel = await send('DELETE', '/places/zones/nope');
+  check('DELETE unknown zone → 404', missingDel.status === 404);
+
   // alerts
   const alerts = await get('/alerts', { status: 'OPEN' });
   const aj = alerts.json as { alerts: { id: string; status: string }[] };
@@ -63,6 +80,12 @@ async function main(): Promise<void> {
   check('POST /alerts/:id/resolve', (resolve.json as { status: string }).status === 'RESOLVED');
   const callLog = await send('POST', `/alerts/${firstId}/call-log`, { called: true, note: 'رد' });
   check('POST /alerts/:id/call-log', Boolean((callLog.json as { meta: Record<string, unknown> }).meta.callLog));
+
+  // what the map asks for: one driver's abnormal events inside one UTC day
+  const dayWin = await get('/alerts', { userId: 'u-mostafa', from: '2026-10-22T00:00:00.000Z', to: '2026-10-22T23:59:59.999Z', pageSize: '200' });
+  const dw = dayWin.json as { alerts: { userId: string; createdAt: string; meta: { lat?: number } }[] };
+  check('GET /alerts?userId+day window filters to that driver', dw.alerts.length > 0 && dw.alerts.every((a) => a.userId === 'u-mostafa' && a.createdAt.startsWith('2026-10-22')), `${dw.alerts.length}`);
+  check('day alerts carry meta.lat for map pins', dw.alerts.some((a) => typeof a.meta?.lat === 'number'));
 
   // attendance
   const att = await get('/attendance', { from: '2026-10-22', to: '2026-10-22' });
