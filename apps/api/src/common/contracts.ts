@@ -34,8 +34,57 @@ export interface AlertDispatcher {
   raise(input: RaiseAlertInput): Promise<RaisedAlert | undefined>;
 }
 
+/**
+ * The enriched live item consumed by BOTH the HTTP `GET /positions/live`
+ * envelope and the socket `position:update` event.
+ *
+ * Keying contract: the dashboard keys its live store / map markers by the EMPLOYEE id,
+ * so `id` === `userId` === `employeeId` all resolve to the same value. The real login
+ * user id (distinct from the employee id in the API) is intentionally NOT used as the
+ * live key, otherwise the Live page driver cards never resolve to a position.
+ */
 export interface LivePosition {
+  /** canonical live key — always the employee id. */
+  id: string;
+  /** dashboard live-store key (kept equal to `employeeId` so cards resolve). */
   userId: string;
+  employeeId: string;
+  name: string;
+  /** alias of `name` for the map tooltip consumer (`userName`). */
+  userName: string;
+  externalId: string | null;
+  kind: string | null;
+  driver: boolean;
+  lat: number;
+  lng: number;
+  speedKmh: number | null;
+  motionState: MotionState;
+  insideZone: boolean | null;
+  ts: string;
+  replayed: boolean;
+  accuracy: number | null;
+  battery: number | null;
+  zoneId: string | null;
+  zoneName: string | null;
+  siteId: string | null;
+  siteName: string | null;
+  /** Login user id behind this employee — used only for socket room routing. */
+  authUserId: string | null;
+  // ---- device-health flags read from the Device row ingest already maintains ----
+  online: boolean;
+  tracking: boolean;
+  gpsEnabled: boolean;
+  dataEnabled: boolean;
+  lastSeen: string | null;
+}
+
+/**
+ * Internal per-employee realtime position the tracking cache holds. Enrichment
+ * (device health + employee/geo metadata) is applied at the read/broadcast boundary
+ * to produce a full `LivePosition`; keeping the cache lean avoids touching the
+ * verified ingest path semantics.
+ */
+export interface LivePositionBase {
   employeeId: string;
   name: string;
   lat: number;
@@ -45,6 +94,7 @@ export interface LivePosition {
   insideZone: boolean | null;
   ts: string;
   replayed: boolean;
+  accuracy: number | null;
 }
 
 export interface RealtimePublisher {

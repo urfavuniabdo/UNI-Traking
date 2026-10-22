@@ -13,7 +13,8 @@ import { PositionsService } from './positions.service';
 import { ALERT_DISPATCHER, REALTIME_PUBLISHER, type RealtimePublisher } from '../../common/contracts';
 
 // Isolated temp sqlite DB for the realtime-tracking integration tests.
-const DB = 'file:./tmp-track-alerts.db';
+// Placed one level up (apps/api/) so it matches the .gitignore pattern `apps/api/tmp-*.db`.
+const DB = 'file:../tmp-track-alerts.db';
 process.env.DATABASE_URL = DB;
 process.env.ALERT_COOLDOWN_S = '180';
 
@@ -62,15 +63,15 @@ async function mkDriver(opts: { lat: number; lng: number; radiusM: number }) {
     data: { identifier: `u-${seq}`, passwordHash: 'x', role: 'DRIVER', name: emp.name, employeeId: emp.id },
   });
   const device = await prisma.device.create({
-    data: { deviceId: `dev-${seq}`, employeeId: emp.id, userId: user.id, platform: 'android', tracking: true, gpsEnabled: true, lastSeenAt: new Date(), online: true },
+    data: { deviceId: `dev-${seq}`, employeeId: emp.id, userId: user.id, platform: 'android', tracking: true, gpsEnabled: true, online: true, batteryPct: 77, lastSeenAt: new Date() },
   });
   return { employeeId: emp.id, userId: user.id, deviceId: device.deviceId, zoneId: zone.id };
 }
 
 beforeAll(() => {
   try {
-    rmSync('prisma/tmp-track-alerts.db', { force: true });
-    rmSync('prisma/tmp-track-alerts.db-journal', { force: true });
+    rmSync('tmp-track-alerts.db', { force: true });
+    rmSync('tmp-track-alerts.db-journal', { force: true });
   } catch {
     /* ignore */
   }
@@ -103,6 +104,14 @@ beforeEach(async () => {
   await reset();
   mockPublisher.position.mockClear();
   mockPublisher.alert.mockClear();
+});
+
+afterAll(async () => {
+  try {
+    await prisma?.$disconnect();
+  } catch {
+    /* ignore */
+  }
 });
 
 const countByType = async (employeeId: string, type: string): Promise<number> =>
@@ -282,5 +291,109 @@ describe('HARSH_BRAKING from GPS (§6)', () => {
     expect(await countByType(employeeId, 'HARSH_BRAKING')).toBe(1);
     const alert = await prisma.alert.findFirst({ where: { employeeId, type: 'HARSH_BRAKING' } });
     expect(JSON.parse(alert?.meta ?? '{}').accelMs2).toBeLessThanOrEqual(-2.2);
+  });
+});
+
+interface RouteEnvelope {
+  employeeId: string;
+  userName: string;
+  distanceKm: number;
+  points: { clientTs: string; buffered: boolean }[];
+  replayedPoints: number;
+  stops: { startTs: string; endTs: string | null; durationMin: number; kind: string; lat: number; lng: number }[];
+  gaps: { fromTs: string; toTs: string; minutes: number }[];
+  // legacy aliases kept for existing specs / external consumers
+  positions: { ts: string }[];
+  pointCount: number;
+}
+
+describe('GET /positions/live — enriched live item (read surface)', () => {
+  it('carries device-health flags and is keyed by employee id', async () => {
+    const { employeeId, deviceId } = await mkDriver({ lat: 30.0, lng: 30.0, radiusM: 100000 });
+    const t0 = Date.now();
+    await positions.ingestBatch({
+      deviceId,
+      batchSeq: 1,
+      positions: [{ clientTs: iso(t0), lat: 30.0, lng: 30.0, speed: 20, accuracy: 5 }],
+    });
+    const snap = await positions.liveSnapshot();
+    expect(Array.isArray(snap.positions)).toBe(true);
+    expect(typeof snap.serverTs).toBe('string');
+    const item = snap.positions.find((p) => p.employeeId === employeeId);
+    expect(item).toBeTruthy();
+    // keyed by employee id (the dashboard live-store key)
+    expect(item?.id).toBe(employeeId);
+    expect(item?.userId).toBe(employeeId);
+    expect(item?.employeeId).toBe(employeeId);
+    // device-health flags surfaced from the Device row ingest already maintains
+    for (const key of ['online', 'gpsEnabled', 'dataEnabled', 'tracking', 'lastSeen', 'battery']) {
+      expect(item).toHaveProperty(key);
+    }
+    expect(item?.online).toBe(true);
+    expect(item?.tracking).toBe(true);
+    expect(item?.gpsEnabled).toBe(true);
+    expect(item?.dataEnabled).toBe(true);
+    expect(item?.battery).toBe(77);
+    expect(typeof item?.lastSeen).toBe('string');
+  });
+
+  it('broadcasts the same enriched fields on the socket position:update payload', async () => {
+    const { employeeId, deviceId } = await mkDriver({ lat: 30.0, lng: 30.0, radiusM: 100000 });
+    const t0 = Date.now();
+    await positions.ingestBatch({
+      deviceId,
+      batchSeq: 1,
+      positions: [{ clientTs: iso(t0), lat: 30.0, lng: 30.0, speed: 20, accuracy: 6 }],
+    });
+    expect(mockPublisher.position).toHaveBeenCalled();
+    const calls = mockPublisher.position.mock.calls;
+    const last = calls[calls.length - 1][0];
+    expect(last.employeeId).toBe(employeeId);
+    expect(last.userId).toBe(employeeId);
+    expect(last.id).toBe(employeeId);
+    for (const key of ['online', 'gpsEnabled', 'dataEnabled', 'tracking', 'lastSeen', 'battery']) {
+      expect(last).toHaveProperty(key);
+    }
+    expect(last.online).toBe(true);
+    expect(last.accuracy).toBe(6);
+  });
+});
+
+describe('GET /positions/route — dashboard envelope (rename)', () => {
+  it('returns points/stops/gaps/userName/distanceKm and keeps positions/pointCount aliases', async () => {
+    const { employeeId, userId, deviceId } = await mkDriver({ lat: 30.0, lng: 30.0, radiusM: 100000 });
+    const t0 = Date.now();
+    await positions.ingestBatch({
+      deviceId,
+      batchSeq: 1,
+      positions: [
+        { clientTs: iso(t0), lat: 30.0, lng: 30.0, speed: 30, accuracy: 5 },
+        { clientTs: iso(t0 + 300000), lat: 30.005, lng: 30.0, speed: 40, accuracy: 5 },
+      ],
+    });
+    // a stop with DB columns startedAt/endedAt/durationS → exposed as startTs/endTs/durationMin
+    await prisma.stopEvent.create({
+      data: { employeeId, startedAt: new Date(t0), endedAt: new Date(t0 + 1_200_000), durationS: 1200, kind: 'UNPLANNED', lat: 30.0, lng: 30.0 },
+    });
+    const date = new Date(t0).toISOString().slice(0, 10);
+    const route = (await positions.route(userId, date)) as RouteEnvelope;
+
+    expect(typeof route.userName).toBe('string');
+    expect(typeof route.distanceKm).toBe('number');
+    expect(Array.isArray(route.points)).toBe(true);
+    expect(route.points[0]).toHaveProperty('clientTs');
+    expect(typeof route.replayedPoints).toBe('number');
+    expect(Array.isArray(route.stops)).toBe(true);
+    expect(route.stops[0]?.startTs).toBe(new Date(t0).toISOString());
+    expect(route.stops[0]?.endTs).toBe(new Date(t0 + 1_200_000).toISOString());
+    expect(route.stops[0]?.durationMin).toBe(20); // 1200s → 20 min
+    expect(route.stops[0]?.kind).toBe('UNPLANNED');
+    expect(Array.isArray(route.gaps)).toBe(true);
+
+    // kept aliases: `positions` (existing spec reads positions[].ts) + `pointCount`
+    expect(Array.isArray(route.positions)).toBe(true);
+    expect(route.positions[0]).toHaveProperty('ts');
+    expect(route.pointCount).toBe(2);
+    expect(route.employeeId).toBe(employeeId);
   });
 });

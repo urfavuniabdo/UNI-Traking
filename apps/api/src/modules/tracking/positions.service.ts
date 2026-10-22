@@ -5,12 +5,13 @@ import type { MotionState } from '../../shared/constants';
 import { SEVERITY, type AlertType } from '../../shared/constants';
 import { PrismaService } from '../../common/prisma.service';
 import { GeoService } from '../../common/geo/geo.service';
-import { json, round, workDateOf, isValidLat, isValidLng } from '../../common/utils';
+import { json, parseJson, round, workDateOf, isValidLat, isValidLng } from '../../common/utils';
 import {
   ALERT_DISPATCHER,
   REALTIME_PUBLISHER,
   type AlertDispatcher,
   type LivePosition,
+  type LivePositionBase,
   type RaiseAlertInput,
   type RealtimePublisher,
 } from '../../common/contracts';
@@ -47,11 +48,45 @@ interface Track {
 
 const MAX_BATCH = 500;
 
+/** Employee identity/geo metadata used to enrich a live item (cached; `at` = epoch ms). */
+interface EmployeeMeta {
+  name: string;
+  externalId: string | null;
+  kind: string | null;
+  driver: boolean;
+  userId: string | null;
+  zoneId: string | null;
+  zoneName: string | null;
+  siteId: string | null;
+  siteName: string | null;
+}
+
+/** Device health row projected for live enrichment. */
+interface DeviceHealthRow {
+  employeeId: string | null;
+  online: boolean;
+  tracking: boolean;
+  gpsEnabled: boolean;
+  batteryPct: number | null;
+  lastSeenAt: Date | null;
+}
+
+/** RouteLine.gaps stored shape → mapped to the dashboard gap envelope. */
+interface RouteGapRaw {
+  from: string;
+  to: string;
+  gapS?: number;
+}
+
+const META_TTL_MS = 60_000;
+
 @Injectable()
 export class PositionsService {
   private readonly logger = new Logger(PositionsService.name);
   private tracks = new Map<string, Track>();
-  private live = new Map<string, LivePosition>();
+  private live = new Map<string, LivePositionBase>();
+  /** cached employee identity/geo metadata (rarely changes; refreshed lazily). */
+  private metaCache = new Map<string, { at: number; value: EmployeeMeta }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -248,11 +283,14 @@ export class PositionsService {
     const dtS = track.last ? (p.ts - track.last.ts) / 1000 : null;
     const distanceFromLast = track.last ? this.geo.distanceM(track.last, { lat: p.lat, lng: p.lng }) : 0;
 
-    // speed: device-provided, else derived from GPS between consecutive points.
-    let speed = p.speedKmh;
-    if (speed === null && track.last) {
-      speed = this.geo.speedKmhBetween({ lat: track.last.lat, lng: track.last.lng, at: track.last.ts }, { lat: p.lat, lng: p.lng, at: p.ts });
-    }
+    // Speed: the device reading, but never below what the GPS actually covered since the
+    // previous fix — a hand-held phone under-reports walking speed to ~0 and reads as STOPPED.
+    // Displacement inside the accuracy circle is noise, not movement, so it is ignored.
+    const derived =
+      track.last && distanceFromLast > (p.accuracyM ?? 0)
+        ? this.geo.speedKmhBetween({ lat: track.last.lat, lng: track.last.lng, at: track.last.ts }, { lat: p.lat, lng: p.lng, at: p.ts })
+        : null;
+    const speed = this.classifier.resolveSpeed(p.speedKmh, derived);
 
     // absurd-jump guard → UNKNOWN, don't advance state/last
     if (th && this.classifier.isAbsurd(speed, distanceFromLast, dtS, th.accuracyDriftM)) {
@@ -452,8 +490,9 @@ export class PositionsService {
       .catch(() => undefined);
 
     if (ctx) {
-      const live: LivePosition = {
-        userId: ctx.userId ?? employeeId,
+      // cache stays lean (base only); enrichment (device health + geo meta) is applied
+      // at the broadcast/read boundary so the ingest semantics stay untouched.
+      const base: LivePositionBase = {
         employeeId,
         name: ctx.employeeName,
         lat: p.lat,
@@ -463,10 +502,11 @@ export class PositionsService {
         insideZone,
         ts: new Date(p.ts).toISOString(),
         replayed: p.buffered || p.stale,
+        accuracy: p.accuracyM,
       };
-      this.live.set(employeeId, live);
+      this.live.set(employeeId, base);
       try {
-        this.publisher?.position(live);
+        this.publisher?.position(await this.enrichOne(base));
       } catch (e) {
         this.logger.warn(`position broadcast failed: ${(e as Error)?.message}`);
       }
@@ -548,22 +588,137 @@ export class PositionsService {
     return emp?.id ?? null;
   }
 
-  /** GET /positions/live — latest position per employee (cache first, DB fallback). */
-  async liveSnapshot(since?: string): Promise<{ generatedAt: string; drivers: LivePosition[] }> {
-    let drivers = [...this.live.values()];
-    if (!drivers.length) drivers = await this.liveFromDb();
-    const sinceMs = since ? new Date(since).getTime() : null;
-    if (sinceMs) drivers = drivers.filter((d) => new Date(d.ts).getTime() > sinceMs);
-    return { generatedAt: new Date().toISOString(), drivers };
+  // ---------- live enrichment helpers ----------
+
+  /** Employee identity/geo metadata (cached TTL; ingest never mutates these often). */
+  private async metaFor(employeeId: string): Promise<EmployeeMeta> {
+    const hit = this.metaCache.get(employeeId);
+    if (hit && Date.now() - hit.at < META_TTL_MS) return hit.value;
+    const emp = await this.prisma.employee.findUnique({
+      where: { id: employeeId },
+      select: {
+        name: true,
+        externalId: true,
+        kind: true,
+        zoneId: true,
+        siteId: true,
+        zone: { select: { name: true } },
+        site: { select: { name: true } },
+        user: { select: { id: true } },
+      },
+    });
+    const value: EmployeeMeta = {
+      name: emp?.name ?? '',
+      externalId: emp?.externalId ?? null,
+      kind: emp?.kind ?? null,
+      driver: emp?.kind === 'DRIVER',
+      userId: emp?.user?.id ?? null,
+      zoneId: emp?.zoneId ?? null,
+      zoneName: emp?.zone?.name ?? null,
+      siteId: emp?.siteId ?? null,
+      siteName: emp?.site?.name ?? null,
+    };
+    this.metaCache.set(employeeId, { at: Date.now(), value });
+    return value;
   }
 
-  private async liveFromDb(): Promise<LivePosition[]> {
-    const recent = await this.prisma.position.findMany({ orderBy: { clientTs: 'desc' }, take: 2000, include: { employee: { select: { id: true, name: true, user: { select: { id: true } } } } } });
-    const seen = new Map<string, LivePosition>();
+  /** offline window = 3 × heartbeat interval, in seconds. */
+  private async offlineWindowS(): Promise<number> {
+    let hb = 300;
+    try {
+      hb = (await this.rules.globalOverrides()).heartbeatIntervalS ?? 300;
+    } catch {
+      /* defaults */
+    }
+    return hb * 3;
+  }
+
+  /** Compose base live + employee meta + device health into the enriched LivePosition. */
+  private compose(base: LivePositionBase, meta: EmployeeMeta | undefined, dev: DeviceHealthRow | undefined, offlineAfterS: number): LivePosition {
+    const ageS = dev?.lastSeenAt ? (Date.now() - dev.lastSeenAt.getTime()) / 1000 : null;
+    const online = !!dev?.online && (ageS === null || ageS <= offlineAfterS);
+    const name = meta?.name || base.name;
+    return {
+      // dashboard keys its live store / map by the EMPLOYEE id → id === userId === employeeId.
+      id: base.employeeId,
+      userId: base.employeeId,
+      employeeId: base.employeeId,
+      name,
+      userName: name,
+      externalId: meta?.externalId ?? null,
+      kind: meta?.kind ?? null,
+      driver: meta?.driver ?? false,
+      lat: base.lat,
+      lng: base.lng,
+      speedKmh: base.speedKmh,
+      motionState: base.motionState,
+      insideZone: base.insideZone,
+      ts: base.ts,
+      replayed: base.replayed,
+      accuracy: base.accuracy,
+      battery: dev?.batteryPct ?? null,
+      zoneId: meta?.zoneId ?? null,
+      zoneName: meta?.zoneName ?? null,
+      siteId: meta?.siteId ?? null,
+      siteName: meta?.siteName ?? null,
+      authUserId: meta?.userId ?? null,
+      online,
+      tracking: dev?.tracking ?? false,
+      gpsEnabled: dev?.gpsEnabled ?? false,
+      dataEnabled: !!dev?.online, // no separate data column → DATA state is `online`
+      lastSeen: dev?.lastSeenAt?.toISOString() ?? null,
+    };
+  }
+
+  /** Enrich ONE base row (single device read + cached meta) — used for the socket broadcast. */
+  private async enrichOne(base: LivePositionBase): Promise<LivePosition> {
+    const offlineAfterS = await this.offlineWindowS();
+    const [meta, dev] = await Promise.all([
+      this.metaFor(base.employeeId),
+      this.prisma.device.findFirst({
+        where: { employeeId: base.employeeId },
+        orderBy: { lastSeenAt: 'desc' },
+        select: { employeeId: true, online: true, tracking: true, gpsEnabled: true, batteryPct: true, lastSeenAt: true },
+      }),
+    ]);
+    return this.compose(base, meta, (dev as DeviceHealthRow | null) ?? undefined, offlineAfterS);
+  }
+
+  /** Batch-enrich base rows (one device query + cached metas) — used for the HTTP snapshot. */
+  private async enrichMany(bases: LivePositionBase[]): Promise<LivePosition[]> {
+    if (!bases.length) return [];
+    const offlineAfterS = await this.offlineWindowS();
+    const ids = [...new Set(bases.map((b) => b.employeeId))];
+    const [devs, metas] = await Promise.all([
+      this.prisma.device.findMany({
+        where: { employeeId: { in: ids } },
+        orderBy: { lastSeenAt: 'desc' },
+        select: { employeeId: true, online: true, tracking: true, gpsEnabled: true, batteryPct: true, lastSeenAt: true },
+      }),
+      Promise.all(ids.map((id) => this.metaFor(id))),
+    ]);
+    const devByEmp = new Map<string, DeviceHealthRow>();
+    for (const d of devs) if (d.employeeId && !devByEmp.has(d.employeeId)) devByEmp.set(d.employeeId, d as DeviceHealthRow);
+    const metaByEmp = new Map<string, EmployeeMeta>(ids.map((id, i) => [id, metas[i]]));
+    return bases.map((b) => this.compose(b, metaByEmp.get(b.employeeId), devByEmp.get(b.employeeId), offlineAfterS));
+  }
+
+  /** GET /positions/live → { positions, serverTs } — enriched per employee. */
+  async liveSnapshot(since?: string): Promise<{ positions: LivePosition[]; serverTs: string }> {
+    let bases = [...this.live.values()];
+    if (!bases.length) bases = await this.liveFromDb();
+    const sinceMs = since ? new Date(since).getTime() : null;
+    if (sinceMs) bases = bases.filter((d) => new Date(d.ts).getTime() > sinceMs);
+    const positions = await this.enrichMany(bases);
+    return { positions, serverTs: new Date().toISOString() };
+  }
+
+  private async liveFromDb(): Promise<LivePositionBase[]> {
+    const recent = await this.prisma.position.findMany({ orderBy: { clientTs: 'desc' }, take: 2000, include: { employee: { select: { id: true, name: true } } } });
+    const seen = new Map<string, LivePositionBase>();
     for (const p of recent) {
       if (seen.has(p.employeeId)) continue;
       seen.set(p.employeeId, {
-        userId: p.employee?.user?.id ?? p.employeeId,
         employeeId: p.employeeId,
         name: p.employee?.name ?? '',
         lat: p.lat,
@@ -573,46 +728,76 @@ export class PositionsService {
         insideZone: p.insideZone,
         ts: p.clientTs.toISOString(),
         replayed: p.buffered || p.stale,
+        accuracy: p.accuracyM,
       });
     }
     return [...seen.values()];
   }
 
-  /** GET /positions/route?userId&date */
+  /**
+   * GET /positions/route?userId&date → { userName, distanceKm, points, replayedPoints, stops, gaps }.
+   * `userId` historically accepted a login user id; the dashboard passes the EMPLOYEE id —
+   * both are resolved (user id first, else employee id) via employeeIdForUserId().
+   * Legacy `positions` / `pointCount` keys are kept as aliases (existing spec + consumers depend on them).
+   */
   async route(userId: string, date: string): Promise<unknown> {
     const employeeId = await this.employeeIdForUserId(userId);
     if (!employeeId) throw new BadRequestException('EMPLOYEE_NOT_FOUND');
     const dayStart = new Date(`${date}T00:00:00.000Z`);
     const dayEnd = new Date(`${date}T23:59:59.999Z`);
-    const positions = await this.prisma.position.findMany({
+    const rows = await this.prisma.position.findMany({
       where: { employeeId, clientTs: { gte: dayStart, lte: dayEnd } },
       orderBy: { clientTs: 'asc' },
     });
-    const line = this.geo.simplify(positions.map((p) => ({ lat: p.lat, lng: p.lng })), 25);
+    const line = this.geo.simplify(rows.map((p) => ({ lat: p.lat, lng: p.lng })), 25);
     const routeLine = await this.prisma.routeLine.findUnique({ where: { employeeId_workDate: { employeeId, workDate: date } } });
-    const stops = await this.prisma.stopEvent.findMany({
+    const stopRows = await this.prisma.stopEvent.findMany({
       where: { employeeId, startedAt: { gte: dayStart, lte: dayEnd } },
       orderBy: { startedAt: 'asc' },
     });
-    const gaps = JSON.parse(routeLine?.gaps ?? '[]') as unknown[];
+
+    // distance (km): sum of haversine over consecutive clientTs-ordered points.
+    let distanceM = 0;
+    for (let i = 1; i < rows.length; i++) distanceM += this.geo.distanceM({ lat: rows[i - 1].lat, lng: rows[i - 1].lng }, { lat: rows[i].lat, lng: rows[i].lng });
+
+    const points = rows.map((p) => ({
+      clientTs: p.clientTs.toISOString(),
+      lat: p.lat,
+      lng: p.lng,
+      speedKmh: round(p.speedKmh, 1),
+      bearing: p.bearing,
+      accuracy: p.accuracyM,
+      motionState: p.motionState,
+      buffered: p.buffered,
+      stale: p.stale,
+    }));
+
+    const rawGaps = parseJson<RouteGapRaw[]>(routeLine?.gaps ?? '[]', []);
+    const gaps = rawGaps.map((g) => ({ fromTs: g.from, toTs: g.to, minutes: Math.round((g.gapS ?? 0) / 60) }));
+
     return {
       userId,
       employeeId,
       date,
-      replayed: positions.some((p) => p.buffered || p.stale),
-      pointCount: positions.length,
+      userName: (await this.metaFor(employeeId)).name,
+      distanceKm: round(distanceM / 1000, 2) ?? 0,
+      replayed: rows.some((p) => p.buffered || p.stale),
+      replayedPoints: rows.filter((p) => p.buffered || p.stale).length,
       geojson: { type: 'LineString', coordinates: line.map((p) => [p.lng, p.lat]) },
-      positions: positions.map((p) => ({
-        ts: p.clientTs.toISOString(),
-        lat: p.lat,
-        lng: p.lng,
-        speedKmh: round(p.speedKmh, 1),
-        motionState: p.motionState,
-        buffered: p.buffered,
-        stale: p.stale,
+      points,
+      stops: stopRows.map((s) => ({
+        id: s.id,
+        kind: s.kind,
+        lat: s.lat,
+        lng: s.lng,
+        startTs: s.startedAt.toISOString(),
+        endTs: s.endedAt?.toISOString() ?? null,
+        durationMin: Math.round((s.durationS ?? 0) / 60),
       })),
-      stops: stops.map((s) => ({ id: s.id, startedAt: s.startedAt.toISOString(), endedAt: s.endedAt?.toISOString() ?? null, durationS: s.durationS, kind: s.kind, lat: s.lat, lng: s.lng })),
       gaps,
+      // ---- backward-compat aliases (existing tracking spec + external consumers read these) ----
+      positions: points.map((p) => ({ ts: p.clientTs, lat: p.lat, lng: p.lng, speedKmh: p.speedKmh, motionState: p.motionState, buffered: p.buffered, stale: p.stale })),
+      pointCount: rows.length,
     };
   }
 
@@ -643,29 +828,55 @@ export class PositionsService {
     }));
   }
 
-  /** GET /drivers/presence — derived from Device + latest Position. */
+  /**
+   * GET /drivers/presence — derived from Device + latest Position.
+   * Item keys match the enriched live snapshot exactly (so the dashboard's two sources agree).
+   */
   async presence(): Promise<unknown[]> {
     const devices = await this.prisma.device.findMany({
       where: { employee: { isNot: null } },
-      include: { employee: { select: { id: true, name: true, user: { select: { id: true } } } } },
+      select: { employeeId: true, online: true, tracking: true, gpsEnabled: true, batteryPct: true, lastSeenAt: true },
     });
-    const hb = (await this.rules.globalOverrides()).heartbeatIntervalS ?? undefined;
+    const offlineAfterS = await this.offlineWindowS();
     const out: unknown[] = [];
-    for (const d of devices) {
-      if (!d.employee) continue;
-      const live = this.live.get(d.employee.id);
-      const ageS = d.lastSeenAt ? Math.round((Date.now() - d.lastSeenAt.getTime()) / 1000) : null;
-      const offlineAfter = (hb ?? 300) * 3;
+    for (const dev of devices) {
+      const employeeId = dev.employeeId;
+      if (!employeeId) continue;
+      const meta = await this.metaFor(employeeId);
+      const base = this.live.get(employeeId);
+      if (base) {
+        out.push(this.compose(base, meta, dev as DeviceHealthRow, offlineAfterS));
+        continue;
+      }
+      // device with no position yet → same keys, no coordinates.
+      const ageS = dev.lastSeenAt ? (Date.now() - dev.lastSeenAt.getTime()) / 1000 : null;
       out.push({
-        userId: d.employee.user?.id ?? d.employee.id,
-        employeeId: d.employee.id,
-        name: d.employee.name,
-        online: d.online && (ageS === null || ageS <= offlineAfter),
-        tracking: d.tracking,
-        gpsEnabled: d.gpsEnabled,
-        lastSeen: d.lastSeenAt?.toISOString() ?? null,
-        ageS,
-        motionState: live?.motionState ?? 'UNKNOWN',
+        id: employeeId,
+        userId: employeeId,
+        employeeId,
+        name: meta.name,
+        userName: meta.name,
+        externalId: meta.externalId,
+        kind: meta.kind,
+        driver: meta.driver,
+        lat: null,
+        lng: null,
+        speedKmh: null,
+        motionState: 'UNKNOWN',
+        insideZone: null,
+        ts: null,
+        replayed: false,
+        accuracy: null,
+        battery: dev.batteryPct,
+        zoneId: meta.zoneId,
+        zoneName: meta.zoneName,
+        siteId: meta.siteId,
+        siteName: meta.siteName,
+        online: !!dev.online && (ageS === null || ageS <= offlineAfterS),
+        tracking: dev.tracking,
+        gpsEnabled: dev.gpsEnabled,
+        dataEnabled: !!dev.online,
+        lastSeen: dev.lastSeenAt?.toISOString() ?? null,
       });
     }
     return out;
@@ -731,5 +942,6 @@ export class PositionsService {
   clearTrack(employeeId: string): void {
     this.tracks.delete(employeeId);
     this.live.delete(employeeId);
+    this.metaCache.delete(employeeId);
   }
 }

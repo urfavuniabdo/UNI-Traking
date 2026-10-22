@@ -63,6 +63,12 @@ export class GeoService {
     return (vToKmh - vFromKmh) / 3.6 / dtS;
   }
 
+  /**
+   * حلقة المضلع — الصيغة الموثقة في docs/CONTRACT.md هي [[lat,lng],…].
+   * يُقبل أيضًا [[lng,lat],… (شكل GeoJSON): اتجاه الحلقة يتحدد بمطابقة مركزها مع
+   * مركز النطاق المُعلَن (fence.lat/lng) — الأقرب هو الصحيح. بدون سحر: لو المركزين
+   * على نفس المسافة تقريبًا نلتزم بصيغة العقد.
+   */
   ringOf(fence: FenceShape): number[][] | null {
     if (!fence.polygon) return null;
     try {
@@ -70,15 +76,26 @@ export class GeoService {
         typeof fence.polygon === 'string' ? (JSON.parse(fence.polygon) as unknown) : fence.polygon;
       const arr = raw as unknown[];
       if (!Array.isArray(arr) || arr.length < 3) return null;
-      const ring = arr.map((pair) => {
-        if (Array.isArray(pair) && pair.length >= 2) return [Number(pair[0]), Number(pair[1])];
-        const p = pair as { lat?: number; lng?: number };
+      const pairs = arr.map((item) => {
+        if (Array.isArray(item) && item.length >= 2) return [Number(item[0]), Number(item[1])];
+        const p = item as { lat?: number; lng?: number };
         return [Number(p.lat), Number(p.lng)];
       });
-      return ring.every((p) => Number.isFinite(p[0]) && Number.isFinite(p[1])) ? ring : null;
+      if (!pairs.every((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]))) return null;
+      if (pairs.some((p) => Math.abs(p[0]) > 90)) return pairs.map(([a, b]) => [b, a]);
+      const mean = (i: 0 | 1) => pairs.reduce((s, p) => s + p[i], 0) / pairs.length;
+      const center = { lat: fence.lat, lng: fence.lng };
+      const asLatLng = this.distanceM(center, { lat: mean(0), lng: mean(1) });
+      const asLngLat = this.distanceM(center, { lat: mean(1), lng: mean(0) });
+      return asLngLat + 1 < asLatLng ? pairs.map(([a, b]) => [b, a]) : pairs;
     } catch {
       return null;
     }
+  }
+
+  /** [lat,lng] → [lng,lat] لاستدعاءات turf/GeoJSON. */
+  private toTurfRing(ring: number[][]): number[][] {
+    return ring.map(([lat, lng]) => [lng, lat]);
   }
 
   /** polygon عند وجوده وإلا دائرة radiusM حول النقطة. */
@@ -87,14 +104,13 @@ export class GeoService {
     const distanceToCenterM = Math.round(this.distanceM(center, p));
     const ring = this.ringOf(fence);
     if (ring) {
+      const turfRing = this.toTurfRing(ring);
       const closed =
-        ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]
-          ? ring
-          : [...ring, ring[0]];
-      const inside = booleanPointInPolygon(
-        turfPoint([p.lng, p.lat]),
-        polygon([closed]),
-      );
+        turfRing[0][0] === turfRing[turfRing.length - 1][0] &&
+        turfRing[0][1] === turfRing[turfRing.length - 1][1]
+          ? turfRing
+          : [...turfRing, turfRing[0]];
+      const inside = booleanPointInPolygon(turfPoint([p.lng, p.lat]), polygon([closed]));
       return {
         fenceId: fence.id,
         fenceName: fence.name,
@@ -148,7 +164,11 @@ export class GeoService {
   fenceToGeoJSON(fence: FenceShape): string {
     const ring = this.ringOf(fence);
     if (ring) {
-      const closed = ring[0][0] === ring[ring.length - 1][0] ? ring : [...ring, ring[0]];
+      const turfRing = this.toTurfRing(ring);
+      const closed =
+        turfRing[0][0] === turfRing[turfRing.length - 1][0]
+          ? turfRing
+          : [...turfRing, turfRing[0]];
       return JSON.stringify({ type: 'Polygon', coordinates: [closed] });
     }
     // تقريب دائرة إلى 64 ضلعًا للعرض على الخريطة
