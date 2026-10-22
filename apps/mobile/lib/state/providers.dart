@@ -73,8 +73,10 @@ final StateNotifierProvider<AuthController, AuthState> authControllerProvider =
 
 class AuthController extends StateNotifier<AuthState> {
   AuthController(this._ref) : super(const AuthState()) {
-    state = AuthState(user: _ref.read(sessionStoreProvider).user);
-    if (_ref.read(sessionStoreProvider).isLoggedIn) {
+    final SessionStore session = _ref.read(sessionStoreProvider);
+    final AppUser? saved = session.user;
+    state = AuthState(user: saved, mustChangePassword: session.mustChangePassword);
+    if (session.isLoggedIn) {
       unawaited(_ensureDeviceRegistered());
     }
   }
@@ -99,13 +101,12 @@ class AuthController extends StateNotifier<AuthState> {
       final ApiClient api = _ref.read(apiClientProvider);
       final AuthTokens t = await api.login(identifier: identifier, password: password);
       final AppUser user = t.user ?? await api.me();
+      final bool mustChange = t.mustChangePassword || user.mustChangePassword;
       await _ref.read(sessionStoreProvider).saveUser(user);
+      await _ref.read(sessionStoreProvider).setMustChangePassword(mustChange);
       await _ensureDeviceRegistered();
-      state = AuthState(
-        user: user,
-        mustChangePassword: t.mustChangePassword || user.mustChangePassword,
-      );
-      return !state.mustChangePassword;
+      state = AuthState(user: user, mustChangePassword: mustChange);
+      return !mustChange;
     } on ApiException catch (e) {
       state = state.copyWith(busy: false, error: _ar(e));
       return false;
@@ -124,7 +125,8 @@ class AuthController extends StateNotifier<AuthState> {
       final AuthTokens t = await api.login(identifier: identifier, password: newPw);
       final AppUser user = t.user ?? await api.me();
       await _ref.read(sessionStoreProvider).saveUser(user);
-      state = AuthState(user: user, mustChangePassword: t.mustChangePassword);
+      await _ref.read(sessionStoreProvider).setMustChangePassword(false);
+      state = AuthState(user: user);
       return true;
     } on ApiException catch (e) {
       state = state.copyWith(busy: false, error: _ar(e));

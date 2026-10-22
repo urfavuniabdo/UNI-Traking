@@ -33,4 +33,5 @@ class AppConfig {
   static const String darkModeKey = 'tk.d8';
   static const String isCheckedInKey = 'tk.c9';
   static const String onboardedKey = 'tk.o10';
+  static const String mustChangePasswordKey = 'tk.m11';
 }

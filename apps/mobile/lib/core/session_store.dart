@@ -77,6 +77,12 @@ class SessionStore {
   bool get onboarded => _prefs.getBool(AppConfig.onboardedKey) ?? false;
   Future<void> setOnboarded(bool v) => _prefs.setBool(AppConfig.onboardedKey, v);
 
+  /// Persists the forced-password-change requirement across app restarts (the user
+  /// object returned by the API does not include the top-level `mustChangePassword`).
+  bool get mustChangePassword => _prefs.getBool(AppConfig.mustChangePasswordKey) ?? false;
+  Future<void> setMustChangePassword(bool v) =>
+      _prefs.setBool(AppConfig.mustChangePasswordKey, v);
+
   // --- notification prefs ---
   bool get soundEnabled => _prefs.getBool(AppConfig.soundKey) ?? true;
   Future<void> setSoundEnabled(bool v) => _prefs.setBool(AppConfig.soundKey, v);
@@ -92,6 +98,7 @@ class SessionStore {
       AppConfig.refreshTokenKey,
       AppConfig.userJsonKey,
       AppConfig.sessionAliveKey,
+      AppConfig.mustChangePasswordKey,
     ]) {
       await _prefs.remove(k);
     }
