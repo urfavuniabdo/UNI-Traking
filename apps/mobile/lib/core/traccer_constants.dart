@@ -21,6 +21,7 @@ class Motion {
   static const int hysteresisSamples = 3; // samples before a transition commits
   static const double accuracyRejectM = 35.0; // points worse than this are dropped/UNKNOWN
   static const int minIntervalS = 2; // min seconds between accepted fixes
+  static const int maxCredibleSpeedKmh = 250; // ceiling on one GPS step; teleports count as 0 km
 
   /// Golden-keyed view for the consistency test.
   static Map<String, Object> toGoldenMap() => <String, Object>{
@@ -30,6 +31,7 @@ class Motion {
         'HYSTERESIS_SAMPLES': hysteresisSamples,
         'ACCURACY_REJECT_M': accuracyRejectM,
         'MIN_INTERVAL_S': minIntervalS,
+        'MAX_CREDIBLE_SPEED_KMH': maxCredibleSpeedKmh,
       };
 }
 
@@ -153,10 +155,17 @@ class Severity {
 class Roles {
   const Roles._();
 
-  static const List<String> all = <String>['ADMIN', 'SUPERVISOR', 'EMPLOYEE', 'DRIVER'];
+  static const List<String> all = <String>[
+    'ADMIN',
+    'SUPERVISOR',
+    'HR',
+    'EMPLOYEE',
+    'DRIVER'
+  ];
 
   static const String admin = 'ADMIN';
   static const String supervisor = 'SUPERVISOR';
+  static const String hr = 'HR';
   static const String employee = 'EMPLOYEE';
   static const String driver = 'DRIVER';
 }
@@ -168,13 +177,39 @@ class AttendanceStatus {
   static const String outOfFence = 'OUT_OF_FENCE';
   static const String missingCheckout = 'MISSING_CHECKOUT';
   static const String autoClosed = 'AUTO_CLOSED';
+  static const String leave = 'LEAVE';
 
   static const List<String> all = <String>[
     valid,
     outOfFence,
     missingCheckout,
     autoClosed,
+    leave,
   ];
+}
+
+/// LeaveRequest statuses (mirrors LEAVE_STATUS) — not in the golden file.
+class LeaveStatus {
+  const LeaveStatus._();
+
+  static const String pending = 'PENDING';
+  static const String approved = 'APPROVED';
+  static const String rejected = 'REJECTED';
+  static const String cancelled = 'CANCELLED';
+
+  static const List<String> all = <String>[
+    pending,
+    approved,
+    rejected,
+    cancelled,
+  ];
+
+  static const Map<String, String> ar = <String, String>{
+    pending: 'قيد المراجعة',
+    approved: 'مقبولة',
+    rejected: 'مرفوضة',
+    cancelled: 'ملغاة',
+  };
 }
 
 /// Arabic alert copy (mirrors AR_ALERT_TEXT). Keyed by alert type.
@@ -189,8 +224,8 @@ class ArAlertText {
     ),
     'GEOFENCE_ENTER': (title: 'دخول المنطقة', body: 'عدت إلى نطاق منطقتك'),
     'CHECK_IN_OUT_OF_FENCE': (
-      title: 'بدء وردية خارج النطاق',
-      body: 'بدأت ورديتك خارج النطاق المحدد'
+      title: 'بدء اليوم خارج النطاق',
+      body: 'بدأت يومك خارج النطاق المحدد'
     ),
     'SPEEDING': (
       title: 'تجاوز السرعة',
@@ -223,8 +258,8 @@ class ArAlertText {
       body: 'تم رفع خط السير المخزّن محليًا وإظهاره كأنه لحظي'
     ),
     'CHECKOUT_MISSING': (
-      title: 'إنهاء وردية غير مسجّل',
-      body: 'انتهت الوردية ولم يتم تسجيل إنهاؤها'
+      title: 'إنهاء اليوم غير مسجّل',
+      body: 'انتهى اليوم ولم يتم تسجيل إنهاؤه'
     ),
     'ROUTE_GAP': (
       title: 'فجوة في خط السير',

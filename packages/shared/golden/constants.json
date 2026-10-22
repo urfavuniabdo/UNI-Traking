@@ -7,7 +7,8 @@
     "SPEED_EMA_ALPHA": 0.35,
     "HYSTERESIS_SAMPLES": 3,
     "ACCURACY_REJECT_M": 35,
-    "MIN_INTERVAL_S": 2
+    "MIN_INTERVAL_S": 2,
+    "MAX_CREDIBLE_SPEED_KMH": 250
   },
   "RULE_DEFAULTS": {
     "maxSpeedKmh": 80,
@@ -75,6 +76,7 @@
   "ROLES": [
     "ADMIN",
     "SUPERVISOR",
+    "HR",
     "EMPLOYEE",
     "DRIVER"
   ],
@@ -82,7 +84,8 @@
     "VALID",
     "OUT_OF_FENCE",
     "MISSING_CHECKOUT",
-    "AUTO_CLOSED"
+    "AUTO_CLOSED",
+    "LEAVE"
   ],
   "AR_ALERT_TEXT": {
     "GEOFENCE_EXIT": {
@@ -94,8 +97,8 @@
       "body": "عدت إلى نطاق منطقتك"
     },
     "CHECK_IN_OUT_OF_FENCE": {
-      "title": "بدء وردية خارج النطاق",
-      "body": "بدأت ورديتك خارج النطاق المحدد"
+      "title": "بدء اليوم خارج النطاق",
+      "body": "بدأت يومك خارج النطاق المحدد"
     },
     "SPEEDING": {
       "title": "تجاوز السرعة",
@@ -134,8 +137,8 @@
       "body": "تم رفع خط السير المخزّن محليًا وإظهاره كأنه لحظي"
     },
     "CHECKOUT_MISSING": {
-      "title": "إنهاء وردية غير مسجّل",
-      "body": "انتهت الوردية ولم يتم تسجيل إنهاؤها"
+      "title": "إنهاء اليوم غير مسجّل",
+      "body": "انتهى اليوم ولم يتم تسجيل إنهاؤه"
     },
     "ROUTE_GAP": {
       "title": "فجوة في خط السير",

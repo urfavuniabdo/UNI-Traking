@@ -9,12 +9,15 @@ Base URL: `/api/v1` — كل الطلبات محمية بـ `Authorization: Bear
 
 ## 1. الأدوار والحماية
 
-`ADMIN` · `SUPERVISOR` · `EMPLOYEE` · `DRIVER`
+`ADMIN` (IT) · `SUPERVISOR` (متابعة التتبع) · `HR` (الموارد البشرية) · `EMPLOYEE` · `DRIVER`
 
-- `EMPLOYEE`/`DRIVER` يرون سجلهم الشخصي فقط (`/me/**`).
-- `SUPERVISOR` و `ADMIN` يرون كل المستخدمين داخل نطاق رقابتهم (`scopeOrgUnitId` اختياري).
-- إنشاء/تعديل النطاقات والقواعد والمزامنة والأجهزة: `ADMIN` فقط.
+- `EMPLOYEE`/`DRIVER` يرون سجلهم الشخصي فقط (`/me/**`)، **وكل تعاملهم من تطبيق الموبايل**: لو فتحا الداش بورد تُعرض شاشة «الدخول من التطبيق» بلا أي تابات.
+- `HR` = شؤون الحضور فقط: `/attendance` و`/leave` و`/places` و`/employees` (قراءة) و`/reports/daily|timesheet|exceptions`. **لا رحلات، لا خط سير، لا أميال، لا مراقبة حية، لا تنبيهات** — `route`/`mileage`/`live-kpis` مغلقة دونه.
+- `SUPERVISOR` = حركة السواقين: `/positions/live`, `/trips`, `/drivers/presence`, التنبيهات، والتقارير التشغيلية. يرى بيانات من هم داخل نطاق رقابته (`scopeOrgUnitId` اختياري).
+- `ADMIN` (IT) يمرّ من أي فحص أدوار (يشوف كل شيء للتشخيص)؛ إنشاء/تعديل النطاقات والقواعد والمزامنة والأجهزة: `ADMIN` فقط، ما عدا استثناء `HR` في `/settings` (بالأسفل).
 - ack/resolve/تعليق على التنبيهات: `SUPERVISOR` + `ADMIN`.
+- `PATCH /settings`: `ADMIN` بلا قيود؛ `HR` مسموح له بمفاتيح الحضور فقط — `shiftGraceMin` و`attendanceStrictReject` — وأي مفتاح تاني يرجع `403 FORBIDDEN_SETTING_KEY`.
+- حسابات `HR` تُنشأ وتُعدّل من `/users` (قائمة `MANAGEABLE_ROLES`).
 
 ## 2. Auth & Devices
 
@@ -64,9 +67,28 @@ Base URL: `/api/v1` — كل الطلبات محمية بـ `Authorization: Bear
 
 ممنوع تشيك ان مزدوج: `ALREADY_CHECKED_IN` (`409`)، و`check-out` بلا سجل مفتوح ⇒ `NO_OPEN_RECORD` (`409`). نهاية الوردية بفترة سماح `shiftGraceMin=30` (أو `schedule.graceMin`) ثم حالة `MISSING_CHECKOUT` وتنبيه `CHECKOUT_MISSING`.
 
+**أثر الإجازة المعتمدة (انظر 3.1):** إذا كان يوم العمل داخل إجازة `APPROVED` لنفس الموظف، فـ `check-in` يُرفض بـ **`409 ON_APPROVED_LEAVE`** وجسم `{ code, leave: { id, dateFrom, dateTo } }`، و`GET /attendance/me/today` يرجع `currentStatus: "ON_LEAVE"` مع حقل `leave` — والتطبيق يقفل زر «بدء اليوم» في اليوم ده. `GET /attendance` (و`?format=csv`) يضيف **صفوفًا مُولَّدة** بحالة `LEAVE` لكل يوم إجازة معتمدة بلا سجل حضور (`id = "leave:<leaveId>"`، `checkInTs/checkOutTs = null`)، و`stats.onLeave` يعدّها، وغياب `/reports/daily` = النشطون − الحاضرون − أيام الإجازة.
+
+### 3.1 Leave (الإجازات)
+
+`LeaveRequest{ id, employeeId, dateFrom, dateTo, reason, status, requestedAt, decidedById, decidedAt, decisionNote }` — التواريخ `YYYY-MM-DD` (يوم واحد ⇒ `dateTo = dateFrom`)، و`status ∈ PENDING | APPROVED | REJECTED | CANCELLED` (`LEAVE_STATUS`).
+
+| Method | Path | الوصف |
+|---|---|---|
+| POST | `/leave` | `{ dateFrom, dateTo?, reason? }` لأي مستخدم ليه ملف موظف → طلب `PENDING`. أخطاء: `NO_EMPLOYEE_PROFILE`، `LEAVE_BAD_RANGE`، `LEAVE_OVERLAP` (`409`) لو اتداخل مع طلب `PENDING`/`APPROVED` قائم |
+| GET | `/leave/mine?status&from&to` | طلبات المستخدم نفسه فقط (تُستخدم في شاشة الإجازات بالتطبيق) |
+| PATCH | `/leave/:id/cancel` | صاحب الطلب وهو لسه `PENDING` → `CANCELLED`؛ وإلا `403 LEAVE_NOT_YOURS` أو `409 LEAVE_NOT_PENDING` |
+| GET | `/leave?status&from&to&page&pageSize` | **`HR` + `ADMIN` فقط** → `{ items, total, pendingCount }`، والعنصر فيه `employeeName`/`employeeExternalId`/`kind`/`decidedByName` |
+| POST | `/leave/:id/approve` | `HR` + `ADMIN`، جسم اختياري `{ note }` → `APPROVED`. القرار نهائي: `409 LEAVE_ALREADY_DECIDED` لو اتخاذ قرار سابقًا |
+| POST | `/leave/:id/reject` | نفس الشيء → `REJECTED` |
+
+موافقة الـ HR لا تكتب سجل حضور — هي بتغيّر نوع اليوم في تقارير الحضور من «غياب» إلى «إجازة»، وببت زر بدء اليوم في التطبيق.
+
 ## 4. Position ingest (التتبع + إعادة البث أوف لاين)
 
 `POST /positions/batch` — **نقطة الدخول الوحيدة** لبيانات الموقع.
+
+**موظف المواقع (`Employee.kind = EMPLOYEE`) ممنوع من التتبع أصلًا:** الرفع بيوافق بس لما صاحب الجهاز `kind = DRIVER`، وإلا `400 TRACKING_NOT_ALLOWED_FOR_EMPLOYEE`. المطلب المطلوب للموظف العادي هو حضور وانصراف فقط، فأي نقاط أو رحلات أو أحداث من حسابه تُرفض على السيرفر (رسائل العميل وحدها ما تكفيش).
 
 ```json
 {

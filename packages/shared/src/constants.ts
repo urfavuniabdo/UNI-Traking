@@ -5,8 +5,12 @@
  */
 
 export const ROLES = {
+  /** IT Admin — يرى كل شيء: دوره تشخيص لا صلاحيات. */
   ADMIN: 'ADMIN',
+  /** Tracking Admin — حركة السواقين وتنبيهاتها فقط. */
   SUPERVISOR: 'SUPERVISOR',
+  /** HR Admin — حضور وانصراف وأقسام وإعدادات وإجازات؛ لا رحلات ولا مراقبة حية. */
+  HR: 'HR',
   EMPLOYEE: 'EMPLOYEE',
   DRIVER: 'DRIVER',
 } as const;
@@ -112,12 +116,23 @@ export const ATTENDANCE_STATUS = {
   OUT_OF_FENCE: 'OUT_OF_FENCE',
   MISSING_CHECKOUT: 'MISSING_CHECKOUT',
   AUTO_CLOSED: 'AUTO_CLOSED',
+  /** يوم مُغطّى بإجازة معتمدة — صف مُولّد في التقارير، لا سجل حضور. */
+  LEAVE: 'LEAVE',
 } as const;
+
+/** LeaveRequest.status — طلب الموظف/السواق وموافقة الـ HR. */
+export const LEAVE_STATUS = {
+  PENDING: 'PENDING',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+  CANCELLED: 'CANCELLED',
+} as const;
+export type LeaveStatus = (typeof LEAVE_STATUS)[keyof typeof LEAVE_STATUS];
 
 export const AR_ALERT_TEXT: Record<AlertType, { title: string; body: string }> = {
   GEOFENCE_EXIT: { title: 'خروج عن المنطقة المحددة', body: 'خرجت عن نطاق منطقتك المصرّح لك بها' },
   GEOFENCE_ENTER: { title: 'دخول المنطقة', body: 'عدت إلى نطاق منطقتك' },
-  CHECK_IN_OUT_OF_FENCE: { title: 'بدء وردية خارج النطاق', body: 'بدأت ورديتك خارج النطاق المحدد' },
+  CHECK_IN_OUT_OF_FENCE: { title: 'بدء اليوم خارج النطاق', body: 'بدأت يومك خارج النطاق المحدد' },
   SPEEDING: { title: 'تجاوز السرعة', body: 'السرعة أعلى من الحد المسموح في هذه المنطقة' },
   HARSH_BRAKING: { title: 'فرملة مفاجئة', body: 'تم رصد فرملة قوية مفاجئة' },
   HARSH_ACCELERATION: { title: 'تسارع مفاجئ', body: 'تم رصد تسارع قوي مفاجئ' },
@@ -127,7 +142,7 @@ export const AR_ALERT_TEXT: Record<AlertType, { title: string; body: string }> =
   APP_OFFLINE: { title: 'التطبيق غير متصل', body: 'لم تصل بيانات من جهازك منذ فترة' },
   HEARTBEAT_MISSING: { title: 'انقطاع نبض الجهاز', body: 'الجهاز لم يرسل نبضًا في الموعد المحدد' },
   BUFFER_REPLAYED: { title: 'استعادة بيانات أوف لاين', body: 'تم رفع خط السير المخزّن محليًا وإظهاره كأنه لحظي' },
-  CHECKOUT_MISSING: { title: 'إنهاء وردية غير مسجّل', body: 'انتهت الوردية ولم يتم تسجيل إنهاؤها' },
+  CHECKOUT_MISSING: { title: 'إنهاء اليوم غير مسجّل', body: 'انتهى اليوم ولم يتم تسجيل إنهاؤه' },
   ROUTE_GAP: { title: 'فجوة في خط السير', body: 'انقطاع في تسجيل المسار أثناء الرحلة' },
   IDLE_LONG: { title: 'سكون طويل', body: 'لم يتم رصد أي حركة لفترة طويلة' },
 };
