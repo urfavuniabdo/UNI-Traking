@@ -28,8 +28,8 @@ import { ROLES } from '../../shared/constants';
 export class PlacesController {
   constructor(private readonly places: PlacesService) {}
 
-  // ---- reads: ADMIN + SUPERVISOR ----
-  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  // ---- reads: ADMIN + SUPERVISOR، والدليل التنظيمي/المواقع لـ HR كمان (CONTRACT §1) ----
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.HR)
   @Get('org-tree')
   orgTree() {
     return this.places.orgTree();
@@ -41,25 +41,25 @@ export class PlacesController {
     return this.places.fences();
   }
 
-  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.HR)
   @Get('sites')
   sites(@Query('active') active?: string) {
     return this.places.listSites(active === 'true');
   }
 
-  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.HR)
   @Get('sites/:id')
   site(@Param('id') id: string) {
     return this.places.getSite(id);
   }
 
-  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.HR)
   @Get('zones')
   zones(@Query('active') active?: string) {
     return this.places.listZones(active === 'true');
   }
 
-  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.HR)
   @Get('zones/:id')
   zone(@Param('id') id: string) {
     return this.places.getZone(id);

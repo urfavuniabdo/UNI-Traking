@@ -74,16 +74,29 @@ export class SocketGateway implements RealtimePublisher, OnGatewayConnection, On
     /* rooms are cleaned up automatically by socket.io */
   }
 
+  /**
+   * Live/route rooms a socket may join. ADMIN + SUPERVISOR watch anyone; every other role
+   * only itself — otherwise an app user (or an HR account) could subscribe to another
+   * driver's position stream straight through the namespace, past the HTTP role guards.
+   */
+  private watchableRooms(client: Socket, userIds: string[], prefix: string): string[] {
+    const user = (client.data as { user?: RtAuthUser }).user;
+    if (!user) return [];
+    const privileged = user.role === ROLES.ADMIN || user.role === ROLES.SUPERVISOR;
+    const own = new Set([user.id, user.employeeId ?? '']);
+    return (privileged ? userIds : userIds.filter((id) => own.has(id))).map((id) => `${prefix}:${id}`);
+  }
+
   @SubscribeMessage('subscribe:live')
   onSubscribeLive(client: Socket, payload: { userIds?: string[] } = {}): { ok: boolean; rooms: string[] } {
-    const rooms = (payload?.userIds ?? []).map((id) => `watch:live:${id}`);
+    const rooms = this.watchableRooms(client, payload?.userIds ?? [], 'watch:live');
     for (const r of rooms) client.join(r);
     return { ok: true, rooms };
   }
 
   @SubscribeMessage('subscribe:route')
   onSubscribeRoute(client: Socket, payload: { userIds?: string[] } = {}): { ok: boolean; rooms: string[] } {
-    const rooms = (payload?.userIds ?? []).map((id) => `watch:route:${id}`);
+    const rooms = this.watchableRooms(client, payload?.userIds ?? [], 'watch:route');
     for (const r of rooms) client.join(r);
     return { ok: true, rooms };
   }

@@ -9,8 +9,8 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-/** Only ADMIN/SUPERVISOR accounts are manageable through /users (CONTRACT §1). */
-export const MANAGEABLE_ROLES = ['ADMIN', 'SUPERVISOR'] as const;
+/** Only the dashboard-side accounts are manageable through /users (CONTRACT §1). */
+export const MANAGEABLE_ROLES = ['ADMIN', 'SUPERVISOR', 'HR'] as const;
 export type ManageableRole = (typeof MANAGEABLE_ROLES)[number];
 
 export class CreateUserDto {

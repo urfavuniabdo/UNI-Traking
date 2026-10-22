@@ -12,7 +12,7 @@ Base URL: `/api/v1` — كل الطلبات محمية بـ `Authorization: Bear
 `ADMIN` (IT) · `SUPERVISOR` (متابعة التتبع) · `HR` (الموارد البشرية) · `EMPLOYEE` · `DRIVER`
 
 - `EMPLOYEE`/`DRIVER` يرون سجلهم الشخصي فقط (`/me/**`)، **وكل تعاملهم من تطبيق الموبايل**: لو فتحا الداش بورد تُعرض شاشة «الدخول من التطبيق» بلا أي تابات.
-- `HR` = شؤون الحضور فقط: `/attendance` و`/leave` و`/places` و`/employees` (قراءة) و`/reports/daily|timesheet|exceptions`. **لا رحلات، لا خط سير، لا أميال، لا مراقبة حية، لا تنبيهات** — `route`/`mileage`/`live-kpis` مغلقة دونه.
+- `HR` = شؤون الحضور فقط: `/attendance` (قراءة وتصدير) و`/leave` و`/places/org-tree|sites|sites/:id|zones|zones/:id` و`/employees` (القائمة فقط — تفاصيل الموظف فيها موقعه الحي) و`/reports/daily|timesheet|exceptions`. **لا رحلات، لا خط سير، لا أميال، لا مراقبة حية، لا تنبيهات** — `route`/`mileage`/`live-kpis` و`/positions/live` و`/employees/live` و`/places/fences` و`/notifications/log` مغلقة دونه، و`GET /settings` يوصله بلا سجل تسليم التنبيهات.
 - `SUPERVISOR` = حركة السواقين: `/positions/live`, `/trips`, `/drivers/presence`, التنبيهات، والتقارير التشغيلية. يرى بيانات من هم داخل نطاق رقابته (`scopeOrgUnitId` اختياري).
 - `ADMIN` (IT) يمرّ من أي فحص أدوار (يشوف كل شيء للتشخيص)؛ إنشاء/تعديل النطاقات والقواعد والمزامنة والأجهزة: `ADMIN` فقط، ما عدا استثناء `HR` في `/settings` (بالأسفل).
 - ack/resolve/تعليق على التنبيهات: `SUPERVISOR` + `ADMIN`.
@@ -176,7 +176,7 @@ IDLE_ALARM_MIN         = 30      // توقف > 30 دقيقة ⇒ STOP_EXCEEDED
 | `attendance:changed` | → إداريين | `{ userId, kind, status, ts }` |
 | `driver:presence` | → إداريين | `{ userId, online, tracking, gpsEnabled, lastSeen }` |
 | `notify:me` | → السواق/الموظف | `{ title, body, alertType }` (تنبيه الشخص لنفسه) |
-| `subscribe:live` / `subscribe:route` | ← العميل | `{ userIds?: [] }` → ينضم لـ `watch:live:<id>` / `watch:route:<id>` ويردّ `{ ok:true, rooms:[...] }` |
+| `subscribe:live` / `subscribe:route` | ← العميل | `{ userIds?: [] }` → ينضم لـ `watch:live:<id>` / `watch:route:<id>` ويردّ `{ ok:true, rooms:[...] }`. **التفويض على الغرف:** `ADMIN`+`SUPERVISOR` يشتركان في أي معرّف؛ وأي دور تاني (`HR`/`EMPLOYEE`/`DRIVER`) تُفلتر طلباته لمعرّفه هو فقط (`user.id` أو `employeeId`)، فالباقٍ يُسقط من `rooms` — لا يوجد بث موقع يتجاوز حراسة الأدوار. |
 
 **مخطط غرف `position:update` (Gateway `socket-gateway.ts`):** لكل نقطة يُوجَّ `position:update` إلى `[watch:admins, watch:live:<userId>, user:<userId>]` — وحيث `userId === employeeId` (مفتاح الداش بورد الحيّ). وبما أن `LivePosition.authUserId` (معرّف تسجيل الدخول خلف الموظف، `string | null`) قد يختلف عن `employeeId`، يضيف الـ gateway غرفتين إضافيتين عند وجوده: **`user:<authUserId>`** و**`watch:live:<authUserId>`** — حتى يرى التطبيق موقعه بنفسه رغم اختلاف المعرّفين.
 

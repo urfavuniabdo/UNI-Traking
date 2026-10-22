@@ -35,8 +35,8 @@ export class AttendanceController {
     return this.attendance.meHistory(user.id, q);
   }
 
-  // ---- management reads ----
-  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  // ---- management reads (ADMIN + tracking admin + HR) ----
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.HR)
   @Get('export')
   @Header('Content-Type', 'text/csv; charset=utf-8')
   @Header('Content-Disposition', 'attachment; filename="attendance.csv"')
@@ -44,7 +44,7 @@ export class AttendanceController {
     return this.attendance.exportCsv(q);
   }
 
-  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.HR)
   @Get()
   async list(@Query() q: AttendanceQueryDto, @Res({ passthrough: true }) res: Response) {
     // ?format=csv → raw CSV text (dashboard downloadCsv() reads res.text() in real mode);

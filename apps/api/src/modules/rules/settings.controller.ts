@@ -12,8 +12,9 @@ import {
 
 /**
  * HTTP surface for the dashboard Settings page.
- *  GET   /settings          ADMIN+SUPERVISOR → { rules, timezone, notifications, preferences }
- *  PATCH /settings          ADMIN only       → upsert rules.global, invalidate RulesService cache
+ *  GET   /settings          ADMIN+SUPERVISOR+HR → { rules, timezone, notifications, preferences }
+ *  PATCH /settings          ADMIN (any key) · HR (HR_RULE_KEYS only) → upsert rules.global,
+ *                                                                  invalidate RulesService cache
  *  GET   /notifications/log ADMIN+SUPERVISOR → { log: NotificationLogEntry[] }
  */
 @Controller()
@@ -22,15 +23,15 @@ export class SettingsController {
   constructor(private readonly settings: SettingsService) {}
 
   @Get('settings')
-  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.HR)
   getSettings(@CurrentUser() user: AuthUser): Promise<SettingsEnvelope> {
     return this.settings.getSettingsEnvelope(user);
   }
 
   @Patch('settings')
-  @Roles(ROLES.ADMIN)
-  patchSettings(@Body() body: Record<string, unknown>): Promise<RulesPayload> {
-    return this.settings.patchRules(body);
+  @Roles(ROLES.ADMIN, ROLES.HR)
+  patchSettings(@Body() body: Record<string, unknown>, @CurrentUser() user: AuthUser): Promise<RulesPayload> {
+    return this.settings.patchRules(body, user);
   }
 
   @Get('notifications/log')

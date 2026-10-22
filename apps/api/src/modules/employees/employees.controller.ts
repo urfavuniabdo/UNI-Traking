@@ -27,7 +27,7 @@ import { ROLES } from '../../shared/constants';
 export class EmployeesController {
   constructor(private readonly employees: EmployeesService) {}
 
-  // ---- reads: ADMIN + SUPERVISOR ----
+  // ---- reads: ADMIN + SUPERVISOR، وقائمة الأسماء لـ HR (تفاصيل الموظف فيها موقع حي فلا تُمنح له) ----
   @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
   @Get('live')
   live(
@@ -38,7 +38,7 @@ export class EmployeesController {
     return this.employees.live({ kind, siteId, zoneId });
   }
 
-  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.HR)
   @Get()
   list(@Query() q: ListEmployeesQueryDto) {
     return this.employees.list(q);

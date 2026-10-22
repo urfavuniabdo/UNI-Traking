@@ -1,5 +1,5 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { RULE_DEFAULTS, type AlertType } from '../../shared/constants';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { ROLES, RULE_DEFAULTS, type AlertType } from '../../shared/constants';
 import { PrismaService } from '../../common/prisma.service';
 import { parseJson } from '../../common/utils';
 import { RulesService, type GlobalOverrides } from './rules.service';
@@ -25,6 +25,9 @@ export const NUMERIC_RULE_KEYS = [
 ] as const;
 
 export type NumericRuleKey = (typeof NUMERIC_RULE_KEYS)[number];
+
+/** What an HR admin may change in `rules.global` — attendance policy only, never tracking thresholds. */
+export const HR_RULE_KEYS = ['shiftGraceMin', 'attendanceStrictReject'] as const;
 
 /** The `rules` object served by GET/PATCH /settings. */
 export type RulesPayload = Record<NumericRuleKey, number> & { attendanceStrictReject: boolean };
@@ -55,9 +58,10 @@ export interface SettingsEnvelope {
   preferences: FlatPrefs;
 }
 
-/** A caller-shaped user (only `id` is needed here; matches AuthUser). */
+/** A caller-shaped user (`role` decides the HR key allowlist; matches AuthUser). */
 export interface SettingsUser {
   id: string;
+  role?: string;
 }
 
 const asFiniteNumber = (v: unknown): number | undefined => {
@@ -121,12 +125,20 @@ export class SettingsService {
   /**
    * Merge an incoming PATCH into `rules.global`, validate numeric keys, clamp negatives,
    * persist, and drop the RulesService cache so the next ingest sees the new values.
+   *
+   * HR is limited to the attendance keys (CONTRACT §1); every other key is a 403, so a
+   * stolen HR session cannot retune speed or geofence thresholds.
    */
-  async patchRules(input: Record<string, unknown> | null | undefined): Promise<RulesPayload> {
+  async patchRules(input: Record<string, unknown> | null | undefined, user: SettingsUser): Promise<RulesPayload> {
     const body = input ?? {};
     const source = (
       body.rules && typeof body.rules === 'object' ? body.rules : body
     ) as Record<string, unknown>;
+
+    if (user.role === ROLES.HR) {
+      const forbidden = Object.keys(source).filter((k) => !(HR_RULE_KEYS as readonly string[]).includes(k));
+      if (forbidden.length) throw new ForbiddenException('FORBIDDEN_SETTING_KEY');
+    }
 
     const storedBefore = await this.readStored();
     const merged = this.mergeRules(storedBefore);
@@ -190,12 +202,13 @@ export class SettingsService {
     });
   }
 
-  /** The full envelope GET /settings returns. */
+  /** The full envelope GET /settings returns. The delivery log is tracking traffic, so HR gets an empty list. */
   async getSettingsEnvelope(user: SettingsUser): Promise<SettingsEnvelope> {
+    const hr = user.role === ROLES.HR;
     const [rules, prefRows, notifications] = await Promise.all([
       this.getRules(),
       this.prisma.userPreference.findMany({ where: { userId: user.id } }),
-      this.getNotificationLog(),
+      hr ? Promise.resolve([] as NotificationLogEntryDto[]) : this.getNotificationLog(),
     ]);
     return {
       rules,

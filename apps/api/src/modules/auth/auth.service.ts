@@ -159,6 +159,7 @@ export class AuthService {
         'places:read', 'places:write', 'attendance:read', 'attendance:export',
         'devices:read', 'devices:write', 'rules:write', 'sync:run',
         'alerts:read', 'alerts:ack', 'alerts:resolve', 'reports:read',
+        'leave:read', 'leave:decide',
       ];
     }
     if (role === 'SUPERVISOR') {
@@ -166,6 +167,14 @@ export class AuthService {
         ...base,
         'employees:read', 'places:read', 'attendance:read', 'attendance:export',
         'devices:read', 'alerts:read', 'alerts:ack', 'alerts:resolve', 'reports:read',
+      ];
+    }
+    // HR: attendance, departments and leave only — no alerts, no devices, no tracking reports.
+    if (role === 'HR') {
+      return [
+        ...base,
+        'employees:read', 'places:read', 'attendance:read', 'attendance:export',
+        'reports:read', 'rules:write', 'leave:read', 'leave:decide',
       ];
     }
     return base;

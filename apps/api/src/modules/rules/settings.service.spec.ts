@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { RULE_DEFAULTS, ALERT_TYPES } from '../../shared/constants';
 import { RulesService } from './rules.service';
 import { SettingsService, NUMERIC_RULE_KEYS } from './settings.service';
@@ -118,6 +118,8 @@ describe('GET /settings envelope', () => {
 });
 
 describe('PATCH /settings → rules.global + cache invalidation', () => {
+  const admin = { id: 'u1', role: 'ADMIN' };
+
   it('round-trips attendanceStrictReject and invalidates the RulesService 30s cache', async () => {
     const { prisma } = build();
     const rules = new RulesService(prisma);
@@ -126,7 +128,7 @@ describe('PATCH /settings → rules.global + cache invalidation', () => {
     // prime the RulesService cache
     await rules.globalOverrides();
 
-    const updated = await svc.patchRules({ rules: { attendanceStrictReject: true, cooldownS: 300 } });
+    const updated = await svc.patchRules({ rules: { attendanceStrictReject: true, cooldownS: 300 } }, admin);
     expect(updated.attendanceStrictReject).toBe(true);
     expect(updated.cooldownS).toBe(300);
 
@@ -155,11 +157,46 @@ describe('PATCH /settings → rules.global + cache invalidation', () => {
     const rules = new RulesService(prisma);
     const svc = new SettingsService(prisma, rules);
 
-    await expect(svc.patchRules({ maxSpeedKmh: 'fast' })).rejects.toBeInstanceOf(BadRequestException);
-    await expect(svc.patchRules({ maxSpeedKmh: 'fast' })).rejects.toThrow('BAD_RULE_VALUE');
-    await expect(svc.patchRules({ attendanceStrictReject: 'yes' })).rejects.toThrow('BAD_RULE_VALUE');
+    await expect(svc.patchRules({ maxSpeedKmh: 'fast' }, admin)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(svc.patchRules({ maxSpeedKmh: 'fast' }, admin)).rejects.toThrow('BAD_RULE_VALUE');
+    await expect(svc.patchRules({ attendanceStrictReject: 'yes' }, admin)).rejects.toThrow('BAD_RULE_VALUE');
 
-    const r = await svc.patchRules({ stopAlertMin: -10 });
+    const r = await svc.patchRules({ stopAlertMin: -10 }, admin);
     expect(r.stopAlertMin).toBe(0);
+  });
+});
+
+describe('PATCH /settings — the HR key allowlist (CONTRACT §1)', () => {
+  const hr = { id: 'u-hr', role: 'HR' };
+
+  const build2 = () => {
+    const fx = build();
+    const rules = new RulesService(fx.prisma);
+    return { svc: new SettingsService(fx.prisma, rules), rules, fx };
+  };
+
+  it('lets HR move the attendance keys only', async () => {
+    const { svc } = build2();
+    const updated = await svc.patchRules({ rules: { shiftGraceMin: 45, attendanceStrictReject: true } }, hr);
+    expect(updated.shiftGraceMin).toBe(45);
+    expect(updated.attendanceStrictReject).toBe(true);
+  });
+
+  it('403 FORBIDDEN_SETTING_KEY on any tracking threshold, and nothing is persisted', async () => {
+    const { svc, fx } = build2();
+    await expect(svc.patchRules({ rules: { maxSpeedKmh: 30 } }, hr)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(svc.patchRules({ rules: { maxSpeedKmh: 30 } }, hr)).rejects.toThrow('FORBIDDEN_SETTING_KEY');
+    expect(fx.settingStore.has('rules.global')).toBe(false);
+  });
+
+  it('HR settings envelope hides the alert delivery log', async () => {
+    const { svc, fx } = build2();
+    fx.logs.push({
+      id: 'n1', alertId: null, userId: 'u1', channel: 'PUSH', target: 'tok',
+      status: 'SENT', attempts: 1, error: null, payload: JSON.stringify({ type: 'SPEEDING' }),
+      createdAt: new Date('2026-01-01T00:00:00.000Z'), alert: null,
+    });
+    expect((await svc.getSettingsEnvelope(hr)).notifications).toEqual([]);
+    expect((await svc.getSettingsEnvelope({ id: 'u1', role: 'SUPERVISOR' })).notifications).toHaveLength(1);
   });
 });
