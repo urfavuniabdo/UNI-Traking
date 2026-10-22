@@ -7,6 +7,13 @@ export class AppController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Public()
+  @Get('ping')
+  ping() {
+    // Render's health probe: answers as soon as the process is up, without touching the DB.
+    return { ok: true };
+  }
+
+  @Public()
   @Get('health')
   async health() {
     let db = true;

@@ -1,0 +1,46 @@
+# Render Blueprint for UNI Tracking — one web service that hosts the NestJS API, the
+# Socket.IO realtime namespace and the built dashboard on a single origin, plus the
+# PostgreSQL it runs on. Import it from GitHub (New + → Blueprint) and Render creates
+# both resources. See docs/RENDER.md for the exact click path and the free-tier limits.
+services:
+  - type: web
+    name: uni-tracking
+    runtime: node
+    plan: free # upgrade to starter for anything beyond testing
+    region: oregon
+    rootDir: apps/api
+    autoDeployTrigger: commit
+    healthCheckPath: /api/v1/ping
+    # rootDir is apps/api, so the dashboard build has to step out of it and back in.
+    buildCommand: >-
+      npm ci
+      && cd ../../apps/dashboard && npm ci && npm run build
+      && cd ../../apps/api && npm run prisma:prod && npm run build
+    # Runs on every deploy, before the new instance takes traffic. `db push` (not
+    # `migrate deploy`) because this project keeps no migration history yet, and the
+    # seed is all upserts so re-running it never resets a changed password.
+    preDeployCommand: npx prisma db push --skip-generate --accept-data-loss && npx ts-node prisma/seed.ts
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: uni-tracking-db
+          property: connectionString
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      # Set this in the Render dashboard after the first deploy — `synced: false` keeps a
+      # Blueprint re-import from overwriting what you typed there.
+      - key: ADMIN_INIT_PASSWORD
+        synced: false
+        value: ChangeMe123!
+
+databases:
+  - name: uni-tracking-db
+    databaseName: unitracking
+    user: unitracking
+    plan: free
+    region: oregon
+    postgresMajorVersion: "17"

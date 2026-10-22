@@ -30,6 +30,11 @@ cd apps/mobile && flutter pub get && flutter run
 cd apps/api && npm run prisma:prod   # يولّد schema من schema.base.prisma بـ provider = postgresql
 ```
 
+## النشر على Render
+
+`render.yaml` في الجذر بيعرّف سيرفر واحد (NestJS + Socket.IO + الداش بورد من نفس الـ origin)
+مع PostgreSQL. الخطوات الكاملة بالظبط وحدود خطة Free في **[`docs/RENDER.md`](docs/RENDER.md)**.
+
 ## الأدوار
 
 | الدور | الرمز | الصلاحيات |
