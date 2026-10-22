@@ -181,6 +181,8 @@ void main() {
 
     expect(find.text(S.t('enter')), findsOneWidget);
     expect(find.text(S.t('identifier')), findsOneWidget);
+    // The login tile must be the shipped product mark, not a generic icon.
+    expect(find.image(const AssetImage('assets/brand/logo.png')), findsOneWidget);
     _expectNoLayoutErrors(tester, '360x780');
   });
 

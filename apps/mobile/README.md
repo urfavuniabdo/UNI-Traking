@@ -1,13 +1,13 @@
-# Traccer — mobile (Flutter)
+# UNI Tracking — mobile (Flutter)
 
 تطبيق Flutter لموظفي وسوّاقي Uni Group. **واجهة السوّاق = زر تشيك ان / تشيك أوت فقط**؛
 كل التتبع والتخزين أوف‑لاين والتنبيهات يعمل تلقائيًا في الخلفية. الموظف نفس الزر لكن على نطاق موقعه.
 
 The app is **built and verified** on this machine: `flutter analyze` reports no issues,
-all 47 tests pass, and a signed release APK is produced at:
+all 58 tests pass, and a signed release APK is produced at:
 
 ```
-D:\UNI Track\dist\traccer-0.1.0.apk
+D:\UNI Track\dist\uni-tracking-0.1.0.apk
 ```
 
 ---
@@ -28,7 +28,7 @@ D:\UNI Track\dist\traccer-0.1.0.apk
 cd apps/mobile
 flutter pub get
 flutter analyze          # no issues
-flutter test             # 47 tests, all passing
+flutter test             # 58 tests, all passing
 
 # Release APK — point API_URL at the machine running apps/api
 flutter build apk --release \
@@ -45,13 +45,20 @@ flutter build apk --release \
 Socket.IO origin is derived from `API_URL` (namespace `/rt`). The APK currently in `dist/`
 points at `http://192.168.1.186:3000/api/v1`, so the phone must be on the same Wi‑Fi as the API.
 
+**You do not need a rebuild to change servers.** الإعدادات ← **الخادم** accepts a bare domain
+(`uni-tracking.onrender.com`) or a full URL, normalises it to `…/api/v1`, and only keeps it if
+that host answers `/health`; on success the app signs the user out (the token belongs to the
+old host). `SessionStore.open()` replays the override in the tracking and catch-up isolates, so
+background work follows it too. See [`docs/RENDER.md`](../../docs/RENDER.md) for the hosted
+backend this is meant to point at.
+
 ### Install
 
 1. Start the API (`apps/api`, `npm run start:dev`, port 3000) and keep the phone on the same network.
    Windows Defender blocks inbound :3000 by default, so from an elevated PowerShell run
    `New-NetFirewallRule -DisplayName "traccer-api" -Direction Inbound -LocalPort 3000 -Protocol TCP -Action Allow`
    once; without it the app sits on "غير متصل".
-2. Copy `dist/traccer-0.1.0.apk` to the phone and install (allow "unknown sources").
+2. Copy `dist/uni-tracking-0.1.0.apk` to the phone and install (allow "unknown sources").
 3. Log in with a seeded account, e.g. `E0101` or `D0201`, using `ADMIN_INIT_PASSWORD`
    (default `ChangeMe123!` — the app forces a password change on first login).
 4. Grant location + notification permission, including **"Allow all the time"** for drivers
@@ -59,7 +66,7 @@ points at `http://192.168.1.186:3000/api/v1`, so the phone must be on the same W
    through it and names the OEM battery-exemption path (Xiaomi/Oppo/Samsung/Huawei);
    settings can reopen it.
 
-> `dist/traccer-0.1.0.apk` is signed with the project release key (`CN=Traccer`). Keep
+> `dist/uni-tracking-0.1.0.apk` is signed with the project release key (`CN=Traccer`). Keep
 > `android/key.properties` and `android/traccer-release.keystore` backed up and private —
 > both are git-ignored. On a fresh clone without them, the build falls back to the debug key.
 
