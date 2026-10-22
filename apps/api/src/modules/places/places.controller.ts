@@ -18,6 +18,8 @@ import {
   UpdateSiteDto,
   UpdateZoneDto,
 } from './dto';
+import { CurrentUser } from '../../common/auth/current-user.decorator';
+import type { AuthUser } from '../../common/auth/jwt.strategy';
 import { JwtAuthGuard, RolesGuard, Roles } from '../../common/auth/guards';
 import { ROLES } from '../../shared/constants';
 
@@ -91,8 +93,8 @@ export class PlacesController {
 
   @Roles(ROLES.ADMIN)
   @Post('sites')
-  createSite(@Body() dto: CreateSiteDto) {
-    return this.places.createSite(dto);
+  createSite(@Body() dto: CreateSiteDto, @CurrentUser() user: AuthUser) {
+    return this.places.createSite(dto, { scopeOrgUnitId: user?.scopeOrgUnitId ?? null });
   }
 
   @Roles(ROLES.ADMIN)
@@ -109,8 +111,8 @@ export class PlacesController {
 
   @Roles(ROLES.ADMIN)
   @Post('zones')
-  createZone(@Body() dto: CreateZoneDto) {
-    return this.places.createZone(dto);
+  createZone(@Body() dto: CreateZoneDto, @CurrentUser() user: AuthUser) {
+    return this.places.createZone(dto, { scopeOrgUnitId: user?.scopeOrgUnitId ?? null });
   }
 
   @Roles(ROLES.ADMIN)
