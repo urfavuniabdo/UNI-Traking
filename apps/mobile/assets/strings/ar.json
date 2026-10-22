@@ -91,5 +91,17 @@
   "roleEmployee": "موظف",
   "logoutConfirmHint": "اضغط مرة أخرى لتأكيد الخروج",
   "cancel": "إلغاء",
-  "confirmLogout": "تأكيد الخروج"
+  "confirmLogout": "تأكيد الخروج",
+  "out": "خروج",
+  "statusPresent": "حاضر",
+  "statusMissingCheckout": "بدون انصراف",
+  "statusAutoClosed": "إغلاق تلقائي",
+  "statusAbsent": "غائب",
+  "statusOpenShift": "وردية مفتوحة",
+  "shiftDuration": "مدة الوردية",
+  "pullToRefresh": "اسحب للتحديث",
+  "alertOpenStatus": "قيد المعالجة",
+  "alertAckStatus": "تم الاستلام",
+  "alertResolvedStatus": "تم إغلاقه",
+  "alertHandledAt": "تمت المعالجة"
 }
