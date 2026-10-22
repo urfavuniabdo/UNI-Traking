@@ -5,8 +5,7 @@
   Flutter template ships adaptive icons — swap them for the Traccer mark before release.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    package="com.unigroup.traccer">
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Location & background tracking (the driver's tracking runs while the screen is off) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -72,7 +71,7 @@
             android:name="id.flutter.flutter_background_service.BackgroundService"
             android:foregroundServiceType="location"
             android:exported="false"
-            tools:replace="android:foregroundServiceType" />
+            tools:replace="android:foregroundServiceType,android:exported" />
 
         <!-- Flutter tooling metadata (do not remove) -->
         <meta-data
