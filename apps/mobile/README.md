@@ -110,6 +110,10 @@ assets/
 android/app/src/main/res/        # branded launcher: legacy PNGs + adaptive icon (mipmap-anydpi-v26)
                                  # over #2563EB, and the blue splash in drawable/launch_background.xml
                                  # master art: docs/brand/traccer-icon-1024.png
+android/app/proguard-rules.pro   # REQUIRED keep rules: Flutter turns R8 on for release, and the
+                                 # dart:jni bridges in the Kotlin plugins (shared_preferences) look
+                                 # up kotlin.coroutines.* by name — without this the app hangs on
+                                 # the splash screen with NoSuchMethodError on a real device.
 ```
 
 ## Background behavior
