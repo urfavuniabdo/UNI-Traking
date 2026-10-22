@@ -3,108 +3,119 @@
 تطبيق Flutter لموظفي وسوّاقي Uni Group. **واجهة السوّاق = زر تشيك ان / تشيك أوت فقط**؛
 كل التتبع والتخزين أوف‑لاين والتنبيهات يعمل تلقائيًا في الخلفية. الموظف نفس الزر لكن على نطاق موقعه.
 
-> ⚠️ **Flutter/Dart SDK is not installed on the machine that produced this code.**
-> The app was written against pinned package versions and the binding contract
-> (`docs/CONTRACT.md`), but **it has NOT been `pub get`‑ed, `analyze`‑d, `test`‑ed, or
-> `build`‑ed**. Treat the first `flutter build` as a review pass — expect at most minor
-> version‑range or plugin‑API tweaks, all of which are isolated to the adapter classes in
-> `lib/services/adapters/`.
+The app is **built and verified** on this machine: `flutter analyze` reports 0 errors,
+all 39 tests pass, and a signed release APK is produced at:
+
+```
+D:\UNI Track\dist\traccer-0.1.0.apk
+```
 
 ---
 
-## What you must run (nothing here was executed)
+## Verified toolchain
+
+| Tool | Version |
+|---|---|
+| Flutter / Dart | 3.47.7 / 3.13 (stable) |
+| JDK | 17 (Temurin 17.0.20.1+1) |
+| Android SDK | platform 36, build-tools 36.0.0, NDK 28.2.13676358 |
+| Gradle / AGP / Kotlin | 9.3.1 / 9.1.0 / 2.4.0 |
+| minSdk / targetSdk | 24 / 36 |
+
+## Build & test
 
 ```bash
-# 0. Install Flutter 3.16+ / Dart 3.2+ (https://docs.flutter.dev/get-started/install)
-flutter --version
-
-# 1. From THIS directory (apps/mobile)
 cd apps/mobile
 flutter pub get
-flutter analyze                 # 0 errors expected; fix any version-range nudges here
+flutter analyze          # 0 errors (a few info-level style lints only)
+flutter test             # 39 tests, all passing
 
-# 2. Unit tests — pure Dart/VM, no device/emulator needed
-flutter test
-#   Covers: motion classifier, buffer eviction (sqflite_common_ffi), batch payload (500 cap /
-#   ordering / dedupe), wire JSON == CONTRACT §4, Cairo date formatting, fence distance,
-#   and the golden-constants gate (see below).
-
-# 3. Firebase config (push) — generates lib/firebase_options.dart
-#    (Android needs android/app/google-services.json, iOS needs GoogleService-Info.plist)
-dart pub global activate flutterfire_cli
-flutterfire configure --project=<your-firebase-project-id>
-
-# 4. Build & run
-# Android (emulator uses API_URL default http://10.0.2.2:3000/api/v1):
-flutter run -d android                                    # debug on attached device/emulator
-flutter build apk --release --dart-define=API_URL=https://api.traccer.eg/api/v1
-
-# iOS (run from macOS; the API_URL for a simulator is host loopback):
-flutter build ios --release --dart-define=API_URL=http://127.0.0.1:3000/api/v1
-#   For a real iPhone use your LAN/tunnel host, e.g. --dart-define=API_URL=http://192.168.1.20:3000/api/v1
-
-# 5. BEFORE shipping: the golden-constants gate must pass
-node ../../tools/generate_constants_golden.mjs   # regenerate packages/shared/golden/constants.json
-flutter test test/constants_golden_test.dart     # fails if Dart mirror drifts from packages/shared
+# Release APK — point API_URL at the machine running apps/api
+flutter build apk --release \
+  --dart-define=API_URL=http://192.168.1.186:3000/api/v1 \
+  --dart-define=APP_VERSION=0.1.0
+# → build/app/outputs/flutter-apk/app-release.apk
 ```
-
-## Configuration
 
 | dart-define | default | notes |
 |---|---|---|
-| `API_URL` | `http://10.0.2.2:3000/api/v1` | Android‑emulator alias to the host's `localhost:3000` (apps/api `PORT=3000`). Change per environment. |
+| `API_URL` | `http://10.0.2.2:3000/api/v1` | Emulator alias to host `localhost:3000`. Use the PC's LAN IP for a real phone. |
 | `APP_VERSION` | `0.1.0` | Sent in `/devices/register`. |
 
-Socket.IO base origin is derived from `API_URL` (namespace `/rt`).
+Socket.IO origin is derived from `API_URL` (namespace `/rt`). The APK currently in `dist/`
+points at `http://192.168.1.186:3000/api/v1`, so the phone must be on the same Wi‑Fi as the API.
+
+### Install
+
+1. Start the API (`apps/api`, `npm run start:dev`, port 3000) and keep the phone on the same network.
+2. Copy `dist/traccer-0.1.0.apk` to the phone and install (allow "unknown sources").
+3. Log in with a seeded account, e.g. `E0101` or `D0201`, using `ADMIN_INIT_PASSWORD`
+   (default `ChangeMe123!` — the app forces a password change on first login).
+4. Grant location + notification permission, including **"Allow all the time"** for drivers
+   so tracking survives the app being backgrounded.
+
+> The release build is signed with the Android **debug key** so it installs directly.
+> Replace it with a private keystore before publishing to Google Play.
+
+## Firebase / push (optional)
+
+Push is the only feature that needs project-specific config. Without it the app still
+logs in, checks in/out, tracks, buffers offline, and receives in-app socket alerts; the app
+simply cannot be woken by FCM when fully closed.
+
+1. Create a Firebase Android app with package `com.unigroup.traccer`.
+2. Place `google-services.json` in `android/app/` (and `GoogleService-Info.plist` in `ios/Runner/`
+   for iOS).
+3. Rebuild. `lib/firebase_options.dart` intentionally returns `null` on mobile so the native
+   config files are used.
+
+## Tests
+
+`flutter test` covers the motion classifier, offline buffer eviction, batch payload
+(500 cap / ordering / dedupe), wire JSON vs `docs/CONTRACT.md`, Cairo date formatting, fence
+distance, golden constants, and a render smoke test for the login + home screens.
 
 ## Structure
 
 ```
 lib/
-  main.dart                      # bootstrap: prefs, Firebase (best-effort), WorkManager, APP_KILLED
+  main.dart                      # prefs, Firebase (best-effort), WorkManager, unclean-kill report
   app.dart                       # MaterialApp.router, RTL, Cairo theme, push+socket wiring
   router.dart                    # auth / mustChangePassword / onboarding redirects
-  theme.dart                     # #2563eb, white bg, cards r16, thin blue shadow, dark tokens
-  core/
-    traccer_constants.dart       # EXACT mirror of packages/shared/src/constants.ts
-    api_client.dart              # Dio + bearer + single-flight refresh + typed errors + backoff
-    api_error.dart               # FENCE_VIOLATION / ALREADY_CHECKED_IN / NO_OPEN_RECORD ...
-    session_store.dart           # SharedPreferences (keys obfuscated — see limitation note)
-    app_config.dart  app_strings.dart  cairo_time.dart  geo.dart
-  data/
-    app_database.dart  position_dao.dart   # write-ahead offline buffer
-    batch_builder.dart                     # pure §4 payload builder (500 cap / dedupe / order)
-  models/  position.dart user.dart attendance.dart alert.dart
+  theme.dart                     # #2563eb, white bg, cards r16, Cairo (bundled)
+  core/                          # config, API client, errors, session store, Cairo time, geo
+  data/                          # SQLite write-ahead buffer + batch builder
+  models/                        # user, attendance, position, alert
   services/
-    tracking_service.dart        # background isolate engine + @vm:entry-point handlers
-    motion_classifier.dart       # EMA .35 + 3-sample hysteresis (§5)
-    alert_service.dart           # FCM + local notifications + token → /devices/register
-    realtime_service.dart        # Socket.IO notify:me (§7)
-    sync_scheduler.dart          # WorkManager catch-up + keep-alive + APP_KILLED
-    adapters/                    # ONE seam per plugin: location, connectivity, battery,
-                                 #   device, notifications, background_service
-  state/providers.dart           # Riverpod: session, api, auth, home (the ONE button), tracking
+    tracking_service.dart        # background isolate engine
+    motion_classifier.dart       # EMA + hysteresis
+    alert_service.dart           # FCM + local notifications
+    realtime_service.dart        # Socket.IO notify:me
+    sync_scheduler.dart          # WorkManager catch-up + keep-alive
+    adapters/                    # one seam per plugin
+  state/providers.dart           # Riverpod auth + home (the ONE button) + tracking
   features/                      # login, change_password, onboarding, home, history,
-                                 #   notifications, settings
-assets/strings/ar.json           # Arabic UI copy
-test/                            # pure-Dart unit tests
+                                 # notifications, settings
+assets/
+  fonts/                         # Cairo 400/600/700/800 + OFL license (offline UI)
+  strings/ar.json
 ```
 
-## Contract points worth a backend tweak
+## Background behavior
 
-1. **Employee history list**: the app reads `GET /attendance` for personal history; §1 says
-   EMPLOYEE/DRIVER are auto-scoped to their own records, but §3 doesn't list a dedicated
-   `GET /attendance/me` paged route. A personal-history endpoint would be cleaner than relying
-   on role-scoping of the admin list.
-2. **Password change**: §2/§8 describe `changeOnLogin=true` but no change-password route. The
-   app POSTs `/auth/change-password` (see `api_client.changePassword`); add it or point us at
-   the real path.
-3. **`mustChangePassword` on the login user**: §2 `user` shape doesn't carry it; the app accepts
-   either `mustChangePassword` or `changeOnLogin` on the login/me payload. Pick one and put it in
-   the `user` object.
+- Android foreground service type `location`, with `ACCESS_BACKGROUND_LOCATION` requested
+  at runtime for drivers.
+- WorkManager registers a ~15-minute catch-up and a network-constrained flush.
+- On some OEMs (Xiaomi/Oppo/Samsung) the user must disable battery optimisation for reliable
+  background tracking; the onboarding screen explains the permission flow.
 
 ## Session store security
 
 Tokens live in `shared_preferences` with *obfuscated* keys — this is NOT secure storage. For
 production move to the platform keystore / Keychain; the whole app reads through `SessionStore`,
 so it's a one-file swap (see the class doc).
+
+## iOS
+
+The iOS scaffold and `Info.plist` (background location, notifications, URL scheme) are present,
+but an iOS build requires macOS + Xcode and was not produced here.
