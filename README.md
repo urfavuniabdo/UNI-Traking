@@ -19,8 +19,9 @@
 cp .env.example .env
 cd apps/api && npm install && npm run prisma:dev && npm run seed && npm run dev
 cd apps/dashboard && npm install && npm run dev
-# apps/mobile: يحتاج Flutter SDK (غير مثبّت على هذا الجهاز حاليًا)
+# apps/mobile: Flutter 3.47 + JDK 17 + Android SDK 36 — انظر apps/mobile/README.md
 cd apps/mobile && flutter pub get && flutter run
+# APK جاهز للتثبيت: dist/traccer-0.1.0.apk (+ .sha256) — يحتاج الـ API يعمل على نفس الشبكة
 ```
 
 قاعدة البيانات في التطوير: **SQLite** (`file:../../_data/traccer.db`) بدون حاجة لـ Docker أو PostGIS — كل حسابات الهندسة (نقطة داخل نطاق، مسافة، تبسيط خط السير) بتتعمل في التطبيق عن طريق `@turf/turf`، فالتبديل للإنتاج سطر واحد:

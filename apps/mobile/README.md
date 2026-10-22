@@ -3,8 +3,8 @@
 تطبيق Flutter لموظفي وسوّاقي Uni Group. **واجهة السوّاق = زر تشيك ان / تشيك أوت فقط**؛
 كل التتبع والتخزين أوف‑لاين والتنبيهات يعمل تلقائيًا في الخلفية. الموظف نفس الزر لكن على نطاق موقعه.
 
-The app is **built and verified** on this machine: `flutter analyze` reports 0 errors,
-all 39 tests pass, and a signed release APK is produced at:
+The app is **built and verified** on this machine: `flutter analyze` reports no issues,
+all 47 tests pass, and a signed release APK is produced at:
 
 ```
 D:\UNI Track\dist\traccer-0.1.0.apk
@@ -27,8 +27,8 @@ D:\UNI Track\dist\traccer-0.1.0.apk
 ```bash
 cd apps/mobile
 flutter pub get
-flutter analyze          # 0 errors (a few info-level style lints only)
-flutter test             # 39 tests, all passing
+flutter analyze          # no issues
+flutter test             # 47 tests, all passing
 
 # Release APK — point API_URL at the machine running apps/api
 flutter build apk --release \
@@ -48,11 +48,16 @@ points at `http://192.168.1.186:3000/api/v1`, so the phone must be on the same W
 ### Install
 
 1. Start the API (`apps/api`, `npm run start:dev`, port 3000) and keep the phone on the same network.
+   Windows Defender blocks inbound :3000 by default, so from an elevated PowerShell run
+   `New-NetFirewallRule -DisplayName "traccer-api" -Direction Inbound -LocalPort 3000 -Protocol TCP -Action Allow`
+   once; without it the app sits on "غير متصل".
 2. Copy `dist/traccer-0.1.0.apk` to the phone and install (allow "unknown sources").
 3. Log in with a seeded account, e.g. `E0101` or `D0201`, using `ADMIN_INIT_PASSWORD`
    (default `ChangeMe123!` — the app forces a password change on first login).
 4. Grant location + notification permission, including **"Allow all the time"** for drivers
-   so tracking survives the app being backgrounded.
+   so tracking survives the app being backgrounded. The first-run onboarding screen walks
+   through it and names the OEM battery-exemption path (Xiaomi/Oppo/Samsung/Huawei);
+   settings can reopen it.
 
 > `dist/traccer-0.1.0.apk` is signed with the project release key (`CN=Traccer`). Keep
 > `android/key.properties` and `android/traccer-release.keystore` backed up and private —
@@ -74,7 +79,9 @@ simply cannot be woken by FCM when fully closed.
 
 `flutter test` covers the motion classifier, offline buffer eviction, batch payload
 (500 cap / ordering / dedupe), wire JSON vs `docs/CONTRACT.md`, Cairo date formatting, fence
-distance, golden constants, and a render smoke test for the login + home screens.
+distance, golden constants, and a render smoke test that pumps every screen (login, home,
+history, notifications, onboarding, settings sheet) down to a 320×480 phone and fails on
+any layout overflow.
 
 ## Structure
 
@@ -100,12 +107,16 @@ lib/
 assets/
   fonts/                         # Cairo 400/600/700/800 + OFL license (offline UI)
   strings/ar.json
+android/app/src/main/res/        # branded launcher: legacy PNGs + adaptive icon (mipmap-anydpi-v26)
+                                 # over #2563EB, and the blue splash in drawable/launch_background.xml
+                                 # master art: docs/brand/traccer-icon-1024.png
 ```
 
 ## Background behavior
 
 - Android foreground service type `location`, with `ACCESS_BACKGROUND_LOCATION` requested
-  at runtime for drivers.
+  at runtime for drivers. Promotion to foreground happens only after the check-in gate, so a
+  boot-start with no open shift stops silently instead of crash-looping on Android 14+.
 - WorkManager registers a ~15-minute catch-up and a network-constrained flush.
 - On some OEMs (Xiaomi/Oppo/Samsung) the user must disable battery optimisation for reliable
   background tracking; the onboarding screen explains the permission flow.
