@@ -32,7 +32,7 @@ flutter test             # 58 tests, all passing
 
 # Release APK — point API_URL at the machine running apps/api
 flutter build apk --release \
-  --dart-define=API_URL=http://192.168.1.186:3000/api/v1 \
+  --dart-define=API_URL=http://192.168.1.41:3000/api/v1 \
   --dart-define=APP_VERSION=0.1.0
 # → build/app/outputs/flutter-apk/app-release.apk
 ```
@@ -43,7 +43,10 @@ flutter build apk --release \
 | `APP_VERSION` | `0.1.0` | Sent in `/devices/register`. |
 
 Socket.IO origin is derived from `API_URL` (namespace `/rt`). The APK currently in `dist/`
-points at `http://192.168.1.186:3000/api/v1`, so the phone must be on the same Wi‑Fi as the API.
+points at `http://192.168.1.41:3000/api/v1`, so the phone must be on the same Wi‑Fi as the API.
+Your router hands that address out by DHCP, so it can change; if the app stops reaching the
+server, read the PC's current IPv4 (`ipconfig`) and enter it under الإعدادات ← الخادم instead
+of rebuilding. Reserving the PC's MAC address on the router makes the baked address stable.
 
 **You do not need a rebuild to change servers.** الإعدادات ← **الخادم** accepts a bare domain
 (`uni-tracking.onrender.com`) or a full URL, normalises it to `…/api/v1`, and only keeps it if
