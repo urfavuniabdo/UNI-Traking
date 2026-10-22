@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Header, HttpCode, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, Post, Query, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { AttendanceService } from './attendance.service';
 import { AttendanceQueryDto, CheckDto } from './dto';
 import { JwtAuthGuard, RolesGuard, Roles } from '../../common/auth/guards';
@@ -45,7 +46,14 @@ export class AttendanceController {
 
   @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
   @Get()
-  list(@Query() q: AttendanceQueryDto) {
+  async list(@Query() q: AttendanceQueryDto, @Res({ passthrough: true }) res: Response) {
+    // ?format=csv → raw CSV text (dashboard downloadCsv() reads res.text() in real mode);
+    // same payload /attendance/export serves.
+    if (q.format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="attendance${q.from ? `-${q.from}` : ''}.csv"`);
+      return this.attendance.exportCsv(q);
+    }
     return this.attendance.list(q);
   }
 }

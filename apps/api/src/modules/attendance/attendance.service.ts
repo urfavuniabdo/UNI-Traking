@@ -18,8 +18,8 @@ import {
   type AlertDispatcher,
   type RealtimePublisher,
 } from '../../common/contracts';
-import { workDateOf } from '../../common/utils';
-import { AR_ALERT_TEXT, ATTENDANCE_STATUS, SEVERITY } from '../../shared/constants';
+import { parseJson, workDateOf } from '../../common/utils';
+import { AR_ALERT_TEXT, ATTENDANCE_STATUS, ROLES, SEVERITY } from '../../shared/constants';
 import type { AttendanceQueryDto, CheckDto } from './dto';
 import { zonedLocalToUtc } from './tz';
 
@@ -32,6 +32,7 @@ type EmpWithPlaces = {
   name: string;
   kind: string;
   phone: string;
+  orgUnitId: string | null;
   siteId: string | null;
   zoneId: string | null;
   site: { id: string; name: string; lat: number; lng: number; radiusM: number; polygon: string | null; strictReject: boolean } | null;
@@ -44,8 +45,26 @@ interface EvalResult {
   fenceName: string | null;
 }
 
+/** Attendance row + joins needed to map the dashboard `/attendance` record shape. */
+type AttRow = {
+  id: string;
+  employeeId: string;
+  workDate: string;
+  siteId: string | null;
+  zoneId: string | null;
+  status: string;
+  checkInAt: Date | null;
+  checkOutAt: Date | null;
+  distanceToSiteM: number | null;
+  employee: { id: string; externalId: string; name: string; kind: string; phone: string } | null;
+  site: { id: string; name: string } | null;
+};
+
 @Injectable()
 export class AttendanceService {
+  /** Cached `rules.global` Setting row (same ~30s pattern as RulesService.globalOverrides). */
+  private settingsCache: { at: number; value: { attendanceStrictReject?: boolean } } | null = null;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly geo: GeoService,
@@ -81,9 +100,75 @@ export class AttendanceService {
     return { inside: hit.inside, distanceToCenterM: hit.distanceToCenterM, fenceName: hit.fenceName };
   }
 
-  private isStrict(emp: EmpWithPlaces): boolean {
-    // Site.strictReject covers employees; Zone has no equivalent field yet (see report).
-    return emp.kind !== 'DRIVER' && !!emp.site?.strictReject;
+  /**
+   * Strict reject = `site.strictReject` (employees) OR the global
+   * `rules.global` Setting `attendanceStrictReject` (applies to every fence,
+   * zones included — the Zone table has no strictReject column).
+   */
+  private async isStrict(emp: EmpWithPlaces): Promise<boolean> {
+    if (emp.kind !== 'DRIVER' && emp.site?.strictReject) return true;
+    return this.globalStrictReject();
+  }
+
+  /** Global override stored in Setting(key='rules.global') as a JSON string — cached ~30s. */
+  private async globalStrictReject(): Promise<boolean> {
+    const now = Date.now();
+    if (this.settingsCache && now - this.settingsCache.at < 30_000) {
+      return !!this.settingsCache.value.attendanceStrictReject;
+    }
+    let value: { attendanceStrictReject?: boolean } = {};
+    try {
+      const row = await this.prisma.setting.findUnique({ where: { key: 'rules.global' } });
+      value = parseJson<{ attendanceStrictReject?: boolean }>(row?.value, {});
+    } catch {
+      value = {};
+    }
+    this.settingsCache = { at: now, value };
+    return !!value.attendanceStrictReject;
+  }
+
+  /** Phone of a SUPERVISOR user in the employee's org unit, falling back to any ADMIN. */
+  private async supervisorPhone(emp: EmpWithPlaces): Promise<string | null> {
+    try {
+      if (emp.orgUnitId) {
+        const sup = await this.prisma.user.findFirst({
+          where: { role: ROLES.SUPERVISOR, disabled: false, employee: { orgUnitId: emp.orgUnitId } },
+          select: { employee: { select: { phone: true } } },
+          orderBy: { createdAt: 'asc' },
+        });
+        if (sup?.employee?.phone) return sup.employee.phone;
+      }
+      const admin = await this.prisma.user.findFirst({
+        where: { role: ROLES.ADMIN, disabled: false, employee: { isNot: null } },
+        select: { employee: { select: { phone: true } } },
+        orderBy: { createdAt: 'asc' },
+      });
+      return admin?.employee?.phone ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 422 with the rich JSON body the mobile client parses (api_error.dart
+   * FenceViolationException.fromJson): message / fenceName / distanceToCenterM /
+   * allowedFences[] / supervisorPhone|phone / statusCode (+ code for dashboard ApiError).
+   */
+  private async raiseFenceViolation(
+    emp: EmpWithPlaces,
+    evalRes: EvalResult,
+    allowed: Array<{ id: string; name: string; kind: 'SITE' | 'ZONE' }>,
+  ): Promise<never> {
+    const body = {
+      code: 'FENCE_VIOLATION',
+      statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+      message: AR_ALERT_TEXT.CHECK_IN_OUT_OF_FENCE.title,
+      fenceName: evalRes.fenceName,
+      distanceToCenterM: evalRes.distanceToCenterM,
+      allowedFences: allowed,
+      supervisorPhone: await this.supervisorPhone(emp),
+    };
+    throw new HttpException(body, HttpStatus.UNPROCESSABLE_ENTITY);
   }
 
   async checkIn(userId: string, dto: CheckDto) {
@@ -98,8 +183,8 @@ export class AttendanceService {
     const allowed = this.allowedFences(emp);
     const status = evalRes.inside ? ATTENDANCE_STATUS.VALID : ATTENDANCE_STATUS.OUT_OF_FENCE;
 
-    if (!evalRes.inside && this.isStrict(emp)) {
-      throw new HttpException('FENCE_VIOLATION', HttpStatus.UNPROCESSABLE_ENTITY);
+    if (!evalRes.inside && (await this.isStrict(emp))) {
+      await this.raiseFenceViolation(emp, evalRes, allowed);
     }
 
     const data = {
@@ -146,8 +231,8 @@ export class AttendanceService {
     const allowed = this.allowedFences(emp);
     const outOfFence = !evalRes.inside;
 
-    if (outOfFence && this.isStrict(emp)) {
-      throw new HttpException('FENCE_VIOLATION', HttpStatus.UNPROCESSABLE_ENTITY);
+    if (outOfFence && (await this.isStrict(emp))) {
+      await this.raiseFenceViolation(emp, evalRes, allowed);
     }
 
     const status = outOfFence
@@ -332,8 +417,22 @@ export class AttendanceService {
     if (f.from) dateRange.gte = f.from;
     if (f.to) dateRange.lte = f.to;
     if (Object.keys(dateRange).length) where.workDate = dateRange;
-    if (f.status) where.status = f.status;
+    if (f.status) {
+      if (f.status === ATTENDANCE_STATUS.OUT_OF_FENCE) {
+        where.status = ATTENDANCE_STATUS.OUT_OF_FENCE;
+      } else if (f.status === ATTENDANCE_STATUS.VALID) {
+        where.status = { not: ATTENDANCE_STATUS.OUT_OF_FENCE };
+      } else if (f.status === ATTENDANCE_STATUS.MISSING_CHECKOUT) {
+        where.OR = [
+          { status: { in: [ATTENDANCE_STATUS.MISSING_CHECKOUT, ATTENDANCE_STATUS.AUTO_CLOSED] } },
+          { checkInAt: { not: null }, checkOutAt: null },
+        ];
+      } else {
+        where.status = f.status;
+      }
+    }
     if (f.siteId) where.siteId = f.siteId;
+    if (f.zoneId) where.zoneId = f.zoneId;
     if (f.userId) {
       const u = await this.prisma.user.findUnique({ where: { id: f.userId }, select: { employeeId: true } });
       where.employeeId = u?.employeeId ?? '__none__';
@@ -341,24 +440,104 @@ export class AttendanceService {
     return where;
   }
 
+  /**
+   * GET /attendance (admin list) — envelope the dashboard Attendance page renders:
+   * `{ records, total, page, pageSize, stats }`. `records[]` keys follow
+   * apps/dashboard/src/api/types.ts AttendanceRecord exactly (userId = employee id).
+   */
   async list(f: AttendanceQueryDto) {
     const where = await this.buildWhere(f);
     const page = Math.max(1, Number(f.page ?? 1));
     const pageSize = Math.min(200, Math.max(1, Number(f.pageSize ?? 50)));
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.attendanceRecord.findMany({
-        where,
-        include: {
-          employee: { select: { id: true, externalId: true, name: true, kind: true, phone: true } },
-          site: { select: { id: true, name: true } },
-        },
-        orderBy: [{ workDate: 'desc' }, { checkInAt: 'desc' }],
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      this.prisma.attendanceRecord.count({ where }),
+    const rows = (await this.prisma.attendanceRecord.findMany({
+      where,
+      include: {
+        employee: { select: { id: true, externalId: true, name: true, kind: true, phone: true } },
+        site: { select: { id: true, name: true } },
+      },
+      orderBy: [{ workDate: 'desc' }, { checkInAt: 'desc' }],
+      take: 20000,
+    })) as unknown as AttRow[];
+
+    const zoneIds = [...new Set(rows.map((r) => r.zoneId).filter((z): z is string => !!z))];
+    const zoneNames = new Map<string, string>();
+    if (zoneIds.length) {
+      const zs = await this.prisma.zone.findMany({ where: { id: { in: zoneIds } }, select: { id: true, name: true } });
+      for (const z of zs) zoneNames.set(z.id, z.name);
+    }
+    const replayedKeys = await this.replayedKeys(rows);
+    const records = rows.map((r) => this.toRecordDto(r, zoneNames, replayedKeys));
+
+    // stats: computed over the whole filtered set — the page uses sites[]/zones[] to fill filter dropdowns.
+    const [sites, zones, staffed] = await Promise.all([
+      this.prisma.site.findMany({ where: { active: true }, select: { id: true, name: true } }).catch(() => []),
+      this.prisma.zone.findMany({ where: { active: true }, select: { id: true, name: true } }).catch(() => []),
+      this.prisma.employee.findMany({ where: { active: true, siteId: { not: null } }, select: { siteId: true } }).catch(() => []),
     ]);
-    return { items, total, page, pageSize };
+    const expectedBySite = new Map<string, number>();
+    for (const e of staffed) if (e.siteId) expectedBySite.set(e.siteId, (expectedBySite.get(e.siteId) ?? 0) + 1);
+    const stats = {
+      present: rows.filter((r) => r.checkInAt).length,
+      missingCheckout: rows.filter((r) => r.checkInAt && !r.checkOutAt).length,
+      outOfFence: rows.filter((r) => r.status === ATTENDANCE_STATUS.OUT_OF_FENCE).length,
+      sites: sites.map((s) => {
+        const c = rows.filter((r) => r.siteId === s.id).length;
+        return { id: s.id, name: s.name, count: c, present: c, expected: expectedBySite.get(s.id) ?? 0 };
+      }),
+      zones: zones.map((z) => {
+        const c = rows.filter((r) => r.zoneId === z.id).length;
+        return { id: z.id, name: z.name, count: c, present: c };
+      }),
+    };
+    return { records: records.slice((page - 1) * pageSize, page * pageSize), total: records.length, page, pageSize, stats };
+  }
+
+  /** Attendance rows without a `replayed` column — derive from buffered/stale positions of the same work day. */
+  private async replayedKeys(rows: Array<{ employeeId: string; workDate: string }>): Promise<Set<string>> {
+    const out = new Set<string>();
+    if (!rows.length) return out;
+    const dates = rows.map((r) => r.workDate).sort();
+    try {
+      const hits = await this.prisma.position.findMany({
+        where: {
+          employeeId: { in: [...new Set(rows.map((r) => r.employeeId))] },
+          clientTs: { gte: new Date(`${dates[0]}T00:00:00Z`), lte: new Date(`${dates[dates.length - 1]}T23:59:59.999Z`) },
+          OR: [{ buffered: true }, { stale: true }],
+        },
+        select: { employeeId: true, clientTs: true },
+      });
+      for (const h of hits) out.add(`${h.employeeId}|${workDateOf(h.clientTs, TZ())}`);
+    } catch {
+      /* positions table unreachable in stub state — everything stays non-replayed */
+    }
+    return out;
+  }
+
+  private toRecordDto(
+    r: AttRow,
+    zoneNames: Map<string, string>,
+    replayedKeys: Set<string>,
+  ) {
+    const outOfFence = r.status === ATTENDANCE_STATUS.OUT_OF_FENCE;
+    const zoneName = r.zoneId ? zoneNames.get(r.zoneId) ?? null : null;
+    return {
+      id: r.id,
+      userId: r.employeeId,
+      userName: r.employee?.name ?? null,
+      siteId: r.siteId ?? null,
+      siteName: r.site?.name ?? null,
+      zoneId: r.zoneId ?? null,
+      zoneName,
+      date: r.workDate,
+      checkInTs: r.checkInAt ? r.checkInAt.toISOString() : null,
+      checkOutTs: r.checkOutAt ? r.checkOutAt.toISOString() : null,
+      checkInStatus: outOfFence ? ATTENDANCE_STATUS.OUT_OF_FENCE : ATTENDANCE_STATUS.VALID,
+      checkOutStatus: r.checkOutAt ? (outOfFence ? ATTENDANCE_STATUS.OUT_OF_FENCE : ATTENDANCE_STATUS.VALID) : null,
+      distanceToCenterM: r.distanceToSiteM ?? null,
+      fenceName: r.site?.name ?? zoneName,
+      exception: r.status !== ATTENDANCE_STATUS.VALID,
+      replayed: replayedKeys.has(`${r.employeeId}|${r.workDate}`),
+    };
   }
 
   async exportCsv(f: AttendanceQueryDto): Promise<string> {

@@ -28,7 +28,10 @@ export class AttendanceQueryDto {
   @IsOptional() @IsString() to?: string;
   @IsOptional() @IsString() userId?: string;
   @IsOptional() @IsString() siteId?: string;
+  @IsOptional() @IsString() zoneId?: string;
   @IsOptional() @IsString() status?: string;
+  /** 'csv' → GET /attendance returns raw CSV text (dashboard downloadCsv reads res.text()). */
+  @IsOptional() @IsString() format?: string;
   @IsOptional() @Type(() => Number) page?: number;
   @IsOptional() @Type(() => Number) pageSize?: number;
 }
