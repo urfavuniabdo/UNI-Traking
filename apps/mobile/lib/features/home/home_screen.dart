@@ -81,6 +81,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
                   _StatusCard(home: home, isDark: isDark, user: auth.user?.name ?? ''),
+                  if (home.notice != null) ...<Widget>[
+                    const SizedBox(height: 10),
+                    _AmberNotice(
+                      message: home.notice!,
+                      isDark: isDark,
+                      onDismiss: controller.dismissNotice,
+                    ),
+                  ],
                   if (home.amberOutOfFence) ...<Widget>[
                     const SizedBox(height: 10),
                     _AmberNotice(message: S.t('outOfFenceNotice'), isDark: isDark),
@@ -569,9 +577,10 @@ class _AutoIndicators extends StatelessWidget {
 }
 
 class _AmberNotice extends StatelessWidget {
-  const _AmberNotice({required this.message, required this.isDark});
+  const _AmberNotice({required this.message, required this.isDark, this.onDismiss});
   final String message;
   final bool isDark;
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -590,11 +599,16 @@ class _AmberNotice extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
               style: TextStyle(color: ink, fontWeight: FontWeight.w600, fontSize: 13),
             ),
           ),
+          if (onDismiss != null)
+            IconButton(
+              tooltip: S.t('dismiss'),
+              visualDensity: VisualDensity.compact,
+              icon: Icon(Icons.close, color: ink, size: 18),
+              onPressed: onDismiss,
+            ),
         ],
       ),
     );

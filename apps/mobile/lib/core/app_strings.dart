@@ -30,6 +30,7 @@ class S {
   static const Map<String, String> _fallback = <String, String>{
     'appName': 'UNI Tracking',
     'checkIn': 'تشيك ان',
+    'dismiss': 'إخفاء',
     'checkOut': 'تشيك أوت',
     'insideFence': 'داخل النطاق',
     'outsideFence': 'خارج النطاق',

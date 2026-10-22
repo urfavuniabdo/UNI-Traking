@@ -212,7 +212,7 @@ class HomeState {
     DateTime? shiftStart,
     String? motionState,
     bool? busy,
-    String? notice,
+    Object? notice = _unset,
     Object? fenceViolation = _unset,
     bool? amberOutOfFence,
   }) =>
@@ -227,7 +227,7 @@ class HomeState {
         shiftStart: shiftStart ?? this.shiftStart,
         motionState: motionState ?? this.motionState,
         busy: busy ?? this.busy,
-        notice: notice ?? this.notice,
+        notice: notice == _unset ? this.notice : notice as String?,
         fenceViolation:
             fenceViolation == _unset ? this.fenceViolation : fenceViolation as FenceViolationException?,
         amberOutOfFence: amberOutOfFence ?? this.amberOutOfFence,
@@ -391,6 +391,8 @@ class HomeController extends StateNotifier<HomeState> {
   }
 
   void dismissFenceViolation() => state = state.copyWith(fenceViolation: null);
+
+  void dismissNotice() => state = state.copyWith(notice: null);
 
   /// Emergency hold-to-stop (requires the driver to hold 3s). Fires immediately after.
   Future<void> emergencyStopTracking() async {
