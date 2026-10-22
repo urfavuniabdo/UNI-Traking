@@ -345,10 +345,20 @@ class HomeController extends StateNotifier<HomeState> {
     } on FenceViolationException catch (e) {
       state = state.copyWith(busy: false, fenceViolation: e);
     } on AlreadyCheckedInException {
-      state = state.copyWith(busy: false, checkedIn: true, notice: 'أنت مسجّل بالفعل');
-      if (_ref.read(sessionStoreProvider).user?.isDriver ?? false) {
+      // A 409 only proves the server holds today's record — it may already be closed, and
+      // then a button that says تشيك أوت can never succeed. Re-read today instead of
+      // assuming, so the CTA always matches the server's truth.
+      await refreshToday();
+      final bool open = state.checkedIn;
+      if (open && (_ref.read(sessionStoreProvider).user?.isDriver ?? false)) {
         await BackgroundServiceAdapter.instance.startTracking();
       }
+      state = state.copyWith(
+        busy: false,
+        notice: open
+            ? 'دوامك مفتوح بالفعل — اضغط تشيك أوت لإنهائه'
+            : 'تم تسجيل حضورك وانتهى اليوم — لا يمكن بدء دوام آخر بنفس التاريخ',
+      );
     } on NetworkException {
       state = state.copyWith(busy: false, notice: 'لا يوجد اتصال — حاول لاحقًا');
     } on ApiException catch (e) {
