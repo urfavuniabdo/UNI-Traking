@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 /// Design language (README): Cairo font, brand #2563eb, white background, cards r16 with
 /// thin blue shadows, calm/simple, Arabic RTL, dark-mode tokens.
@@ -37,9 +36,7 @@ class TraccerTheme {
       surface: dark ? const Color(0xFF0B1220) : surfaceLight,
     );
 
-    final TextTheme base = GoogleFonts.cairoTextTheme(
-      ThemeData(brightness: brightness).textTheme,
-    );
+    final TextTheme base = ThemeData(brightness: brightness, fontFamily: 'Cairo').textTheme;
     final Color ink = dark ? Colors.white : inkLight;
     final TextTheme text = base.copyWith(
       bodyLarge: base.bodyLarge?.copyWith(color: ink),
@@ -52,13 +49,14 @@ class TraccerTheme {
       colorScheme: scheme,
       scaffoldBackgroundColor: dark ? const Color(0xFF0B1220) : surfaceLight,
       textTheme: text,
-      fontFamily: GoogleFonts.cairo().fontFamily,
+      fontFamily: 'Cairo',
       appBarTheme: AppBarTheme(
         centerTitle: true,
         backgroundColor: Colors.transparent,
         foregroundColor: dark ? Colors.white : inkLight,
         elevation: 0,
-        titleTextStyle: GoogleFonts.cairo(
+        titleTextStyle: TextStyle(
+          fontFamily: 'Cairo',
           fontSize: 18,
           fontWeight: FontWeight.w700,
           color: dark ? Colors.white : inkLight,
@@ -77,7 +75,11 @@ class TraccerTheme {
         style: FilledButton.styleFrom(
           backgroundColor: brand,
           foregroundColor: Colors.white,
-          textStyle: GoogleFonts.cairo(fontSize: 20, fontWeight: FontWeight.w800),
+          textStyle: const TextStyle(
+            fontFamily: 'Cairo',
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+          ),
           padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 32),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
         ),
@@ -85,7 +87,7 @@ class TraccerTheme {
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: brand,
-          textStyle: GoogleFonts.cairo(fontWeight: FontWeight.w700),
+          textStyle: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w700),
         ),
       ),
       dividerTheme: DividerThemeData(color: brand.withOpacity(0.12)),
