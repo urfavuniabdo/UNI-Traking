@@ -411,8 +411,27 @@ class HomeController extends StateNotifier<HomeState> {
 /// Small helper so home can schedule the buffer keep-alive without importing workmanager.
 Future<void> initKeepAliveFromHome() => scheduleKeepAlive();
 
+/// The API speaks CONTRACT codes; the driver speaks Arabic. Every screen funnels
+/// failures through here so a code never reaches the UI raw.
+const Map<String, String> _errorAr = <String, String>{
+  'INVALID_CREDENTIALS': 'رقم الموظف أو كلمة المرور غير صحيحة',
+  'ACCOUNT_DISABLED': 'الحساب موقوف — راجع المشرف',
+  'NO_EMPLOYEE_PROFILE': 'لا يوجد ملف حضور مرتبط بهذا الحساب',
+  'CURRENT_PASSWORD_REQUIRED': 'أدخل كلمة مرورك الحالية أولًا',
+  'INVALID_REFRESH_TOKEN': 'انتهت الجلسة، سجّل الدخول مرة أخرى',
+  'BAD_TOKEN': 'انتهت الجلسة، سجّل الدخول مرة أخرى',
+  'ALREADY_CHECKED_IN': 'دوامك مفتوح بالفعل — سجّل الخروج أولًا',
+  'NO_OPEN_RECORD': 'لا يوجد دوام مفتوح لتسجيل خروجه',
+  'DEVICE_NOT_REGISTERED': 'لم يُسجَّل هذا الجهاز — أعد تسجيل الدخول',
+  'DEVICE_ID_REQUIRED': 'تعذّر تعريف الجهاز — أعد تشغيل التطبيق',
+};
+
 String _ar(ApiException e) {
-  if (e is UnauthorizedException) return e.message;
   if (e is NetworkException) return 'تعذر الاتصال';
+  final String? code = e.code;
+  if (code != null) {
+    final String? known = _errorAr[code];
+    if (known != null) return known;
+  }
   return e.message;
 }

@@ -382,8 +382,13 @@ class ApiClient {
     final Object? body = e.response?.data;
     final Map<String, Object?> json =
         body is Map<String, Object?> ? body : <String, Object?>{};
-    final String code = (json['code'] ?? json['error'] ?? '') as String;
     final String message = (json['message'] ?? 'خطأ في الاتصال') as String;
+    // Nest's ConflictException/NotFoundException carry the CONTRACT code as the exception
+    // *message* with no `code` field, so a SCREAMING_SNAKE message has to be read as one —
+    // otherwise the typed handlers (double check-in, no open shift) never fire.
+    final String code = ((json['code'] ?? '') as String).isNotEmpty
+        ? json['code'] as String
+        : (_codeLike.hasMatch(message) ? message : '');
 
     if (status == 401) return UnauthorizedException(message: message);
     switch (code) {
@@ -397,6 +402,8 @@ class ApiClient {
         return ApiException(message: message, statusCode: status, code: code.isEmpty ? null : code, data: json);
     }
   }
+
+  static final RegExp _codeLike = RegExp(r'^[A-Z][A-Z0-9_]{2,}$');
 
   void close() => _dio.close(force: true);
 }
