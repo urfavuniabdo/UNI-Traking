@@ -252,6 +252,7 @@ class HomeController extends StateNotifier<HomeState> {
   final Ref _ref;
   StreamSubscription<bool>? _gpsSwitchSub;
   StreamSubscription<bool>? _dataSub;
+  final List<String> _unpostedToggles = <String>[];
 
   Future<void> _bootstrap() async {
     await refreshToday();
@@ -355,13 +356,21 @@ class HomeController extends StateNotifier<HomeState> {
   }
 
   /// §2 toggle-event: this is what raises the admin's GPS_OFF/DATA_OFF alert server-side.
+  /// DATA_OFF is exactly the moment we have no network, so failed posts are kept and
+  /// replayed oldest-first on the next transition — otherwise the admin only ever learns
+  /// that the connection came back.
   Future<void> _postToggle(String kind) async {
     if (!_ref.read(sessionStoreProvider).isLoggedIn) return;
+    _unpostedToggles.add(kind);
+    if (_unpostedToggles.length > 20) _unpostedToggles.removeAt(0);
     try {
-      await _ref
-          .read(apiClientProvider)
-          .toggleEvent(deviceId: await _ref.read(deviceIdProvider.future), kind: kind);
-    } on Exception {/* offline — the heartbeat still carries the real gpsEnabled flag */}
+      final String deviceId = await _ref.read(deviceIdProvider.future);
+      final ApiClient api = _ref.read(apiClientProvider);
+      for (final String pending in List<String>.of(_unpostedToggles)) {
+        await api.toggleEvent(deviceId: deviceId, kind: pending);
+        _unpostedToggles.remove(pending);
+      }
+    } on Exception {/* still offline — the next transition retries the whole queue */}
   }
 
   @override
