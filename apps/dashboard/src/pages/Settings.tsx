@@ -70,7 +70,7 @@ export default function SettingsPage() {
               <Field label="سماح نهاية الوردية (دقيقة)" value={rules.shiftGraceMin} onChange={(v) => setRules({ ...rules, shiftGraceMin: v })} />
               <Field label="أقصى عمر لإعادة البث (ساعة)" value={rules.replayMaxAgeHours} onChange={(v) => setRules({ ...rules, replayMaxAgeHours: v })} />
               <label className="col-span-2 flex items-center justify-between gap-2 font-bold ink2" style={{ fontSize: '.82rem' }}>
-                رفض التشيك ان خارج النطاق (strictReject)
+                رفض بدء الوردية خارج النطاق (strictReject)
                 <Toggle checked={rules.attendanceStrictReject} onChange={(v) => setRules({ ...rules, attendanceStrictReject: v })} label="strictReject" />
               </label>
               <div className="col-span-2">

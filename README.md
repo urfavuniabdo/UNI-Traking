@@ -10,7 +10,7 @@
 |---|---|
 | `apps/api` | NestJS API + Socket.IO realtime + rules engine + push fan-out + sync worker |
 | `apps/dashboard` | داش بورد الإدارة (React + Vite + Tailwind، RTL، نفس هوية `my asset tracking`) |
-| `apps/mobile` | تطبيق Flutter (موظف / سواق) — واجهة السواق = تشيك ان/أوت فقط |
+| `apps/mobile` | تطبيق Flutter (موظف / سواق) — واجهة السواق = بدء وردية / إنهاء وردية فقط |
 | `packages/shared` | ثوابت وأسماء الأحداث/الأنواع المشتركة (TypeScript) |
 | `docs` | العقود والمعمارية (`docs/CONTRACT.md` هو المرجع الملزم) |
 | `_references` | مراجع مفتوحة المصدر مسحوبة للدراسة (Traccar, OwnTracks, traccar-client-android) — **لا تُستورد في البناء** |
@@ -43,8 +43,8 @@ cd apps/api && npm run prisma:prod   # يولّد schema من schema.base.prisma
 |---|---|---|
 | Admin | `ADMIN` | كل شيء: موظفون، نطاقات، قواعد، مزامنة، أجهزة، حذف |
 | Supervisor | `SUPERVISOR` | مراقبة، ack/resolve للتنبيهات، اتصال بالسواق، تقارير |
-| Employee | `EMPLOYEE` | تشيك ان/أوت في نطاق موقعه، سجله الشخصي |
-| Driver | `DRIVER` | تشيك ان/أوت في نطاق منطقته + تتبع تلقائي في الخلفية |
+| Employee | `EMPLOYEE` | بدء وردية / إنهاء وردية في نطاق موقعه، سجله الشخصي |
+| Driver | `DRIVER` | بدء وردية / إنهاء وردية في نطاق منطقته + تتبع تلقائي في الخلفية |
 
 ## أنواع التنبيهات (كلها تدفع Push + Realtime بدون استثناء)
 

@@ -111,7 +111,7 @@ export const ATTENDANCE_STATUS = {
 export const AR_ALERT_TEXT: Record<AlertType, { title: string; body: string }> = {
   GEOFENCE_EXIT: { title: 'خروج عن المنطقة المحددة', body: 'خرجت عن نطاق منطقتك المصرّح لك بها' },
   GEOFENCE_ENTER: { title: 'دخول المنطقة', body: 'عدت إلى نطاق منطقتك' },
-  CHECK_IN_OUT_OF_FENCE: { title: 'تشيك ان خارج النطاق', body: 'تم تسجيل حضورك خارج النطاق المحدد' },
+  CHECK_IN_OUT_OF_FENCE: { title: 'بدء وردية خارج النطاق', body: 'بدأت ورديتك خارج النطاق المحدد' },
   SPEEDING: { title: 'تجاوز السرعة', body: 'السرعة أعلى من الحد المسموح في هذه المنطقة' },
   HARSH_BRAKING: { title: 'فرملة مفاجئة', body: 'تم رصد فرملة قوية مفاجئة' },
   HARSH_ACCELERATION: { title: 'تسارع مفاجئ', body: 'تم رصد تسارع قوي مفاجئ' },
@@ -121,7 +121,7 @@ export const AR_ALERT_TEXT: Record<AlertType, { title: string; body: string }> =
   APP_OFFLINE: { title: 'التطبيق غير متصل', body: 'لم تصل بيانات من جهازك منذ فترة' },
   HEARTBEAT_MISSING: { title: 'انقطاع نبض الجهاز', body: 'الجهاز لم يرسل نبضًا في الموعد المحدد' },
   BUFFER_REPLAYED: { title: 'استعادة بيانات أوف لاين', body: 'تم رفع خط السير المخزّن محليًا وإظهاره كأنه لحظي' },
-  CHECKOUT_MISSING: { title: 'نهاية وردية بدون تشيك أوت', body: 'انتهت الوردية ولم يتم تسجيل الخروج' },
+  CHECKOUT_MISSING: { title: 'إنهاء وردية غير مسجّل', body: 'انتهت الوردية ولم يتم تسجيل إنهاؤها' },
   ROUTE_GAP: { title: 'فجوة في خط السير', body: 'انقطاع في تسجيل المسار أثناء الرحلة' },
   IDLE_LONG: { title: 'سكون طويل', body: 'لم يتم رصد أي حركة لفترة طويلة' },
 };

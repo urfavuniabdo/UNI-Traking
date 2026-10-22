@@ -125,8 +125,8 @@ export default function AttendancePage() {
               <tr className="border-b muted" style={{ borderColor: 'var(--line)', fontSize: '.74rem' }}>
                 <th className="p-2.5 text-start">الشخص</th>
                 <th className="p-2.5 text-start">الموقع / النطاق</th>
-                <th className="p-2.5 text-start">تشيك ان</th>
-                <th className="p-2.5 text-start">تشيك أوت</th>
+                <th className="p-2.5 text-start">بدء وردية</th>
+                <th className="p-2.5 text-start">إنهاء وردية</th>
                 <th className="p-2.5 text-start">حالة الحضور</th>
                 <th className="p-2.5 text-start">المسافة للنطاق</th>
               </tr>
