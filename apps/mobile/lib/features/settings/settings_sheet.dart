@@ -572,7 +572,7 @@ class _ServerDialogState extends State<_ServerDialog> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           Text(
-            S.t('serverEditHint'),
+            _busy ? S.t('serverProbing') : S.t('serverEditHint'),
             style: TextStyle(color: muted, fontSize: 12, height: TraccerTheme.arabicLineHeight),
           ),
           const SizedBox(height: 10),

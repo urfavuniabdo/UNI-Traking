@@ -58,11 +58,18 @@ class ApiClient {
   void rebase() => _dio.options.baseUrl = AppConfig.apiUrl;
 
   /// Liveness probe for the server picker. Never throws: `false` means "unreachable or unhealthy".
+  ///
+  /// A sleeping Render instance accepts the connection immediately but holds it for up to a
+  /// minute while the container boots, so the old 8 s read timed out on a server that was
+  /// actually coming up — and the picker rolled the tester back to a dead LAN address.
   Future<bool> healthy() async {
     try {
       final Response<Object?> res = await _dio.get<Object?>(
         '/health',
-        options: Options(receiveTimeout: const Duration(seconds: 8)),
+        options: Options(
+          connectTimeout: const Duration(seconds: 20),
+          receiveTimeout: const Duration(seconds: 75),
+        ),
       );
       final Object? body = res.data;
       return res.statusCode == 200 && body is Map && body['ok'] == true;
