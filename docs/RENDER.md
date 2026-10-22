@@ -31,10 +31,19 @@ git push origin master
 
 1. [dashboard.render.com](https://dashboard.render.com) ← **New +** ← **Blueprint**.
 2. اختر الريبو، وافق على صلاحية Render لو أول مرة.
-3. Render بيقرأ `render.yaml` نفسه ويعرض مصدرين: `uni-tracking` (web) و `uni-tracking-db` (Postgres).
+3. Render بيقرأ `render.yaml` نفسه ويعرض مصدر واحد: سيرفر `uni-tracking` (ويب).
+   الداتابيز بقى تتربط يدوي لأن خطة Free بيسمحوا فيها بداتابيز PostgreSQL **واحدة** نشطة
+   لكل workspace — لو slot محجوز (زي ما هو الحال دلوقتي بداتابيز مشروع تاني) فإن
+   `fromDatabase` بيفشل والـ Blueprint بيلغاء إنشاء السيرفر كله.
 4. عدّل `ADMIN_INIT_PASSWORD` من شاشة الـ Blueprint قبل الـ Apply (ده الباسورد اللي بيتعمل
    لكل حسابات السييد).
-5. **Apply** ← أول deploy بيبدأ.
+5. **Apply** ← السيرفر بيتخلق (بداية فاشلة طبيعية: `DATABASE_URL` فاضي).
+6. من **Environment** للسيرفر: الصق connection string بتاع الـ Postgres النشط في
+   `DATABASE_URL` ← **Save** ← **Manual Deploy** ← `Build and deploy`.
+   ⚠️ دي نفس الداتابيز اللي عليها مشروعك التاني: Prisma بيبني جدولاته الخاصة باسمها
+   وما بيلمسش جدول المشاريع التانية، بس حذف الداتابيز دي هيمسحي بيانات UNI Tracking وراه.
+   لو عايز عزل حقيقي: ارفع الداتابيز لخطة مدفوعة أو حط `fromDatabase` تاني بعد ما الـ
+   slot يتحرر.
 
 اللي بيحصل في الـ deploy (مظبوط في `render.yaml`):
 

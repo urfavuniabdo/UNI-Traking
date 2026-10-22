@@ -1,7 +1,7 @@
 # Render Blueprint for UNI Tracking — one web service that hosts the NestJS API, the
-# Socket.IO realtime namespace and the built dashboard on a single origin, plus the
-# PostgreSQL it runs on. Import it from GitHub (New + → Blueprint) and Render creates
-# both resources. See docs/RENDER.md for the exact click path and the free-tier limits.
+# Socket.IO realtime namespace and the built dashboard on a single origin. Import it from
+# GitHub (New + → Blueprint) and Render creates the service; the PostgreSQL it runs on is
+# supplied through DATABASE_URL (see docs/RENDER.md for the free-tier limit behind that).
 services:
   - type: web
     name: uni-tracking
@@ -28,10 +28,13 @@ services:
     # all upserts), so paying them again on every free-tier wake is what keeps this deployable.
     startCommand: npx prisma db push --skip-generate --accept-data-loss && npx ts-node prisma/seed.ts && node dist/main.js
     envVars:
+      # Render's free tier keeps only ONE active Postgres per workspace and this account's slot
+      # is already taken by an existing database, so this service points at that instance rather
+      # than creating its own. `synced: false` means the connection string pasted in the
+      # dashboard is never overwritten by a later Blueprint sync.
       - key: DATABASE_URL
-        fromDatabase:
-          name: uni-tracking-db
-          property: connectionString
+        synced: false
+        value: ""
       - key: NODE_ENV
         value: production
       - key: JWT_SECRET
@@ -43,11 +46,3 @@ services:
       - key: ADMIN_INIT_PASSWORD
         synced: false
         value: ChangeMe123!
-
-databases:
-  - name: uni-tracking-db
-    databaseName: unitracking
-    user: unitracking
-    plan: free
-    region: oregon
-    postgresMajorVersion: "17"
