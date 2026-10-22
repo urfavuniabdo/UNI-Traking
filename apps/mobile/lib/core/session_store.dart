@@ -24,6 +24,8 @@ class SessionStore {
 
   static Future<SessionStore> open() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
+    // Replays the tester's server override in this isolate before any ApiClient is built.
+    AppConfig.applyOverride(prefs.getString(AppConfig.serverUrlKey));
     return SessionStore(prefs);
   }
 
@@ -89,6 +91,21 @@ class SessionStore {
 
   bool get darkMode => _prefs.getBool(AppConfig.darkModeKey) ?? false;
   Future<void> setDarkMode(bool v) => _prefs.setBool(AppConfig.darkModeKey, v);
+
+  // --- API host override so a tester can follow a redeployed backend without a rebuild.
+  //     Deliberately survives clear(): it is device config, not identity. ---
+  String? get serverUrl => _prefs.getString(AppConfig.serverUrlKey);
+  Future<void> setServerUrl(String? v) async {
+    final String s = (v ?? '').trim();
+    if (s.isEmpty || s == AppConfig.buildApiUrl) {
+      await _prefs.remove(AppConfig.serverUrlKey);
+      AppConfig.applyOverride(null);
+      return;
+    }
+    final String normalized = AppConfig.normalize(s);
+    await _prefs.setString(AppConfig.serverUrlKey, normalized);
+    AppConfig.applyOverride(normalized);
+  }
 
   bool get isLoggedIn => accessToken != null && refreshToken != null;
 

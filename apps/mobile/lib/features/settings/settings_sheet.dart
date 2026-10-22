@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/api_client.dart';
+import '../../core/app_config.dart';
 import '../../core/app_strings.dart';
 import '../../core/session_store.dart';
 import '../../models/user.dart';
@@ -90,6 +92,21 @@ class _SettingsSheetState extends ConsumerState<_SettingsSheet> {
     router.go('/login');
   }
 
+  /// A new server means new tokens, so a verified change always lands on the login screen.
+  Future<void> _editServer() async {
+    final ApiClient api = ref.read(apiClientProvider);
+    final SessionStore session = ref.read(sessionStoreProvider);
+    final bool? switched = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => _ServerDialog(api: api, session: session),
+    );
+    if (switched != true || !mounted) return;
+    final AuthController auth = ref.read(authControllerProvider.notifier);
+    final GoRouter router = GoRouter.of(context);
+    Navigator.of(context).pop();
+    unawaited(_completeSignOut(auth, router));
+  }
+
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
@@ -154,6 +171,15 @@ class _SettingsSheetState extends ConsumerState<_SettingsSheet> {
               title: S.t('offlineBuffer'),
               value: '${home.pendingCount} ${S.t('points')}',
               accent: home.pendingCount > 0 ? TraccerTheme.amber : muted,
+            ),
+            const SizedBox(height: 12),
+            _InfoRow(
+              icon: Icons.dns_outlined,
+              title: S.t('serverTitle'),
+              subtitle: S.t('serverSubtitle'),
+              value: Uri.parse(AppConfig.apiUrl).host,
+              accent: session.serverUrl == null ? muted : TraccerTheme.amber,
+              onTap: () => unawaited(_editServer()),
             ),
             const SizedBox(height: 12),
             _SwitchRow(
@@ -309,6 +335,7 @@ class _InfoRow extends StatelessWidget {
     required this.accent,
     this.subtitle,
     this.value,
+    this.onTap,
   });
 
   final IconData icon;
@@ -316,6 +343,7 @@ class _InfoRow extends StatelessWidget {
   final String? subtitle;
   final String? value;
   final Color accent;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -323,7 +351,7 @@ class _InfoRow extends StatelessWidget {
     final bool isDark = theme.brightness == Brightness.dark;
     final Color muted = isDark ? const Color(0xFF94A3B8) : TraccerTheme.muted;
 
-    return ConstrainedBox(
+    final Widget content = ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 52),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -353,17 +381,39 @@ class _InfoRow extends StatelessWidget {
             if (value != null)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                constraints: const BoxConstraints(maxWidth: 150),
                 decoration: BoxDecoration(
                   color: accent.withValues(alpha: isDark ? 0.18 : 0.10),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
                   value!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
                   style: TextStyle(color: accent, fontWeight: FontWeight.w700, fontSize: 12),
                 ),
               ),
+            if (onTap != null) ...<Widget>[
+              const SizedBox(width: 6),
+              Icon(
+                Icons.edit_outlined,
+                size: 16,
+                color: muted,
+              ),
+            ],
           ],
         ),
+      ),
+    );
+
+    if (onTap == null) return content;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(TraccerTheme.cardRadius),
+        child: content,
       ),
     );
   }
@@ -458,6 +508,100 @@ class _LogoutConfirm extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Points the app at another backend (e.g. a Render deploy) without rebuilding the APK.
+/// The candidate URL is only kept if `/health` answers on it.
+class _ServerDialog extends StatefulWidget {
+  const _ServerDialog({required this.api, required this.session});
+
+  final ApiClient api;
+  final SessionStore session;
+
+  @override
+  State<_ServerDialog> createState() => _ServerDialogState();
+}
+
+class _ServerDialogState extends State<_ServerDialog> {
+  late final TextEditingController _url = TextEditingController(text: AppConfig.apiUrl);
+  String? _error;
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _url.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveAndProbe() async {
+    final String? previous = widget.session.serverUrl;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    await widget.session.setServerUrl(_url.text);
+    widget.api.rebase();
+    if (!await widget.api.healthy()) {
+      await widget.session.setServerUrl(previous);
+      widget.api.rebase();
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = S.t('serverUnreachable');
+        });
+      }
+      return;
+    }
+    if (mounted) Navigator.of(context).pop(true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final Color muted = theme.brightness == Brightness.dark
+        ? const Color(0xFF94A3B8)
+        : TraccerTheme.muted;
+    return AlertDialog(
+      title: Text(S.t('serverEditTitle'), style: theme.textTheme.titleLarge),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Text(
+            S.t('serverEditHint'),
+            style: TextStyle(color: muted, fontSize: 12, height: TraccerTheme.arabicLineHeight),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _url,
+            enabled: !_busy,
+            keyboardType: TextInputType.url,
+            textDirection: TextDirection.ltr,
+            textAlign: TextAlign.left,
+            autofillHints: const <String>[AutofillHints.url],
+            decoration: InputDecoration(
+              hintText: 'https://uni-tracking.onrender.com/api/v1',
+              errorText: _error,
+              isDense: true,
+              border: const OutlineInputBorder(),
+            ),
+          ),
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.of(context).pop(false),
+          child: Text(S.t('cancel')),
+        ),
+        FilledButton(
+          onPressed: _busy ? null : () => unawaited(_saveAndProbe()),
+          child: _busy
+              ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : Text(S.t('serverSave')),
         ),
       ],
     );

@@ -53,6 +53,23 @@ class ApiClient {
   /// Guard so concurrent 401s trigger exactly one `/auth/refresh`.
   Future<String?>? _refreshFlight;
 
+  /// Repoint this client at the server currently held in [AppConfig] (Settings override).
+  void rebase() => _dio.options.baseUrl = AppConfig.apiUrl;
+
+  /// Liveness probe for the server picker. Never throws: `false` means "unreachable or unhealthy".
+  Future<bool> healthy() async {
+    try {
+      final Response<Object?> res = await _dio.get<Object?>(
+        '/health',
+        options: Options(receiveTimeout: const Duration(seconds: 8)),
+      );
+      final Object? body = res.data;
+      return res.statusCode == 200 && body is Map && body['ok'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ===========================================================================
   // Auth & devices (§2)
   // ===========================================================================

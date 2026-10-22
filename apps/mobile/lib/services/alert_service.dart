@@ -5,7 +5,6 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
 import '../core/api_client.dart';
-import '../core/app_config.dart';
 import '../core/session_store.dart';
 import '../core/traccer_constants.dart';
 import '../models/alert.dart';
@@ -147,6 +146,3 @@ class DeviceAdapterPlatform {
     }
   }
 }
-
-/// Convenience for the API base used in comments/tests.
-const String kApiBase = AppConfig.apiUrl;

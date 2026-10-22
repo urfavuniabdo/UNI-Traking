@@ -6,7 +6,6 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../core/api_client.dart';
-import '../core/app_config.dart';
 import '../core/geo.dart';
 import '../core/session_store.dart';
 import '../core/traccer_constants.dart';
@@ -381,7 +380,3 @@ Future<bool> trackingOnIosBackground(ServiceInstance service) async {
   // restarted by workmanager / a launch if the task is suspended.
   return true;
 }
-
-/// Kept so AppConfig import is used even when tree-shaken; documents the source of the URL
-/// the isolate's [ApiClient] will dial.
-const String kIsolateApiUrl = AppConfig.apiUrl;
