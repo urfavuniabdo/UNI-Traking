@@ -397,3 +397,64 @@ describe('GET /positions/route — dashboard envelope (rename)', () => {
     expect(route.employeeId).toBe(employeeId);
   });
 });
+
+/** An office employee: same device, same JWT, no tracking of any kind. */
+async function mkOfficeEmployee() {
+  seq += 1;
+  const org = await prisma.orgUnit.create({ data: { code: `org-${seq}`, name: 'Org' } });
+  const site = await prisma.site.create({
+    data: { code: `site-${seq}`, name: 'Office', orgUnitId: org.id, lat: 30.0444, lng: 31.2357, radiusM: 250 },
+  });
+  const emp = await prisma.employee.create({
+    data: { externalId: `ext-${seq}`, name: `موظف ${seq}`, phone: `+20100000001${seq}`, kind: 'EMPLOYEE', orgUnitId: org.id, siteId: site.id },
+  });
+  const user = await prisma.user.create({
+    data: { identifier: `u-${seq}`, passwordHash: 'x', role: 'EMPLOYEE', name: emp.name, employeeId: emp.id },
+  });
+  const device = await prisma.device.create({
+    data: { deviceId: `dev-${seq}`, employeeId: emp.id, userId: user.id, platform: 'android', tracking: false, gpsEnabled: true, online: true, batteryPct: 55, lastSeenAt: new Date() },
+  });
+  return { employeeId: emp.id, userId: user.id, deviceId: device.deviceId };
+}
+
+describe('POST /positions/batch — an office employee is never tracked (CONTRACT §3/§4)', () => {
+  it('refuses the batch outright: no position row, no trip, no alert, no live broadcast', async () => {
+    const { employeeId, deviceId } = await mkOfficeEmployee();
+    const t0 = Date.now();
+    // The same points that open a trip + raise SPEEDING for a driver.
+    await expect(
+      positions.ingestBatch({
+        deviceId,
+        batchSeq: 1,
+        positions: [
+          { clientTs: iso(t0), lat: 30.0, lng: 31.23, speed: 60, accuracy: 5 },
+          { clientTs: iso(t0 + 15000), lat: 30.02, lng: 31.23, speed: 190, accuracy: 5 },
+          { clientTs: iso(t0 + 30000), lat: 30.04, lng: 31.23, speed: 0, accuracy: 5 },
+        ],
+      }),
+    ).rejects.toThrow('TRACKING_NOT_ALLOWED_FOR_EMPLOYEE');
+
+    expect(await prisma.position.count({ where: { employeeId } })).toBe(0);
+    expect(await prisma.trip.count({ where: { employeeId } })).toBe(0);
+    expect(await prisma.stopEvent.count({ where: { employeeId } })).toBe(0);
+    expect(await prisma.routeLine.count({ where: { employeeId } })).toBe(0);
+    expect(await prisma.alert.count({ where: { employeeId } })).toBe(0);
+    expect(mockPublisher.position).not.toHaveBeenCalled();
+  });
+
+  it('a driver on the same code path is still tracked, so the guard is per kind not global', async () => {
+    const { employeeId, deviceId } = await mkDriver({ lat: 30.0, lng: 30.0, radiusM: 100000 });
+    const t0 = Date.now();
+    const res = await positions.ingestBatch({
+      deviceId,
+      batchSeq: 1,
+      positions: [
+        { clientTs: iso(t0), lat: 30.0, lng: 30.0, speed: 60, accuracy: 5 },
+        { clientTs: iso(t0 + 15000), lat: 30.02, lng: 30.0, speed: 190, accuracy: 5 },
+        { clientTs: iso(t0 + 30000), lat: 30.04, lng: 30.0, speed: 0, accuracy: 5 },
+      ],
+    });
+    expect(res.accepted).toBe(3);
+    expect(await prisma.trip.count({ where: { employeeId } })).toBeGreaterThan(0);
+  });
+});

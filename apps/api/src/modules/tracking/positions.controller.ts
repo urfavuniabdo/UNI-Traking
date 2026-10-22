@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard, Roles, RolesGuard } from '../../common/auth/guards';
+import { ROLES } from '../../shared/constants';
 import { PositionsService } from './positions.service';
 import type { PositionBatchDto } from './dto';
 
@@ -15,26 +16,30 @@ export class PositionsController {
     return this.positions.ingestBatch(body);
   }
 
+  /** Route/trips are tracking reads: ADMIN+SUPERVISOR only — a driver must not pull another
+   *  driver's day, and HR has no tracking surface at all (CONTRACT §1). */
   @Get('positions/route')
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
   route(@Query('userId') userId: string, @Query('date') date: string): Promise<unknown> {
     if (!userId || !date) throw new BadRequestException('USERID_AND_DATE_REQUIRED');
     return this.positions.route(userId, date);
   }
 
   @Get('positions/live')
-  @Roles('ADMIN', 'SUPERVISOR')
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
   live(@Query('since') since?: string): Promise<unknown> {
     return this.positions.liveSnapshot(since);
   }
 
   @Get('trips')
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
   trips(@Query('userId') userId: string, @Query('from') from?: string, @Query('to') to?: string): Promise<unknown> {
     if (!userId) throw new BadRequestException('USERID_REQUIRED');
     return this.positions.trips(userId, from, to);
   }
 
   @Get('drivers/presence')
-  @Roles('ADMIN', 'SUPERVISOR')
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
   presence(): Promise<unknown> {
     return this.positions.presence();
   }

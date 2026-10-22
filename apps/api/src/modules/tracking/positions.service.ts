@@ -2,7 +2,7 @@ import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nest
 import { Interval } from '@nestjs/schedule';
 import { createHash } from 'node:crypto';
 import type { MotionState } from '../../shared/constants';
-import { SEVERITY, type AlertType } from '../../shared/constants';
+import { EMPLOYEE_KIND, SEVERITY, type AlertType } from '../../shared/constants';
 import { PrismaService } from '../../common/prisma.service';
 import { GeoService } from '../../common/geo/geo.service';
 import { json, parseJson, round, workDateOf, isValidLat, isValidLng } from '../../common/utils';
@@ -143,6 +143,11 @@ export class PositionsService {
     }
 
     const ctx = await this.rules.context(employeeId);
+
+    // An office EMPLOYEE is attendance-only (CONTRACT §3/§4): nothing he uploads may open a
+    // trip, a stop, a route line, an alert or a live marker. His app never starts the location
+    // service, so reaching here means a stale/misconfigured client — refuse before any write.
+    if (ctx && ctx.kind !== EMPLOYEE_KIND.DRIVER) throw new BadRequestException('TRACKING_NOT_ALLOWED_FOR_EMPLOYEE');
 
     // batchSeq: monotonic update, but out-of-order (lower) batches are still ingested.
     if (device) {

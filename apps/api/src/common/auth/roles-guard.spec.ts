@@ -63,7 +63,8 @@ describe('controller metadata — the HR split', () => {
 
   it('HR is closed off trips, live tracking, the fence map and the alert log', () => {
     for (const method of ['route', 'mileage', 'liveKpis']) expect(rolesOf(ReportsController, method)).not.toContain(ROLES.HR);
-    for (const method of ['live', 'presence']) expect(rolesOf(PositionsController, method)).not.toContain(ROLES.HR);
+    for (const method of ['live', 'presence', 'route', 'trips'])
+      expect(rolesOf(PositionsController, method)).toEqual([ROLES.ADMIN, ROLES.SUPERVISOR]);
     expect(rolesOf(PlacesController, 'fences')).not.toContain(ROLES.HR);
     expect(rolesOf(PlacesController, 'geofenceCheck')).not.toContain(ROLES.HR);
     expect(rolesOf(EmployeesController, 'live')).not.toContain(ROLES.HR);

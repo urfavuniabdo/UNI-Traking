@@ -108,6 +108,7 @@ Base URL: `/api/v1` — كل الطلبات محمية بـ `Authorization: Bear
 - وصول أي دفعة فيها نقاط `buffered` يُطلق تنبيه **`BUFFER_REPLAYED`** (INFO، `replayed: true`) بمحتوى `meta: { count, buffered, replayGap }` (المعدود يشمل الفجوة المُغلقة أمام آخر نقطة لحظية).
 - Response: `{ accepted, deduped, rejected: [{ index, reason }], alertsRaised, nextServerTs }` — `reason` مثل `BAD_CLIENTTS`/`BAD_COORDS`/`BAD_SPEED`/`NO_EMPLOYEE`/`BATCH_*`.
 - `GET /positions/live?since=<ts>` → `{ positions: LivePosition[], serverTs }` (المُوسَّع، انظر §7). `GET /positions/route?userId&date` → `{ userId, employeeId, date, userName, distanceKm, replayed, replayedPoints, geojson, points[], stops[], gaps[], positions[], pointCount }` (GeoJSON `[lng,lat]` + فجوات).
+- **قراءة التتبع للـ ADMIN/SUPERVISOR فقط:** `GET /positions/live` و`/positions/route` و`/trips` و`/drivers/presence` كلها `@Roles(ADMIN,SUPERVISOR)` — توكن سواق ما ينفعش يسحب يوم سواق تاني، والـ HR ما لوش حاجة معاهم خالص (§1).
 
 ## 5. Motion-state classifier (مشروع مشترك API/Flutter)
 
