@@ -11,17 +11,21 @@ https://<اسم-الخدمة>.onrender.com/api/v1/health
 
 ## 1) قبل ما تفتح Render (مرة واحدة)
 
-Render بيسحب الكود من GitHub فقط، فلازم الريبو يكون مرفوع:
+Render بيسحب الكود من GitHub فقط. ده اتعمل خلاص:
+
+```
+origin = https://github.com/urfavuniabdo/UNI-Traking.git   (فرع master، ريبو public)
+```
+
+لو اتغير حاجة في الريبو بعدين:
 
 ```bash
 cd "D:/UNI Track"
-git remote add origin https://github.com/<user>/<repo>.git
-git push -u origin master
+git push origin master
 ```
 
-لو `git push` طلب credential: اعمل Personal Access Token من
-GitHub ← Settings ← Developer settings ← Personal access tokens (scope: `repo`) واستخدمه
-ككلمة السر.
+اللي بيتدفع هو اللي متسجّل في الـ commits فقط — أي تعديلات لسه ما اتعملهاش commit على
+`apps/api` أو `apps/dashboard` ما بتوصلش لـ Render.
 
 ## 2) إنشاء الخدمة
 
@@ -59,9 +63,10 @@ GitHub ← Settings ← Developer settings ← Personal access tokens (scope: `r
 مش محتاج تعيد بناء الـ APK كل ما العنوان يتغير:
 
 - **من جوه التطبيق** (الأسهل): الإعدادات ← **الخادم** ← اكتب الدومين بس
-  (`uni-tracking.onrender.com`) ← **احفظ واختبر**. التطبيق بيفحص `/health` قبل ما يقبل،
-  وبيرجع العنوان القديم لو السيرفر ماردش، وبيطلّعك على شاشة الدخول لأن التوكن تبع السيرفر
-  القديم.
+  (`uni-tracking.onrender.com`) ← **احفظ واختبر**. التطبيق بيفحص `/health` قبل ما يقبل
+  ويستنى أول تشغيل لـ Render لحد ~75 ثانية (الخدمة النايمة بترفض الاتصال وبتشتغل ورا
+  الطلب)، بيرجع العنوان القديم لو السيرفر ماردش فعلًا، وبيطلّعك على شاشة الدخول لأن
+  التوكن تبع السيرفر القديم.
 - **وقت البناء** (افتراضي مضمون):
 
 ```bash
