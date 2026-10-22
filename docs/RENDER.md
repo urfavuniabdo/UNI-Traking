@@ -38,12 +38,17 @@ git push origin master
 4. عدّل `ADMIN_INIT_PASSWORD` من شاشة الـ Blueprint قبل الـ Apply (ده الباسورد اللي بيتعمل
    لكل حسابات السييد).
 5. **Apply** ← السيرفر بيتخلق (بداية فاشلة طبيعية: `DATABASE_URL` فاضي).
-6. من **Environment** للسيرفر: الصق connection string بتاع الـ Postgres النشط في
-   `DATABASE_URL` ← **Save** ← **Manual Deploy** ← `Build and deploy`.
-   ⚠️ دي نفس الداتابيز اللي عليها مشروعك التاني: Prisma بيبني جدولاته الخاصة باسمها
-   وما بيلمسش جدول المشاريع التانية، بس حذف الداتابيز دي هيمسحي بيانات UNI Tracking وراه.
-   لو عايز عزل حقيقي: ارفع الداتابيز لخطة مدفوعة أو حط `fromDatabase` تاني بعد ما الـ
-   slot يتحرر.
+6. من **Environment** للسيرفر: الصق `DATABASE_URL` ← **Save, rebuild and deploy**.
+   ⚠️ **ما تصقش الـ connection string الافتراضي_Instance مباشرة.** الـ start command بيشغّل
+   `prisma db push --accept-data-loss`، وPrisma بيحذف أي جدول موجود في الداتابيز ومش موجود
+   في الـ schema تبعه — يعني لو الداتابيز دي عليها مشروع تاني فجدولاته هتتمسح مع أول deploy.
+   العزل من غير خطة مدفوعة: دوخل على نفس الـ instance بـ **Connect / psql** ونفّذ
+   `CREATE DATABASE uni_tracking;` (يوزر الأدمن عنده CREATEDB)، وبعدين خد الـ connection
+   string **الـ internal** وغيّر آخر اسم فيه (اسم الداتابيز) إلى `uni_tracking` والصقه في
+   `DATABASE_URL`. كل مشروع على نفس الـ instance بيبقى له داتابيز منطقية مستقلة، وحذف
+   `uni_tracking` يمسح بيانات UNI Tracking وبس.
+   لو عايز عزل على مستوى الـ instance نفسه: ارفع الداتابيز لخطة مدفوعة أو حط
+   `fromDatabase` تاني بعد ما الـ slot بتاع خطة Free يتحرر.
 
 اللي بيحصل في الـ deploy (مظبوط في `render.yaml`):
 
@@ -65,6 +70,9 @@ services, and background workers"), وعلى خطة Free كان الهيكل د�
 السييد idempotent (كل حاجة upsert)، فإعادة النشر ما ترجّعش باسورد اتغيّر.
 
 ## 3) أول تشغيل
+
+النشرة دي شغّالة فعلًا على `https://uni-tracking.onrender.com` (الـ Blueprint
+`exs-dbd679m7bikc73f8m4b0`)، فأي `push` على `master` يعيد النشر أوتوماتيك.
 
 - افتح `https://<اسم-الخدمة>.onrender.com` وسجّل دخول بحساب من السييد
   (`admin` / `supervisor` / `E0101` موظف / `D0201` سواق) وباسورد `ADMIN_INIT_PASSWORD`.

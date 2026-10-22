@@ -29,9 +29,12 @@ services:
     startCommand: npx prisma db push --skip-generate --accept-data-loss && npx ts-node prisma/seed.ts && node dist/main.js
     envVars:
       # Render's free tier keeps only ONE active Postgres per workspace and this account's slot
-      # is already taken by an existing database, so this service points at that instance rather
-      # than creating its own. `synced: false` means the connection string pasted in the
-      # dashboard is never overwritten by a later Blueprint sync.
+      # is already taken, so the service shares that instance instead of creating its own — but
+      # through its OWN logical database (`uni_tracking`, made with `CREATE DATABASE`), never the
+      # instance's default one. The start command pushes the schema with `--accept-data-loss`,
+      # and Prisma drops every table it doesn't recognise, so pointing DATABASE_URL at another
+      # project's database would delete that project. `synced: false` keeps the connection string
+      # pasted in the dashboard from being overwritten by a later Blueprint sync.
       - key: DATABASE_URL
         synced: false
         value: ""
