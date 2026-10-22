@@ -24,6 +24,7 @@ export interface LoginResponse {
   accessToken: string;
   refreshToken: string;
   user: ApiUser;
+  mustChangePassword?: boolean;
 }
 
 export interface AlertMeta {

@@ -17,7 +17,7 @@ export default function LoginPage() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const ok = await login(identifier, password);
-    if (ok) navigate('/live');
+    if (ok) navigate(useAuth.getState().mustChangePassword ? '/change-password' : '/live');
   };
 
   return (
