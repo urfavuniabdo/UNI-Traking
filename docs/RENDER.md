@@ -27,6 +27,18 @@ git push origin master
 اللي بيتدفع هو اللي متسجّل في الـ commits فقط — أي تعديلات لسه ما اتعملهاش commit على
 `apps/api` أو `apps/dashboard` ما بتوصلش لـ Render.
 
+⚠️ **الـ push لوحدُه ما بيفلّش النشر** على الربط ده. الخدمة على `autoDeployTrigger: commit`
+بس الـ Blueprint بيسحب الكود بـ "Use My Credentials" (توكن حسابك)، ومفيش Render GitHub App
+منصّب على الريبو → مفيش webhook بيجيّ Render. المتابعات الفعلية كل trigger بتاعها
+`Manual` أو `Blueprint`. بعد كل push:
+
+1. الخدمة ← **Manual Deploy** ← **Deploy latest commit** (دقيقتين ونص: build للـ API
+   والداش بورد، و`db push`، والسييد idempotent، وبعدين cut-over).
+2. لو عايز النشر ييجي لوحده فعلاً: منصّب **Render GitHub App** على الريبو
+   (github.com ← Settings ← Applications ← Render ← Configure ← Only select repositories
+   ← `UNI-Traking`) — من غير التطبيق ده مفيش webhook يوصل Render، والتغيير ده محتاج صلاحيات
+   على حسابك في GitHub فبيتنفّذ بيدك مش من غيرك.
+
 ## 2) إنشاء الخدمة
 
 1. [dashboard.render.com](https://dashboard.render.com) ← **New +** ← **Blueprint**.
@@ -68,11 +80,15 @@ services, and background workers"), وعلى خطة Free كان الهيكل د�
 و`nest build` و`vite` و`prisma` و`ts-node` كلهم هناك — من غيرها الـ build يفشل في أول ثانية.
 
 السييد idempotent (كل حاجة upsert)، فإعادة النشر ما ترجّعش باسورد اتغيّر.
+اللي بيرجع الـ `ADMIN_INIT_PASSWORD` هو الحساب اللي لسه ما عملش أول دخول وخلاص — أي حساب
+عدّى شاشة «تعيين كلمة مرور جديدة» بيحتفظ بباسورده الجديد عبر كل النشرات، فالـ smoke test
+اللي بيسجّل دخول بـ `ChangeMe123!` بيفشل على الحسابات دي (مش باج، دي سياسة السييد).
 
 ## 3) أول تشغيل
 
 النشرة دي شغّالة فعلًا على `https://uni-tracking.onrender.com` (الـ Blueprint
-`exs-dbd679m7bikc73f8m4b0`)، فأي `push` على `master` يعيد النشر أوتوماتيك.
+`exs-dbd679m7bikc73f8m4b0`)، والخدمة على `autoDeployTrigger: commit` — بس الـ push لوحده
+مابيحرّكش النشر على الربط الحالي، راجع §1.
 
 - افتح `https://<اسم-الخدمة>.onrender.com` وسجّل دخول بحساب من السييد
   (`admin` / `supervisor` / `E0101` موظف / `D0201` سواق) وباسورد `ADMIN_INIT_PASSWORD`.
