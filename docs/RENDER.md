@@ -79,9 +79,11 @@ cd apps/mobile
 flutter build apk --release --dart-define=API_URL=https://<اسم-الخدمة>.onrender.com/api/v1
 ```
 
-العنوان الافتراضي وقت البناء `http://10.0.2.2:3000/api/v1` (إيموليتر أندرويد)، وأي
-override من الإعدادات بيتطبّق في كل الـ isolates (التتيع الخلفي وشغل الـ buffer) لأن
-`SessionStore.open()` هو اللي بيطبقه.
+العنوان الافتراضي وقت البناء هو `https://uni-tracking.onrender.com/api/v1` (السيرفر المنشور
+نفسه)، فأي APK بيتبنى دلوقتي بيربط نفسه على الديبلوي من غير ما تكتب حاجة — وللتطوير على
+الإيموليتر مرر `--dart-define=API_URL=http://10.0.2.2:3000/api/v1`. وأي override من الإعدادات
+بيتطبّق في كل الـ isolates (التتيع الخلفي وشغل الـ buffer) لأن `SessionStore.open()` هو اللي
+بيطبقه.
 
 ## 5) حدود خطة Free (اعرفها عشان التست ما يفاجئكش)
 

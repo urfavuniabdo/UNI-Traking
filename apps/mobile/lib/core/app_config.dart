@@ -4,15 +4,17 @@
 ///   flutter run --dart-define=API_URL=http://10.0.2.2:3000/api/v1
 ///   flutter build apk --dart-define=API_URL=https://uni-tracking.onrender.com/api/v1
 ///
-/// Default is the Android-emulator alias to the host `localhost:3000` (apps/api PORT=3000).
-/// A tester can point the app at another host from Settings without a rebuild; the override
-/// lives in shared_preferences and [SessionStore.open] replays it in every isolate.
+/// The default is the deployed UNI Tracking origin, so an installed APK talks to the real
+/// backend — and the dashboard on that same origin — without anyone typing an address.
+/// For laptop development pass `--dart-define=API_URL=http://10.0.2.2:3000/api/v1`, or dial
+/// it in from Settings; the override lives in shared_preferences and [SessionStore.open]
+/// replays it in every isolate.
 class AppConfig {
   const AppConfig._();
 
   static const String buildApiUrl = String.fromEnvironment(
     'API_URL',
-    defaultValue: 'http://10.0.2.2:3000/api/v1',
+    defaultValue: 'https://uni-tracking.onrender.com/api/v1',
   );
 
   static String _apiUrl = buildApiUrl;

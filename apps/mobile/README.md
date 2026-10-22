@@ -39,7 +39,7 @@ flutter build apk --release \
 
 | dart-define | default | notes |
 |---|---|---|
-| `API_URL` | `http://10.0.2.2:3000/api/v1` | Emulator alias to host `localhost:3000`. Use the PC's LAN IP for a real phone. |
+| `API_URL` | `https://uni-tracking.onrender.com/api/v1` | The deployed backend, so an installed APK is linked with no typing. Pass `http://10.0.2.2:3000/api/v1` (emulator alias to host `localhost:3000`) or the PC's LAN IP for a real phone during development. |
 | `APP_VERSION` | `0.1.0` | Sent in `/devices/register`. |
 
 Socket.IO origin is derived from `API_URL` (namespace `/rt`). The APK currently in `dist/`
