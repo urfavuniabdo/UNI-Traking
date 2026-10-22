@@ -4,7 +4,7 @@ import { api, downloadCsv } from '@/api/client';
 import type { Employee, LivePosition } from '@/api/types';
 import { useAsync, useNow } from '@/hooks/useAsync';
 import { timeAgo } from '@/utils/format';
-import { Chip, EmptyState, ErrorState, Input, MotionChip, Num, Skeleton } from '@/components/ui';
+import { Chip, EmptyState, ErrorState, Input, LiveSpeed, MotionChip, Num, Skeleton } from '@/components/ui';
 import { Icon } from '@/components/Icon';
 
 export default function DriversPage() {
@@ -61,9 +61,7 @@ export default function DriversPage() {
                 <div className="mt-2 space-y-1" style={{ fontSize: '.75rem' }}>
                   <div className="muted">{e.zoneName ?? '—'}</div>
                   <div className="flex items-center justify-between">
-                    <span className="ink2 font-bold">
-                      <Num>{live ? Math.round(live.speedKmh) : '—'}</Num> كم/س
-                    </span>
+                    <LiveSpeed state={live?.motionState ?? 'UNKNOWN'} speedKmh={live?.speedKmh} className="ink2 font-bold" />
                     <span className="muted">منذ <Num>{live ? timeAgo(live.lastSeen, now) : '—'}</Num></span>
                   </div>
                   <div className="flex items-center gap-2">

@@ -7,7 +7,7 @@ import { useAsync, useNow } from '@/hooks/useAsync';
 import { fmtTime, timeAgo, todayISODate, waLink, telLink } from '@/utils/format';
 import LiveMap, { type TrailLayer } from '@/components/maps/LiveMap';
 import { eventGlyph } from '@/components/maps/icons';
-import { Btn, Chip, EmptyState, ErrorState, MotionChip, Num, Select, SeverityChip, Skeleton } from '@/components/ui';
+import { Btn, Chip, EmptyState, ErrorState, LiveSpeed, MotionChip, Num, Select, SeverityChip, Skeleton } from '@/components/ui';
 import { Icon } from '@/components/Icon';
 
 export default function LivePage() {
@@ -329,7 +329,7 @@ function CarDetails({
 
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <MotionChip state={pos.motionState} />
-        <Chip tone="blue"><Num>{Math.round(pos.speedKmh ?? 0)}</Num> كم/س</Chip>
+        <Chip tone="blue"><LiveSpeed state={pos.motionState} speedKmh={pos.speedKmh} /></Chip>
         <Chip tone={pos.online ? 'green' : 'red'}>{pos.online ? 'متصل' : 'غير متصل'}</Chip>
         <Chip tone={pos.gpsEnabled ? 'green' : 'red'}>GPS {pos.gpsEnabled ? '✓' : '✗'}</Chip>
         <Chip tone={pos.dataEnabled !== false ? 'green' : 'red'}>داتا {pos.dataEnabled !== false ? '✓' : '✗'}</Chip>
@@ -457,9 +457,7 @@ function DriverCard({
           <MotionChip state={motion} />
         </div>
         <div className="mt-2 flex items-center justify-between" style={{ fontSize: '.75rem' }}>
-          <span className="ink2 font-bold">
-            <Num>{speed !== undefined ? Math.round(speed) : '—'}</Num> كم/س
-          </span>
+          <LiveSpeed state={motion} speedKmh={speed} className="ink2 font-bold" />
           <span className="muted" title="آخر ظهور">
             منذ <Num>{pos ? timeAgo(pos.lastSeen ?? pos.ts, now) : '—'}</Num>
           </span>

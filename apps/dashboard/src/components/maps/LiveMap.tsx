@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { Circle, CircleMarker, MapContainer, Marker, Polygon, Polyline, TileLayer, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import type { FencesResponse, LivePosition, MapEvent, Severity } from '@/api/types';
+import { LiveSpeed } from '@/components/ui';
 import { driverIcon, eventIcon } from './icons';
 
 const CAIRO: [number, number] = [30.0444, 31.2357];
@@ -162,7 +163,7 @@ export default function LiveMap({
             <div style={{ direction: 'rtl', fontFamily: 'Cairo' }}>
               <b>{p.userName ?? p.userId}</b>
               <br />
-              <span className="num">{p.speedKmh?.toFixed?.(0) ?? '—'} كم/س</span>
+              <LiveSpeed state={p.motionState} speedKmh={p.speedKmh} />
               {!p.online && <> · <b style={{ color: '#b91c1c' }}>غير متصل</b></>}
             </div>
           </Tooltip>

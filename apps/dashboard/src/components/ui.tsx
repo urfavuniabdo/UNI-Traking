@@ -1,6 +1,6 @@
 import type { HTMLAttributes, ReactNode, InputHTMLAttributes, SelectHTMLAttributes, ButtonHTMLAttributes } from 'react';
 import type { MotionState, Severity, AlertStatus } from '@/api/types';
-import { MOTION_STATE_AR } from '@shared';
+import { MOTION, MOTION_STATE_AR } from '@shared';
 
 /** Renders any value LTR + tabular-nums, safe inside Arabic RTL text. */
 export function Num({ children, className = '' }: { children: ReactNode; className?: string }) {
@@ -101,6 +101,25 @@ export function motionTone(m: MotionState): 'amber' | 'blue' | 'red' | 'gray' {
 
 export function MotionChip({ state }: { state: MotionState }) {
   return <Chip tone={motionTone(state)}>{MOTION_STATE_AR[state]}</Chip>;
+}
+
+/**
+ * A position carries the speed of its own sample, while the motion state is smoothed over EMA and
+ * only commits after HYSTERESIS_SAMPLES — so one fast sample inside a standing stretch pairs
+ * «واقف» with «55 كم/س». Labelled rather than hidden, because a supervisor reads that pair as a
+ * broken board and the raw number is still the honest measurement of the sample.
+ */
+export function LiveSpeed({ state, speedKmh, className = '' }: { state: MotionState; speedKmh: number | null | undefined; className?: string }) {
+  if (speedKmh === null || speedKmh === undefined || !Number.isFinite(speedKmh)) {
+    return <span className={className}><Num>—</Num> كم/س</span>;
+  }
+  const instant = state !== 'UNKNOWN' && (speedKmh <= MOTION.STATIONARY_SPEED_KMH ? 'STOPPED' : speedKmh <= MOTION.WALK_MAX_KMH ? 'WALKING' : 'RIDING') !== state;
+  return (
+    <span className={className} title={instant ? `قراءة العينة دي لحظية — الحالة بتتثبت بعد ${MOTION.HYSTERESIS_SAMPLES} عينات متتالية` : undefined}>
+      <Num>{Math.round(speedKmh)}</Num> كم/س
+      {instant && <span className="muted" style={{ fontSize: '.68rem' }}> لحظية</span>}
+    </span>
+  );
 }
 
 export function severityTone(s: Severity): 'red' | 'amber' | 'green' {
