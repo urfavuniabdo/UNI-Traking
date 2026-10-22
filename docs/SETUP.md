@@ -27,10 +27,11 @@ npm run dev            # http://localhost:3000/api/v1/health
 ```bash
 cd "D:/UNI Track/apps/dashboard"
 npm install
-npm run dev            # http://localhost:5173
+npm run dev            # http://localhost:5175 (vite.config server.port)
 ```
 - وضع الشاشات بدون باك إند: `VITE_USE_MOCK=1 npm run dev` (بيانات سواقين متحركة + تنبيهات لحظية تجريبية).
 - للربط الحقيقي: `VITE_API_URL=http://localhost:3000/api/v1 VITE_USE_MOCK=0`.
+- الـ API بيقبل `CORS_ORIGINS` من `apps/api/.env`؛ مينفعش تفتح الداش بورد على بورت مش موجود في القائمة (طلبات المتصفح بتفشل بصمت). لو غيّرت القائمة أعد تشغيل الـ API لأنه بيقرأ `.env` عند الإقلاع.
 
 ## 3) تطبيق الموبايل (يحتاج Flutter SDK)
 ```bash
