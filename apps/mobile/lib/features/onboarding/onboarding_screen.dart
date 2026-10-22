@@ -83,6 +83,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           bullets: <String>[
             S.t('onboardingBatteryOemPath'),
             S.t('onboardingBatteryUnrestricted'),
+            S.t('onboardingAutoLaunch'),
           ],
           actionLabel: S.t('batteryOptimization'),
           onAction: _openAppSettings,

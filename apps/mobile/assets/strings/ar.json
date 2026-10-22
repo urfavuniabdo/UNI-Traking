@@ -87,6 +87,7 @@
   "onboardingBatteryTitle": "أوقف توفير البطارية عن التطبيق",
   "onboardingBatteryOemPath": "على شاومي وأوبو وسامسونج وهواوي: الإعدادات ← البطارية ← تطبيقات غير محسّنة ← UNI Tracking.",
   "onboardingBatteryUnrestricted": "امنح التطبيق تشغيلًا غير محدود في الخلفية، وإلا أوقف النظام خدمة التتبع.",
+  "onboardingAutoLaunch": "على realme وأوبو (ColorOS): الإعدادات ← إدارة التطبيقات ← بدء التشغيل التلقائي ← UNI Tracking ← السماح. بدونه التتبع ما يرجعش لوحده بعد قفل الموبايل.",
   "onboardingKilledAlert": "إنهاء التطبيق بالقوة لا يوقف التسجيل: سيصل تنبيه للمشرف فورًا.",
   "settingsNotificationsSubtitle": "أصوات التنبيه والاهتزاز",
   "settingsTrackingOnShift": "يعمل تلقائيًا حتى التشيك أوت",
