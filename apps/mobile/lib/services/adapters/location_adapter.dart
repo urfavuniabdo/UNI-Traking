@@ -32,20 +32,34 @@ class LocationAdapter {
 
   /// The live tracking stream, tuned per CONTRACT §5 / task brief:
   ///   interval 5s · distanceFilter 25m · highest accuracy.
+  ///
+  /// `intervalDuration` is what keeps a stationary driver emitting fixes — without it
+  /// FusedLocationProvider only reports on movement and the route looks like a stop.
   Stream<Position> positionStream() {
-    const LocationSettings settings = LocationSettings(
+    final AndroidSettings settings = AndroidSettings(
       accuracy: LocationAccuracy.best,
       distanceFilter: 25, // metres
+      intervalDuration: const Duration(seconds: 5),
     );
     return Geolocator.getPositionStream(locationSettings: settings);
   }
 
   /// One-shot fix for the check-in flow.
+  ///
+  /// Android 12+ lets the user grant *approximate* location, which lands ~3 km off and
+  /// silently corrupts fence validation — so a first fix that coarse gets one GNSS retry.
+  static const double _approximateAccuracyM = 1000;
+
   Future<Position?> currentFix() async {
     try {
-      return await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+      final Position first = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.best,
         timeLimit: const Duration(seconds: 15),
+      );
+      if (first.accuracy <= _approximateAccuracyM) return first;
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.best,
+        timeLimit: const Duration(seconds: 10),
       );
     } catch (_) {
       // fall back to last known so check-in still works

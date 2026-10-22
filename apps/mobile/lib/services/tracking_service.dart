@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' show DartPluginRegistrant;
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -322,17 +323,8 @@ void trackingOnStart(ServiceInstance service) async {
   await session.setDeviceId(deviceId);
 
   // Android: promote to a foreground service with the ongoing tracking notification.
-  if (service is AndroidServiceInstance) {
-    unawaited(service.setAsForegroundService());
-    unawaited(
-      service.setForegroundNotificationInfo(
-        title: 'Traccer',
-        content: 'التتبع يعمل تلقائيًا',
-      ),
-    );
-  }
-
-  // Bridge engine emits → the 'ui' channel the main isolate listens to.
+  // Wiring the command listeners first keeps the engine reachable even when the OS
+  // refuses the promotion (Android 14+ throws unless location is still granted).
   final TrackingEngine engine = TrackingEngine(
     api: ApiClient(session: session),
     dao: PositionDao(),
@@ -367,6 +359,17 @@ void trackingOnStart(ServiceInstance service) async {
   }
 
   // The service is only launched at check-in, so begin immediately.
+  if (service is AndroidServiceInstance) {
+    try {
+      await service.setAsForegroundService();
+      await service.setForegroundNotificationInfo(
+        title: 'Traccer',
+        content: 'التتبع يعمل تلقائيًا',
+      );
+    } catch (e) {
+      debugPrint('[tracking] foreground promotion refused: $e');
+    }
+  }
   await session.markSessionAlive(true);
   await engine.start();
 }

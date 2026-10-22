@@ -42,9 +42,10 @@ Future<void> initSyncScheduler() async {
 }
 
 /// Kick a one-off catch-up whenever we (re)connect or the app launches.
+/// The unique name is fixed so `replace` collapses repeats instead of queueing them.
 Future<void> scheduleCatchUp() async {
   await Workmanager().registerOneOffTask(
-    '$kTaskCatchUp-${DateTime.now().millisecondsSinceEpoch}',
+    kTaskCatchUp,
     kTaskCatchUp,
     constraints: Constraints(networkType: NetworkType.connected),
     existingWorkPolicy: ExistingWorkPolicy.replace,
@@ -60,7 +61,7 @@ Future<void> scheduleKeepAlive() async {
     kTaskCatchUp,
     frequency: const Duration(minutes: 15),
     constraints: Constraints(networkType: NetworkType.connected),
-    existingWorkPolicy: ExistingPeriodicWorkPolicy.update,
+    existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
   );
 }
 
