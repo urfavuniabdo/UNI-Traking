@@ -16,11 +16,15 @@ export class LoginDto {
   password!: string;
 }
 
-/** POST /auth/refresh */
+/**
+ * POST /auth/refresh — token required (the service rejects a missing one).
+ * POST /auth/logout  — optional: the dashboard logs out with an empty `{}` body,
+ * and AuthService.logout() already tolerates `undefined` (revokes by userId instead).
+ */
 export class RefreshDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  refreshToken!: string;
+  refreshToken?: string;
 }
 
 /** POST /auth/change-password */

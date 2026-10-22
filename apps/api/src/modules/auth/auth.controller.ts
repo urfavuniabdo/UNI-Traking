@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { ChangePasswordDto, LoginDto, RefreshDto } from './dto';
 import { Public, JwtAuthGuard } from '../../common/auth/guards';
@@ -22,6 +22,7 @@ export class AuthController {
   @HttpCode(200)
   @Post('refresh')
   refresh(@Body() dto: RefreshDto) {
+    if (!dto.refreshToken) throw new UnauthorizedException('INVALID_REFRESH_TOKEN');
     return this.auth.refresh(dto.refreshToken);
   }
 
