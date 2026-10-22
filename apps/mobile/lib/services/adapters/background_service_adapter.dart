@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
-import 'tracking_service.dart'; // top-level onStart / onIosBackground entrypoints
-import 'adapters/notifications_adapter.dart';
+import '../tracking_service.dart'; // top-level onStart / onIosBackground entrypoints
+import 'notifications_adapter.dart';
 
 /// Single seam for `flutter_background_service` (Android foreground service + iOS tasks).
 ///
@@ -64,17 +64,14 @@ class BackgroundServiceAdapter {
   /// Emergency hold-to-stop: hard-stops the foreground service too.
   Future<void> forceStop() async {
     _service.invoke('STOP');
-    try {
-      await _service.stopService();
-    } catch (_) {/* already stopped */}
     await WakelockPlus.disable();
   }
 
   Future<bool> get isRunning => _service.isRunning();
 
   /// Subscribe the UI to an event the isolate emits via `serviceInstance.invoke(...)`.
-  void onFromService(String event, void Function(Map? data) handler) =>
-      _service.on(event, (dynamic data) => handler(data as Map?));
+  void onFromService(String event, void Function(Map<String, dynamic>? data) handler) =>
+      _service.on(event).listen(handler);
 
   /// Send an ad-hoc command to the isolate.
   void invoke(String command, [Map<String, Object?>? arg]) => _service.invoke(command, arg);

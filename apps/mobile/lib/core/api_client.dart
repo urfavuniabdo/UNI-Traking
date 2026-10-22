@@ -20,7 +20,7 @@ import '../models/user.dart';
 ///  * typed errors for FENCE_VIOLATION / ALREADY_CHECKED_IN / NO_OPEN_RECORD (§3)
 ///  * exponential backoff + jitter, retried ONLY on network failures (never on 4xx)
 class ApiClient {
-  ApiClient({required this.session, Dio? dio, Random? random})
+  ApiClient({required this.session, Dio? dio, math.Random? random})
       : _random = random ?? math.Random(),
         _dio = dio ??
             Dio(BaseOptions(
@@ -58,11 +58,9 @@ class ApiClient {
   // ===========================================================================
 
   Future<AuthTokens> login({required String identifier, required String password}) async {
-    final Map<String, Object?> data = await _send(
-      () => _dio.post<Map<String, Object?>>(
-        '/auth/login',
-        data: <String, Object?>{'identifier': identifier, 'password': password},
-      ),
+    final Map<String, Object?> data = await _postJson(
+      '/auth/login',
+      data: <String, Object?>{'identifier': identifier, 'password': password},
       retry: false,
     );
     final AuthTokens tokens = AuthTokens.fromJson(data);
@@ -71,11 +69,9 @@ class ApiClient {
   }
 
   Future<AuthTokens> refresh(String refreshToken) async {
-    final Map<String, Object?> data = await _send(
-      () => _dio.post<Map<String, Object?>>(
-        '/auth/refresh',
-        data: <String, Object?>{'refreshToken': refreshToken},
-      ),
+    final Map<String, Object?> data = await _postJson(
+      '/auth/refresh',
+      data: <String, Object?>{'refreshToken': refreshToken},
       retry: false,
     );
     final AuthTokens tokens = AuthTokens.fromJson(data);
@@ -84,7 +80,7 @@ class ApiClient {
   }
 
   Future<AppUser> me() async {
-    final Map<String, Object?> data = await _guarded(() => _dio.get<Map<String, Object?>>('/auth/me'));
+    final Map<String, Object?> data = await _getJson('/auth/me');
     return AppUser.fromJson(data);
   }
 
@@ -92,20 +88,19 @@ class ApiClient {
   /// Endpoint not spelled out in CONTRACT §2 — we POST `/auth/change-password`; if the API
   /// hasn't implemented it we surface the typed error so the caller can fall back to re-login.
   Future<void> changePassword({required String oldPassword, required String newPassword}) async {
-    await _guarded(
-      () => _dio.post<Map<String, Object?>>(
-        '/auth/change-password',
-        data: <String, Object?>{'currentPassword': oldPassword, 'newPassword': newPassword},
-      ),
+    await _postJson(
+      '/auth/change-password',
+      data: <String, Object?>{'currentPassword': oldPassword, 'newPassword': newPassword},
     );
   }
 
   Future<void> logout() async {
     try {
-      await _send(() => _dio.post<Map<String, Object?>>(
-            '/auth/logout',
-            data: <String, Object?>{'refreshToken': session.refreshToken},
-          ));
+      await _postJson(
+        '/auth/logout',
+        data: <String, Object?>{'refreshToken': session.refreshToken},
+        retry: false,
+      );
     } on ApiException {
       // best-effort — always clear locally
     }
@@ -117,16 +112,14 @@ class ApiClient {
     required String platform, // "android" | "ios"
     required String deviceId,
   }) async {
-    await _guarded(
-      () => _dio.post<Map<String, Object?>>(
-        '/devices/register',
-        data: <String, Object?>{
-          if (token != null && token.isNotEmpty) 'token': token,
-          'platform': platform,
-          'appVersion': AppConfig.appVersion,
-          'deviceId': deviceId,
-        },
-      ),
+    await _postJson(
+      '/devices/register',
+      data: <String, Object?>{
+        if (token != null && token.isNotEmpty) 'token': token,
+        'platform': platform,
+        'appVersion': AppConfig.appVersion,
+        'deviceId': deviceId,
+      },
     );
   }
 
@@ -137,27 +130,23 @@ class ApiClient {
     required bool online,
     int? battery,
   }) async {
-    await _guarded(
-      () => _dio.post<Map<String, Object?>>(
-        '/devices/heartbeat',
-        data: <String, Object?>{
-          'deviceId': deviceId,
-          'battery': battery,
-          'tracking': tracking,
-          'gpsEnabled': gpsEnabled,
-          'online': online,
-        },
-      ),
+    await _postJson(
+      '/devices/heartbeat',
+      data: <String, Object?>{
+        'deviceId': deviceId,
+        'battery': battery,
+        'tracking': tracking,
+        'gpsEnabled': gpsEnabled,
+        'online': online,
+      },
     );
   }
 
   /// kind ∈ {GPS_OFF, GPS_ON, DATA_OFF, DATA_ON, APP_KILLED, BUFFER_FLUSH} (§2 / §6).
   Future<void> toggleEvent({required String deviceId, required String kind}) async {
-    await _guarded(
-      () => _dio.post<Map<String, Object?>>(
-        '/devices/toggle-event',
-        data: <String, Object?>{'deviceId': deviceId, 'kind': kind},
-      ),
+    await _postJson(
+      '/devices/toggle-event',
+      data: <String, Object?>{'deviceId': deviceId, 'kind': kind},
     );
   }
 
@@ -171,11 +160,9 @@ class ApiClient {
     double? accuracy,
     required String deviceId,
   }) async {
-    final Map<String, Object?> data = await _guarded(
-      () => _dio.post<Map<String, Object?>>(
-        '/attendance/check-in',
-        data: <String, Object?>{'lat': lat, 'lng': lng, 'accuracy': accuracy, 'deviceId': deviceId},
-      ),
+    final Map<String, Object?> data = await _postJson(
+      '/attendance/check-in',
+      data: <String, Object?>{'lat': lat, 'lng': lng, 'accuracy': accuracy, 'deviceId': deviceId},
     );
     return AttendanceResult.fromJson(data);
   }
@@ -186,33 +173,27 @@ class ApiClient {
     double? accuracy,
     required String deviceId,
   }) async {
-    final Map<String, Object?> data = await _guarded(
-      () => _dio.post<Map<String, Object?>>(
-        '/attendance/check-out',
-        data: <String, Object?>{'lat': lat, 'lng': lng, 'accuracy': accuracy, 'deviceId': deviceId},
-      ),
+    final Map<String, Object?> data = await _postJson(
+      '/attendance/check-out',
+      data: <String, Object?>{'lat': lat, 'lng': lng, 'accuracy': accuracy, 'deviceId': deviceId},
     );
     return AttendanceResult.fromJson(data);
   }
 
   Future<TodayState> today() async {
-    final Map<String, Object?> data = await _guarded(
-      () => _dio.get<Map<String, Object?>>('/attendance/me/today'),
-    );
+    final Map<String, Object?> data = await _getJson('/attendance/me/today');
     return TodayState.fromJson(data);
   }
 
   Future<List<AttendanceDay>> history({required DateTime from, required DateTime to}) async {
-    final Map<String, Object?> data = await _guarded(
-      () => _dio.get<Map<String, Object?>>(
-        '/attendance/me/history',
-        queryParameters: <String, Object?>{
-          'from': _dateOnly(from),
-          'to': _dateOnly(to),
-          'page': 1,
-          'pageSize': 100,
-        },
-      ),
+    final Map<String, Object?> data = await _getJson(
+      '/attendance/me/history',
+      query: <String, Object?>{
+        'from': _dateOnly(from),
+        'to': _dateOnly(to),
+        'page': 1,
+        'pageSize': 100,
+      },
     );
     final Object? items = data['items'];
     if (items is! List) return const <AttendanceDay>[];
@@ -230,9 +211,7 @@ class ApiClient {
   // ===========================================================================
 
   Future<BatchResponse> postBatch(BatchPayload payload) async {
-    final Map<String, Object?> data = await _guarded(
-      () => _dio.post<Map<String, Object?>>('/positions/batch', data: payload.toJson()),
-    );
+    final Map<String, Object?> data = await _postJson('/positions/batch', data: payload.toJson());
     return BatchResponse.fromJson(data);
   }
 
@@ -241,9 +220,7 @@ class ApiClient {
   // ===========================================================================
 
   Future<List<TraccerAlert>> myAlerts() async {
-    final List<Object?> rows = await _guarded(
-      () => _dio.get<List<Object?>>('/alerts/me'),
-    );
+    final List<Object?> rows = await _getList('/alerts/me');
     return rows.whereType<Map<String, Object?>>().map(TraccerAlert.fromJson).toList(growable: false);
   }
 
@@ -254,6 +231,32 @@ class ApiClient {
   /// Sends [action], retrying on *network* failures with exp backoff + jitter, and doing a
   /// single-flight refresh + one replay on 401.
   Future<T> _guarded<T>(Future<T> Function() action) => _send(action, retry: true);
+
+  Future<Map<String, Object?>> _postJson(
+    String path, {
+    Object? data,
+    bool retry = true,
+  }) =>
+      _send(
+        () async =>
+            (await _dio.post<Map<String, Object?>>(path, data: data)).data ?? <String, Object?>{},
+        retry: retry,
+      );
+
+  Future<Map<String, Object?>> _getJson(
+    String path, {
+    Map<String, Object?>? query,
+  }) =>
+      _guarded(
+        () async =>
+            (await _dio.get<Map<String, Object?>>(path, queryParameters: query)).data ??
+            <String, Object?>{},
+      );
+
+  Future<List<Object?>> _getList(String path) => _guarded(
+        () async =>
+            (await _dio.get<List<Object?>>(path)).data ?? const <Object?>[],
+      );
 
   Future<T> _send<T>(
     Future<T> Function() action, {

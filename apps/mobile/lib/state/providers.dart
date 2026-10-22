@@ -157,7 +157,7 @@ final StreamProvider<TrackingUiEvent> trackingEventsProvider =
   final BackgroundServiceAdapter svc = BackgroundServiceAdapter.instance;
   final StreamController<TrackingUiEvent> controller =
       StreamController<TrackingUiEvent>.broadcast(sync: true);
-  svc.onFromService('ui', (Map? data) {
+  svc.onFromService('ui', (Map<String, dynamic>? data) {
     controller.add(TrackingUiEvent(
       (data?['event'] ?? '') as String,
       (data?['data'] as Map?)?.cast<String, Object?>() ?? <String, Object?>{},

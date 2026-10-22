@@ -64,7 +64,7 @@ class TraccerTheme {
           color: dark ? Colors.white : inkLight,
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         elevation: 0,
         color: dark ? const Color(0xFF131C2E) : surfaceLight,
         shape: RoundedRectangleBorder(

@@ -8,6 +8,7 @@ import 'core/app_strings.dart';
 import 'core/session_store.dart';
 import 'firebase_options.dart';
 import 'services/sync_scheduler.dart';
+import 'state/providers.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

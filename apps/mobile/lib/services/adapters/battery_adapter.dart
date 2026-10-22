@@ -15,12 +15,4 @@ class BatteryAdapter {
       return null;
     }
   }
-
-  Stream<int> onLevelChange() {
-    try {
-      return _b.onBatteryLevelChanged;
-    } catch (_) {
-      return const Stream<int>.empty();
-    }
-  }
 }

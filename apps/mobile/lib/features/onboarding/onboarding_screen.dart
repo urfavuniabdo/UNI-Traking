@@ -58,7 +58,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                 await _openSystemSettings();
                 if (ctx.mounted) Navigator.of(ctx).pop();
               },
-              icon: const Icon(Icons.settings_battery),
+              icon: const Icon(Icons.battery_saver),
               label: Text(S.t('batteryOptimization')),
             ),
             const SizedBox(height: 8),

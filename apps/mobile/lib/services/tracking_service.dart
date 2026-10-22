@@ -1,7 +1,6 @@
 import 'dart:async';
+import 'dart:ui' show DartPluginRegistrant;
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 import 'package:geolocator/geolocator.dart';
@@ -178,7 +177,7 @@ class TrackingEngine {
   }
 
   String _providerOf(Position p) {
-    if (p.isMock) return 'mock';
+    if (p.isMocked) return 'mock';
     return 'gps';
   }
 
@@ -345,16 +344,16 @@ void trackingOnStart(ServiceInstance service) async {
         service.invoke('ui', <String, Object?>{'event': event, 'data': data}),
   );
 
-  service.on('START', (dynamic _) async {
+  service.on('START').listen((Map<String, dynamic>? _) async {
     await engine.start();
     if (service is AndroidServiceInstance && await service.isForegroundService()) {
       service.setForegroundNotificationInfo(title: 'Traccer', content: 'التتبع يعمل تلقائيًا');
     }
   });
 
-  service.on('SESSION_REFRESH', (dynamic _) => engine.start());
+  service.on('SESSION_REFRESH').listen((Map<String, dynamic>? _) => engine.start());
 
-  service.on('STOP', (dynamic _) async {
+  service.on('STOP').listen((Map<String, dynamic>? _) async {
     await engine.stop();
     if (service is AndroidServiceInstance) service.stopSelf();
   });

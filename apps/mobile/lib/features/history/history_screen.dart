@@ -42,7 +42,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       body: FutureBuilder<List<AttendanceDay>>(
         future: _future,
         builder: (BuildContext ctx, AsyncSnapshot<List<AttendanceDay>> snap) {
-          if (snap.isLoading) return const Center(child: CircularProgressIndicator());
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
           final List<AttendanceDay> days = snap.data ?? const <AttendanceDay>[];
           if (days.isEmpty) {
             return Center(child: Text(S.t('historyEmpty'), style: const TextStyle(color: TraccerTheme.muted)));

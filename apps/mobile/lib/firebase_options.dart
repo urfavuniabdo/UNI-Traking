@@ -26,13 +26,4 @@ class DefaultFirebaseOptions {
         return null;
     }
   }
-
-  // Reference shape once `flutterfire configure` fills this in:
-  // ignore: unused_element
-  static const FirebaseOptions _example = FirebaseOptions(
-    apiKey: 'REPLACE_ME',
-    appId: 'REPLACE_ME',
-    messagingSenderId: 'REPLACE_ME',
-    projectId: 'REPLACE_ME',
-  );
 }

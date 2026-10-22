@@ -83,7 +83,7 @@ class NotificationsAdapter {
           priority: Priority.high,
           playSound: playSound,
           enableVibration: true,
-          category: AndroidNotificationCategory.alert,
+          category: AndroidNotificationCategory.alarm,
         ),
         iOS: const DarwinNotificationDetails(
           presentAlert: true,

@@ -1,5 +1,3 @@
-import 'dart:ui' show Locale;
-
 import 'package:intl/intl.dart' show DateFormat;
 
 /// Arabic / Africa-Cairo date & time formatting used by the UI and unit tests.
@@ -44,8 +42,7 @@ class CairoTime {
   static String formatDayAr(DateTime d) => '${weekdayAr[d.weekday - 1]} ${d.day} ${monthAr[d.month - 1]}';
 
   /// ISO-ish for the locale, used in payloads.
-  static String iso(DateTime d) =>
-      DateFormat('yyyy-MM-dd', Locale('en').toString()).format(d);
+  static String iso(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
 
   /// Human duration "2 س 05 د" for the shift clock.
   static String elapsedLabel(Duration e) {

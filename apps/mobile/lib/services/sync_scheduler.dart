@@ -1,7 +1,7 @@
 import 'dart:async';
+import 'dart:ui' show DartPluginRegistrant;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:workmanager/workmanager.dart';
 
 import '../core/api_client.dart';
@@ -25,9 +25,9 @@ void traccerBackgroundDispatcher() {
     try {
       switch (task) {
         case kTaskCatchUp:
-          return _catchUpUpload();
+          return await _catchUpUpload();
         case kTaskHeartbeat:
-          return _heartbeatOnly();
+          return await _heartbeatOnly();
         default:
           return true;
       }
@@ -61,7 +61,7 @@ Future<void> scheduleKeepAlive() async {
     kTaskCatchUp,
     frequency: const Duration(minutes: 15),
     constraints: Constraints(networkType: NetworkType.connected),
-    existingPeriodicWorkPolicy: PeriodicWorkPolicy.update,
+    existingWorkPolicy: ExistingWorkPolicy.update,
   );
 }
 
