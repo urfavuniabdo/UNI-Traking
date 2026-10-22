@@ -10,6 +10,20 @@ import type { AuthUser } from '../../common/auth/jwt.strategy';
 import { LEAVE_STATUS, type LeaveStatus } from '../../shared/constants';
 import type { CreateLeaveDto, ListLeaveQueryDto } from './dto';
 
+/** One approved-leave day, already joined to the employee labels the attendance/report rows need. */
+export interface LeaveDay {
+  leaveId: string;
+  employeeId: string;
+  name: string;
+  externalId: string;
+  kind: string;
+  siteId: string | null;
+  siteName: string | null;
+  zoneId: string | null;
+  zoneName: string | null;
+  date: string;
+}
+
 type LeaveRow = {
   id: string;
   employeeId: string;
@@ -31,6 +45,18 @@ export function leaveDays(dateFrom: string, dateTo: string): number {
   const b = Date.parse(`${dateTo}T00:00:00Z`);
   if (!Number.isFinite(a) || !Number.isFinite(b)) return 0;
   return Math.floor((b - a) / 86_400_000) + 1;
+}
+
+/** Every `YYYY-MM-DD` key covered by a request, capped so a mistyped range can't explode a report. */
+export function expandDays(dateFrom: string, dateTo: string, cap = 366): string[] {
+  const total = leaveDays(dateFrom, dateTo);
+  if (total < 1) return [];
+  const days: string[] = [];
+  const start = Date.parse(`${dateFrom}T00:00:00Z`);
+  for (let i = 0; i < Math.min(total, cap); i++) {
+    days.push(new Date(start + i * 86_400_000).toISOString().slice(0, 10));
+  }
+  return days;
 }
 
 /**
@@ -166,13 +192,33 @@ export class LeaveService {
     return row ?? null;
   }
 
-  /** Approved requests by employee id, for the days in [from, to] — the report synthesizer. */
-  async approvedInRange(from: string, to: string): Promise<Array<{ employeeId: string; dateFrom: string; dateTo: string }>> {
+  /** Approved leave for the days in [from, to], flattened to one row per employee-day. */
+  async approvedDaysInRange(from: string, to: string): Promise<LeaveDay[]> {
     const rows = await this.prisma.leaveRequest.findMany({
       where: { status: LEAVE_STATUS.APPROVED, dateFrom: { lte: to }, dateTo: { gte: from } },
-      select: { employeeId: true, dateFrom: true, dateTo: true },
+      include: { employee: { include: { site: { select: { name: true } }, zone: { select: { name: true } } } } },
+      orderBy: { dateFrom: 'asc' },
     });
-    return rows;
+    const out: LeaveDay[] = [];
+    for (const r of rows) {
+      const e = r.employee as unknown as { id: string; name: string; externalId: string; kind: string; siteId: string | null; zoneId: string | null; site?: { name: string } | null; zone?: { name: string } | null } | null;
+      for (const date of expandDays(r.dateFrom, r.dateTo)) {
+        if (date < from || date > to) continue;
+        out.push({
+          leaveId: r.id,
+          employeeId: r.employeeId,
+          name: e?.name ?? r.employeeId,
+          externalId: e?.externalId ?? '',
+          kind: e?.kind ?? '',
+          siteId: e?.siteId ?? null,
+          siteName: e?.site?.name ?? null,
+          zoneId: e?.zoneId ?? null,
+          zoneName: e?.zone?.name ?? null,
+          date,
+        });
+      }
+    }
+    return out;
   }
 
   private toDto(r: LeaveRow) {

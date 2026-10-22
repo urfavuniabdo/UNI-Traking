@@ -5,6 +5,7 @@ import { PrismaModule } from '../../common/prisma.module';
 import { PrismaService } from '../../common/prisma.service';
 import { GeoModule } from '../../common/geo/geo.module';
 import { ReportsService } from './reports.service';
+import { LeaveModule } from '../leave/leave.module';
 import { toCsv } from './csv';
 
 const DB = 'file:../tmp-track-reports.db';
@@ -26,7 +27,7 @@ beforeAll(() => {
 
 beforeAll(async () => {
   const m = await Test.createTestingModule({
-    imports: [PrismaModule, GeoModule],
+    imports: [PrismaModule, GeoModule, LeaveModule],
     providers: [ReportsService],
   }).compile();
   await m.init();
@@ -43,6 +44,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  await prisma.leaveRequest.deleteMany();
   await prisma.notificationLog.deleteMany();
   await prisma.alert.deleteMany();
   await prisma.stopEvent.deleteMany();
@@ -97,7 +99,7 @@ describe('Reports (CONTRACT §9)', () => {
     const body = r.body as any;
     expect(body.date).toBe(date);
     expect(Object.keys(body.kpis).sort()).toEqual([
-      'absent', 'activeDrivers', 'criticalAlerts', 'exceptions', 'kmDriven', 'offlineMinutes', 'openAlerts', 'present',
+      'absent', 'activeDrivers', 'criticalAlerts', 'exceptions', 'kmDriven', 'offlineMinutes', 'onLeave', 'openAlerts', 'present',
     ]);
     expect(body.kpis.openAlerts).toBeGreaterThanOrEqual(1);
     expect(body.kpis.criticalAlerts).toBeGreaterThanOrEqual(1);
@@ -161,6 +163,34 @@ describe('Reports (CONTRACT §9)', () => {
     expect(body.rows[0].hoursWorked).toBe(8);
     expect(body.rows[0].status).toBe('VALID');
     expect(body.rows[0].replayed).toBe(false);
+  });
+
+  it('approved leave is a LEAVE timesheet line and its own daily kpi, never an absence', async () => {
+    const { employeeId } = await seedDriver();
+    const date = new Date().toISOString().slice(0, 10);
+    await prisma.leaveRequest.create({ data: { employeeId, dateFrom: date, dateTo: date, status: 'APPROVED' } });
+
+    const r = await reports.timesheet(date, date);
+    const body = r.body as any;
+    expect(body.rows).toHaveLength(1);
+    expect(body.rows[0]).toMatchObject({ userId: employeeId, date, status: 'LEAVE', checkIn: null, checkOut: null, hoursWorked: 0 });
+    expect(r.rows[0][r.headers.indexOf('status')]).toBe('LEAVE');
+    expect(r.rows[0][r.headers.indexOf('exception')]).toBe('NO');
+
+    const d = await reports.daily(date);
+    expect(d.body).toMatchObject({ kpis: { present: 0, onLeave: 1, absent: 0 } });
+  });
+
+  it('a day checked in despite approved leave stays attendance', async () => {
+    const { employeeId } = await seedDriver();
+    const date = new Date().toISOString().slice(0, 10);
+    await prisma.leaveRequest.create({ data: { employeeId, dateFrom: date, dateTo: date, status: 'APPROVED' } });
+    await prisma.attendanceRecord.create({
+      data: { employeeId, workDate: date, status: 'VALID', checkInAt: new Date(`${date}T06:00:00Z`), checkOutAt: new Date(`${date}T14:00:00Z`) },
+    });
+    const body = (await reports.timesheet(date, date)).body as any;
+    expect(body.rows).toHaveLength(1);
+    expect(body.rows[0].status).toBe('VALID');
   });
 
   it('CSV export is BOM-prefixed and escapes Arabic + commas', async () => {

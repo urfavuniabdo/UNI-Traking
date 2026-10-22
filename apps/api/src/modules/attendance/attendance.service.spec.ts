@@ -1,6 +1,7 @@
 import { HttpException } from '@nestjs/common';
 import { GeoService } from '../../common/geo/geo.service';
 import { workDateOf } from '../../common/utils';
+import { LeaveService } from '../leave/leave.service';
 import { AttendanceService } from './attendance.service';
 
 const SITE = {
@@ -55,9 +56,15 @@ function makeFixtures() {
   // supervisor/admin directory consulted by the 422 supervisorPhone resolution
   const directory: any[] = [];
   const records: any[] = [];
+  const leaves: any[] = [];
   const positions: any[] = [];
   const settings: Record<string, string> = {};
   let seq = 1;
+  const leaveMatches = (l: any, where: any) =>
+    (!where?.employeeId || l.employeeId === where.employeeId) &&
+    (!where?.status || l.status === where.status) &&
+    (!where?.dateFrom?.lte || l.dateFrom <= where.dateFrom.lte) &&
+    (!where?.dateTo?.gte || l.dateTo >= where.dateTo.gte);
   const prisma = {
     user: {
       findUnique: async ({ where }: any) => users[where.id] ?? null,
@@ -90,6 +97,13 @@ function makeFixtures() {
           return true;
         }),
     },
+    leaveRequest: {
+      findFirst: async ({ where }: any) => leaves.find((l) => leaveMatches(l, where)) ?? null,
+      findMany: async ({ where }: any) =>
+        leaves
+          .filter((l) => leaveMatches(l, where))
+          .map((l) => ({ ...l, employee: employees[l.employeeId] })),
+    },
     attendanceRecord: {
       findFirst: async ({ where }: any) => records.find((r) => match(r, where)) ?? null,
       findMany: async ({ where }: any) =>
@@ -112,7 +126,7 @@ function makeFixtures() {
       },
     },
   };
-  return { prisma: prisma as never, employees, users, records, positions, settings, directory };
+  return { prisma: prisma as never, employees, users, records, leaves, positions, settings, directory };
 }
 
 function makeDispatcher() {
@@ -129,7 +143,7 @@ function makeDispatcher() {
 function build(fx = makeFixtures()) {
   const geo = new GeoService();
   const dispatcher = makeDispatcher();
-  const svc = new AttendanceService(fx.prisma, geo, dispatcher as never);
+  const svc = new AttendanceService(fx.prisma, geo, new LeaveService(fx.prisma as never), dispatcher as never);
   return { svc, fx, dispatcher };
 }
 
@@ -367,5 +381,84 @@ describe('AttendanceService — GET /attendance list envelope (dashboard contrac
     const paged = await svc.list({ page: 2, pageSize: 2 });
     expect(paged.records).toHaveLength(1);
     expect(paged.total).toBe(3); // total stays the FULL filtered count
+  });
+});
+
+describe('AttendanceService — approved leave owns the day', () => {
+  const today = workDateOf(new Date());
+
+  function withLeave(over: Record<string, unknown> = {}) {
+    const fx = makeFixtures();
+    fx.leaves.push({ id: 'lv1', employeeId: 'e1', dateFrom: today, dateTo: today, status: 'APPROVED', ...over });
+    return fx;
+  }
+
+  it('409 ON_APPROVED_LEAVE instead of starting an approved-leave day', async () => {
+    const fx = withLeave();
+    const { svc, dispatcher } = build(fx);
+    const err = await svc.checkIn('u1', { lat: 30.0444, lng: 31.2357 }).catch((e) => e);
+    expect(err).toBeInstanceOf(HttpException);
+    expect(err.getStatus()).toBe(409);
+    expect(err.getResponse()).toMatchObject({ code: 'ON_APPROVED_LEAVE', leave: { id: 'lv1', dateFrom: today, dateTo: today } });
+    expect(fx.records).toHaveLength(0);
+    expect(dispatcher.calls).toHaveLength(0);
+  });
+
+  it('a still-pending request leaves the day startable', async () => {
+    const { svc } = build(withLeave({ status: 'PENDING' }));
+    expect((await svc.checkIn('u1', { lat: 30.0444, lng: 31.2357 })).status).toBe('VALID');
+  });
+
+  it('meToday says ON_LEAVE and carries the window, so the app can disable the button', async () => {
+    const { svc } = build(withLeave({ dateFrom: '2026-01-01', dateTo: today }));
+    const res = await svc.meToday('u1');
+    expect(res.currentStatus).toBe('ON_LEAVE');
+    expect(res.leave).toMatchObject({ id: 'lv1', dateFrom: '2026-01-01', dateTo: today });
+  });
+
+  it('meToday keeps an already checked-in day as CHECKED_IN', async () => {
+    const fx = withLeave();
+    fx.records.push({ id: 'a0', employeeId: 'e1', workDate: today, status: 'VALID', checkInAt: new Date(), checkOutAt: null, siteId: SITE.id, zoneId: null, distanceToSiteM: 10, note: null });
+    const { svc } = build(fx);
+    const res = await svc.meToday('u1');
+    expect(res.currentStatus).toBe('CHECKED_IN');
+  });
+
+  it('list() synthesizes a LEAVE record and counts it in stats.onLeave', async () => {
+    const fx = makeFixtures();
+    fx.leaves.push({ id: 'lv9', employeeId: 'e1', dateFrom: '2026-01-04', dateTo: '2026-01-05', status: 'APPROVED' });
+    const { svc } = build(fx);
+    const res = await svc.list({ from: '2026-01-04', to: '2026-01-05' });
+    expect(res.total).toBe(2);
+    expect(res.stats.onLeave).toBe(2);
+    expect(res.records.map((r) => r.id)).toEqual(['leave:lv9:2026-01-05', 'leave:lv9:2026-01-04']);
+    expect(res.records[0]).toMatchObject({ userId: 'e1', userName: 'Ahmed', checkInStatus: 'LEAVE', checkOutStatus: null, exception: false, siteName: 'Cairo HQ' });
+  });
+
+  it('a day with a check-in is attendance, not leave', async () => {
+    const fx = makeFixtures();
+    fx.records.push({ id: 'a1', employeeId: 'e1', workDate: '2026-01-05', status: 'VALID', checkInAt: new Date('2026-01-05T06:00:00Z'), checkOutAt: null, siteId: SITE.id, zoneId: null, distanceToSiteM: 5, note: null });
+    fx.leaves.push({ id: 'lv1', employeeId: 'e1', dateFrom: '2026-01-05', dateTo: '2026-01-06', status: 'APPROVED' });
+    const { svc } = build(fx);
+    const res = await svc.list({ from: '2026-01-04', to: '2026-01-07' });
+    expect(res.records.map((r) => r.id)).toEqual(['leave:lv1:2026-01-06', 'a1']); // newest day first
+    expect(res.stats.onLeave).toBe(1);
+  });
+
+  it('?status=LEAVE shows only the leave rows', async () => {
+    const fx = makeFixtures();
+    fx.records.push({ id: 'a1', employeeId: 'e1', workDate: '2026-01-05', status: 'VALID', checkInAt: new Date('2026-01-05T06:00:00Z'), checkOutAt: null, siteId: SITE.id, zoneId: null, distanceToSiteM: 5, note: null });
+    fx.leaves.push({ id: 'lv1', employeeId: 'eS', dateFrom: '2026-01-05', dateTo: '2026-01-05', status: 'APPROVED' });
+    const { svc } = build(fx);
+    const res = await svc.list({ from: '2026-01-04', to: '2026-01-06', status: 'LEAVE' as never });
+    expect(res.records.map((r) => r.id)).toEqual(['leave:lv1:2026-01-05']);
+  });
+
+  it('the CSV export carries the leave days with their own status', async () => {
+    const fx = makeFixtures();
+    fx.leaves.push({ id: 'lv1', employeeId: 'e1', dateFrom: '2026-01-05', dateTo: '2026-01-05', status: 'APPROVED' });
+    const { svc } = build(fx);
+    const csv = await svc.exportCsv({ from: '2026-01-04', to: '2026-01-06' });
+    expect(csv.split('\n')[1]).toBe('2026-01-05,EMP1,Ahmed,EMPLOYEE,Cairo HQ,LEAVE,,,,');
   });
 });

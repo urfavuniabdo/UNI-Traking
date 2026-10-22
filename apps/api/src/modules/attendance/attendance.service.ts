@@ -20,6 +20,7 @@ import {
 } from '../../common/contracts';
 import { parseJson, workDateOf } from '../../common/utils';
 import { AR_ALERT_TEXT, ATTENDANCE_STATUS, ROLES, SEVERITY } from '../../shared/constants';
+import { LeaveService, type LeaveDay } from '../leave/leave.service';
 import type { AttendanceQueryDto, CheckDto } from './dto';
 import { zonedLocalToUtc } from './tz';
 
@@ -45,6 +46,26 @@ interface EvalResult {
   fenceName: string | null;
 }
 
+/** One row of the GET /attendance envelope — a checked day, or a synthesized approved-leave day. */
+type RecordDto = {
+  id: string;
+  userId: string;
+  userName: string | null;
+  siteId: string | null;
+  siteName: string | null;
+  zoneId: string | null;
+  zoneName: string | null;
+  date: string;
+  checkInTs: string | null;
+  checkOutTs: string | null;
+  checkInStatus: string;
+  checkOutStatus: string | null;
+  distanceToCenterM: number | null;
+  fenceName: string | null;
+  exception: boolean;
+  replayed: boolean;
+};
+
 /** Attendance row + joins needed to map the dashboard `/attendance` record shape. */
 type AttRow = {
   id: string;
@@ -68,6 +89,7 @@ export class AttendanceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly geo: GeoService,
+    private readonly leave: LeaveService,
     @Inject(ALERT_DISPATCHER) @Optional() private readonly dispatcher?: AlertDispatcher,
     @Inject(REALTIME_PUBLISHER) @Optional() private readonly rt?: RealtimePublisher,
   ) {}
@@ -175,6 +197,15 @@ export class AttendanceService {
     const now = new Date();
     const emp = await this.resolveEmployee(userId);
     const workDate = workDateOf(now);
+
+    // Approved leave wins: the day is already accounted for, so there is nothing to start.
+    const onLeave = await this.leave.approvedOn(emp.id, workDate);
+    if (onLeave) {
+      throw new HttpException(
+        { code: 'ON_APPROVED_LEAVE', statusCode: HttpStatus.CONFLICT, message: 'يومك معتمد كإجازة، لا حاجة لبدء اليوم', leave: onLeave },
+        HttpStatus.CONFLICT,
+      );
+    }
 
     const existing = await this.prisma.attendanceRecord.findFirst({ where: { employeeId: emp.id, workDate } });
     if (existing && existing.checkInAt) throw new ConflictException('ALREADY_CHECKED_IN');
@@ -368,8 +399,11 @@ export class AttendanceService {
   async meToday(userId: string) {
     const emp = await this.resolveEmployee(userId);
     const workDate = workDateOf(new Date());
-    const rec = await this.prisma.attendanceRecord.findFirst({ where: { employeeId: emp.id, workDate } });
-    const currentStatus = rec
+    const [rec, leave] = await Promise.all([
+      this.prisma.attendanceRecord.findFirst({ where: { employeeId: emp.id, workDate } }),
+      this.leave.approvedOn(emp.id, workDate),
+    ]);
+    let currentStatus = rec
       ? rec.checkOutAt
         ? rec.status === ATTENDANCE_STATUS.OUT_OF_FENCE
           ? 'CHECKED_OUT_OUT_OF_FENCE'
@@ -378,12 +412,15 @@ export class AttendanceService {
           ? 'MISSING_CHECKOUT'
           : 'CHECKED_IN'
       : 'ABSENT';
+    // A checked-in day stays as it is; an untouched approved-leave day is not an absence.
+    if (!rec && leave) currentStatus = 'ON_LEAVE';
     return {
       workDate,
       employee: { id: emp.id, externalId: emp.externalId, name: emp.name, kind: emp.kind },
       fenceName: this.fenceOf(emp)?.name ?? null,
       allowedFences: this.allowedFences(emp),
       currentStatus,
+      leave: leave ?? null,
       record: rec ?? null,
     };
   }
@@ -444,6 +481,9 @@ export class AttendanceService {
    * GET /attendance (admin list) — envelope the dashboard Attendance page renders:
    * `{ records, total, page, pageSize, stats }`. `records[]` keys follow
    * apps/dashboard/src/api/types.ts AttendanceRecord exactly (userId = employee id).
+   *
+   * Approved leave has no AttendanceRecord row — it is synthesized here so the page shows
+   * "إجازة" for those days instead of counting the person as absent.
    */
   async list(f: AttendanceQueryDto) {
     const where = await this.buildWhere(f);
@@ -466,7 +506,17 @@ export class AttendanceService {
       for (const z of zs) zoneNames.set(z.id, z.name);
     }
     const replayedKeys = await this.replayedKeys(rows);
-    const records = rows.map((r) => this.toRecordDto(r, zoneNames, replayedKeys));
+    const records: RecordDto[] = rows.map((r) => this.toRecordDto(r, zoneNames, replayedKeys));
+
+    const leaveOnly = f.status === ATTENDANCE_STATUS.LEAVE;
+    if (!f.status || leaveOnly) {
+      const leaveDays = await this.leaveDaysFor(where, f, rows);
+      if (leaveOnly) records.length = 0;
+      records.push(...leaveDays.map((d) => this.toLeaveRecordDto(d)));
+      // Stable sort on the day only: leave joins its own day, the DB's intra-day order survives.
+      records.sort((a, b) => b.date.localeCompare(a.date));
+    }
+    const onLeave = records.filter((r) => r.checkInStatus === ATTENDANCE_STATUS.LEAVE).length;
 
     // stats: computed over the whole filtered set — the page uses sites[]/zones[] to fill filter dropdowns.
     const [sites, zones, staffed] = await Promise.all([
@@ -480,6 +530,7 @@ export class AttendanceService {
       present: rows.filter((r) => r.checkInAt).length,
       missingCheckout: rows.filter((r) => r.checkInAt && !r.checkOutAt).length,
       outOfFence: rows.filter((r) => r.status === ATTENDANCE_STATUS.OUT_OF_FENCE).length,
+      onLeave,
       sites: sites.map((s) => {
         const c = rows.filter((r) => r.siteId === s.id).length;
         return { id: s.id, name: s.name, count: c, present: c, expected: expectedBySite.get(s.id) ?? 0 };
@@ -490,6 +541,45 @@ export class AttendanceService {
       }),
     };
     return { records: records.slice((page - 1) * pageSize, page * pageSize), total: records.length, page, pageSize, stats };
+  }
+
+  /**
+   * Approved leave days the attendance list should carry, in the `?userId`/site/zone scope
+   * `buildWhere` already resolved — minus any day the employee actually checked in for.
+   */
+  private async leaveDaysFor(where: Record<string, unknown>, f: AttendanceQueryDto, rows: Array<{ employeeId: string; workDate: string; checkInAt: Date | null }>): Promise<LeaveDay[]> {
+    const employeeId = typeof where.employeeId === 'string' ? where.employeeId : null;
+    const taken = new Set(rows.filter((r) => r.checkInAt).map((r) => `${r.employeeId}|${r.workDate}`));
+    const days = await this.leave.approvedDaysInRange(f.from?.slice(0, 10) ?? '1970-01-01', f.to?.slice(0, 10) ?? '9999-12-31');
+    return days.filter(
+      (d) =>
+        !taken.has(`${d.employeeId}|${d.date}`) &&
+        (!employeeId || d.employeeId === employeeId) &&
+        (!f.siteId || d.siteId === f.siteId) &&
+        (!f.zoneId || d.zoneId === f.zoneId),
+    );
+  }
+
+  /** A leave day wearing the attendance-record shape — id is stable per request per day. */
+  private toLeaveRecordDto(d: LeaveDay): RecordDto {
+    return {
+      id: `leave:${d.leaveId}:${d.date}`,
+      userId: d.employeeId,
+      userName: d.name,
+      siteId: d.siteId,
+      siteName: d.siteName,
+      zoneId: d.zoneId,
+      zoneName: d.zoneName,
+      date: d.date,
+      checkInTs: null,
+      checkOutTs: null,
+      checkInStatus: ATTENDANCE_STATUS.LEAVE,
+      checkOutStatus: null,
+      distanceToCenterM: null,
+      fenceName: d.siteName ?? d.zoneName,
+      exception: false,
+      replayed: false,
+    };
   }
 
   /** Attendance rows without a `replayed` column — derive from buffered/stale positions of the same work day. */
@@ -517,7 +607,7 @@ export class AttendanceService {
     r: AttRow,
     zoneNames: Map<string, string>,
     replayedKeys: Set<string>,
-  ) {
+  ): RecordDto {
     const outOfFence = r.status === ATTENDANCE_STATUS.OUT_OF_FENCE;
     const zoneName = r.zoneId ? zoneNames.get(r.zoneId) ?? null : null;
     return {
@@ -568,6 +658,14 @@ export class AttendanceService {
           r.distanceToSiteM ?? '',
           r.deviceId ?? '',
         ]
+          .map(esc)
+          .join(','),
+      );
+    }
+    // Leave days that were never checked in — same columns, LEAVE status, no times.
+    for (const d of await this.leaveDaysFor(where, f, rows)) {
+      lines.push(
+        [d.date, d.externalId, d.name, d.kind, d.siteName ?? '', ATTENDANCE_STATUS.LEAVE, '', '', '', '']
           .map(esc)
           .join(','),
       );

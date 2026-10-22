@@ -67,7 +67,7 @@ Base URL: `/api/v1` — كل الطلبات محمية بـ `Authorization: Bear
 
 ممنوع تشيك ان مزدوج: `ALREADY_CHECKED_IN` (`409`)، و`check-out` بلا سجل مفتوح ⇒ `NO_OPEN_RECORD` (`409`). نهاية الوردية بفترة سماح `shiftGraceMin=30` (أو `schedule.graceMin`) ثم حالة `MISSING_CHECKOUT` وتنبيه `CHECKOUT_MISSING`.
 
-**أثر الإجازة المعتمدة (انظر 3.1):** إذا كان يوم العمل داخل إجازة `APPROVED` لنفس الموظف، فـ `check-in` يُرفض بـ **`409 ON_APPROVED_LEAVE`** وجسم `{ code, leave: { id, dateFrom, dateTo } }`، و`GET /attendance/me/today` يرجع `currentStatus: "ON_LEAVE"` مع حقل `leave` — والتطبيق يقفل زر «بدء اليوم» في اليوم ده. `GET /attendance` (و`?format=csv`) يضيف **صفوفًا مُولَّدة** بحالة `LEAVE` لكل يوم إجازة معتمدة بلا سجل حضور (`id = "leave:<leaveId>"`، `checkInTs/checkOutTs = null`)، و`stats.onLeave` يعدّها، وغياب `/reports/daily` = النشطون − الحاضرون − أيام الإجازة.
+**أثر الإجازة المعتمدة (انظر 3.1):** إذا كان يوم العمل داخل إجازة `APPROVED` لنفس الموظف، فـ `check-in` يُرفض بـ **`409 ON_APPROVED_LEAVE`** وجسم `{ code, leave: { id, dateFrom, dateTo } }`، و`GET /attendance/me/today` يرجع `currentStatus: "ON_LEAVE"` مع حقل `leave` — والتطبيق يقفل زر «بدء اليوم» في اليوم ده. اليوم اللي فيه حضور فعلي يكسب: الإجازة لا تلغي سجل الحضور ولا تُولّد صف ثاني. `GET /attendance` (و`?format=csv` و`/attendance/export`) يضيف **صفوفًا مُولَّدة** بحالة `LEAVE` لكل يوم إجازة معتمدة بلا سجل حضور (`id = "leave:<leaveId>:<date>"` — صف لكل يوم، `checkInTs/checkOutTs = null`، `exception = false`)، و`stats.onLeave` يعدّها، و`?status=LEAVE` يُرجع صفوف الإجازات فقط. `/reports/timesheet` يدمج الأيام دي كصفوف `status: "LEAVE"` بـ `hoursWorked: 0`، و`/reports/daily` عنده `kpis.onLeave` و`absent = النشطون − الحاضرون − أيام الإجازة`.
 
 ### 3.1 Leave (الإجازات)
 

@@ -2,7 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { GeoService } from '../../common/geo/geo.service';
 import { PrismaService } from '../../common/prisma.service';
 import { round, workDateOf } from '../../common/utils';
-import { RULE_DEFAULTS } from '../../shared/constants';
+import { ATTENDANCE_STATUS, RULE_DEFAULTS } from '../../shared/constants';
+import { LeaveService } from '../leave/leave.service';
 import { tabular, toCsv, type Column, type CsvValue } from './csv';
 
 type Cell = CsvValue;
@@ -24,6 +25,10 @@ const dayRange = (date: string): { gte: Date; lte: Date } => ({
   gte: new Date(`${date}T00:00:00.000Z`),
   lte: new Date(`${date}T23:59:59.999Z`),
 });
+
+/** Open-ended window bounds for the leave synthesizer when a report filters only one side. */
+const DAY_MIN = '1970-01-01';
+const DAY_MAX = '9999-12-31';
 
 /** from/to may be YYYY-MM-DD or ISO datetimes; date-only bounds expand to the full UTC day. */
 const timeRange = (from?: string, to?: string): Record<string, Date> => {
@@ -61,7 +66,11 @@ function ridingMinutesBy(
 
 @Injectable()
 export class ReportsService {
-  constructor(private readonly prisma: PrismaService, private readonly geo: GeoService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly geo: GeoService,
+    private readonly leave: LeaveService,
+  ) {}
 
   private async employeeIdForUser(userId: string): Promise<string | null> {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { employeeId: true } });
@@ -182,6 +191,9 @@ export class ReportsService {
     // ---- JSON body the Reports page renders (kpis + charts) ----
     const activeEmployeeCount = await this.prisma.employee.count({ where: { active: true } });
     const present = attendance.filter((a) => a.checkInAt).length;
+    // An approved-leave day is neither present nor absent — it is its own bucket.
+    const checkedInIds = new Set(attendance.filter((a) => a.checkInAt).map((a) => a.employeeId));
+    const onLeave = (await this.leave.approvedDaysInRange(date, date)).filter((l) => !checkedInIds.has(l.employeeId)).length;
     const driverIdsWithPositions = new Set(
       positions.filter((p) => p.employee?.kind === 'DRIVER').map((p) => p.employeeId),
     );
@@ -202,7 +214,8 @@ export class ReportsService {
       date,
       kpis: {
         present,
-        absent: Math.max(0, activeEmployeeCount - present),
+        onLeave,
+        absent: Math.max(0, activeEmployeeCount - present - onLeave),
         activeDrivers: driverIdsWithPositions.size,
         openAlerts: alerts.filter((a) => a.status === 'OPEN').length,
         criticalAlerts: alerts.filter((a) => a.severity === 'CRITICAL').length,
@@ -280,14 +293,32 @@ export class ReportsService {
     }
 
     interface R { name: Cell; workDate: string; checkIn: Cell; checkOut: Cell; status: string; distanceToSiteM: Cell; exception: boolean }
-    const data: R[] = rows.map((a) => ({
-      name: a.employee?.name ?? '',
+    /** One timesheet line — a checked-in day or an approved-leave day that was never checked in. */
+    type SheetRow = { employeeId: string; workDate: string; name: string; checkInAt: Date | null; checkOutAt: Date | null; status: string; distanceToSiteM: number | null };
+    const checkedKeys = new Set(rows.filter((a) => a.checkInAt).map((a) => `${a.employeeId}|${a.workDate}`));
+    const sheet: SheetRow[] = [
+      ...rows.map((a) => ({
+        employeeId: a.employeeId,
+        workDate: a.workDate,
+        name: a.employee?.name ?? '',
+        checkInAt: a.checkInAt,
+        checkOutAt: a.checkOutAt,
+        status: a.status,
+        distanceToSiteM: a.distanceToSiteM,
+      })),
+      ...(await this.leave.approvedDaysInRange(fromD ?? DAY_MIN, toD ?? DAY_MAX))
+        .filter((l) => (!employeeId || l.employeeId === employeeId) && !checkedKeys.has(`${l.employeeId}|${l.date}`))
+        .map((l) => ({ employeeId: l.employeeId, workDate: l.date, name: l.name, checkInAt: null, checkOutAt: null, status: ATTENDANCE_STATUS.LEAVE, distanceToSiteM: null })),
+    ].sort((a, b) => b.workDate.localeCompare(a.workDate));
+
+    const data: R[] = sheet.map((a) => ({
+      name: a.name,
       workDate: a.workDate,
       checkIn: a.checkInAt ? a.checkInAt.toISOString() : '',
       checkOut: a.checkOutAt ? a.checkOutAt.toISOString() : '',
       status: a.status,
       distanceToSiteM: a.distanceToSiteM ?? '',
-      exception: a.status !== 'VALID',
+      exception: a.status !== ATTENDANCE_STATUS.VALID && a.status !== ATTENDANCE_STATUS.LEAVE,
     }));
     const cols: Column<R>[] = [
       { label: 'name', get: (r) => r.name },
@@ -299,9 +330,9 @@ export class ReportsService {
       { label: 'exception', get: (r) => (r.exception ? 'YES' : 'NO') },
     ];
     const t = tabular(cols, data);
-    const jsonRows = rows.map((a) => ({
+    const jsonRows = sheet.map((a) => ({
       userId: a.employeeId,
-      userName: a.employee?.name ?? '',
+      userName: a.name,
       date: a.workDate,
       checkIn: a.checkInAt ? a.checkInAt.toISOString() : null,
       checkOut: a.checkOutAt ? a.checkOutAt.toISOString() : null,
