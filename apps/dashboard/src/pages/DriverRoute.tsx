@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '@/api/client';
-import type { RouteResponse } from '@/api/types';
+import type { AlertsResponse, MapEvent, RouteResponse } from '@/api/types';
 import { useAsync } from '@/hooks/useAsync';
 import { MOTION_STATE_AR } from '@shared';
-import RouteMap from '@/components/maps/RouteMap';
-import { MOTION_COLORS } from '@/components/maps/icons';
+import RouteMap, { nearestPointIndex } from '@/components/maps/RouteMap';
+import { MOTION_COLORS, eventGlyph } from '@/components/maps/icons';
 import { Btn, Chip, ErrorState, IconBtn, Num, Skeleton } from '@/components/ui';
 import { Icon } from '@/components/Icon';
 import { fmtTime, todayISODate } from '@/utils/format';
@@ -15,8 +15,20 @@ const SPEEDS = [1, 2, 4, 8, 16] as const;
 
 export default function DriverRoutePage() {
   const { userId = '' } = useParams();
-  const [date] = useState(todayISODate());
+  const [searchParams] = useSearchParams();
+  // The live map hands over its chosen day through ?date=, so a filtered day stays filtered.
+  const [date, setDate] = useState(() => searchParams.get('date') || todayISODate());
   const res = useAsync<RouteResponse>(() => api.get('/positions/route', { userId, date }), [userId, date]);
+  const dayRes = useAsync<AlertsResponse>(
+    () =>
+      api.get('/alerts', {
+        userId,
+        from: `${date}T00:00:00.000Z`,
+        to: `${date}T23:59:59.999Z`,
+        pageSize: 200,
+      }),
+    [userId, date],
+  );
   const [idx, setIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(4);
@@ -25,6 +37,10 @@ export default function DriverRoutePage() {
   useEffect(() => {
     subscribeRoute(userId);
   }, [userId]);
+
+  useEffect(() => {
+    setIdx(0);
+  }, [date]);
 
   const route = res.data;
   const count = route?.points.length ?? 0;
@@ -59,6 +75,28 @@ export default function DriverRoutePage() {
     return runs;
   }, [route]);
 
+  const events = useMemo<MapEvent[]>(
+    () =>
+      (dayRes.data?.alerts ?? dayRes.data?.data ?? [])
+        .filter((a) => Number.isFinite(a.meta?.lat) && Number.isFinite(a.meta?.lng))
+        .map((a) => ({
+          id: a.id,
+          type: a.type,
+          lat: a.meta.lat as number,
+          lng: a.meta.lng as number,
+          title: a.title,
+          ts: a.createdAt,
+          severity: a.severity,
+        })),
+    [dayRes.data],
+  );
+
+  // Pin each event on the point it happened at, so its symbol sits on the day's line, not in a list.
+  const marks = useMemo(() => {
+    if (!route || count < 2) return [];
+    return events.map((ev) => ({ ev, at: (nearestPointIndex(route, ev.ts) / (count - 1)) * 100 }));
+  }, [route, count, events]);
+
   if (res.loading) {
     return (
       <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-3">
@@ -87,6 +125,15 @@ export default function DriverRoutePage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <input
+            dir="ltr"
+            type="date"
+            value={date}
+            max={todayISODate()}
+            onChange={(e) => e.target.value && setDate(e.target.value)}
+            className="input !h-9 !w-auto px-2 py-0"
+            aria-label="اختيار اليوم"
+          />
           {route.replayedPoints > 0 && (
             <Chip tone="violet" title="وصلت هذه النقاط من المخزن المحلي أوف لاين">
               معاد بثه <Num>{replayedPct}%</Num>
@@ -102,12 +149,17 @@ export default function DriverRoutePage() {
               <Num>{route.stops.length}</Num> توقفات
             </Chip>
           )}
+          {events.length > 0 && (
+            <Chip tone="red" title="أحداث اليوم المرشومة على الخط">
+              <Num>{events.length}</Num> حدث
+            </Chip>
+          )}
         </div>
       </div>
 
       {/* map */}
       <div className="card relative min-h-0 flex-1 overflow-hidden">
-        <RouteMap route={route} index={idx} />
+        <RouteMap route={route} index={idx} events={events} onSelectPoint={setIdx} />
         {current && (
           <div className="card absolute bottom-3 start-3 z-[500] px-3 py-2" style={{ fontSize: '.78rem' }}>
             <div className="flex items-center gap-3">
@@ -155,18 +207,38 @@ export default function DriverRoutePage() {
           </Btn>
         </div>
 
-        {/* motion-state timeline under the map */}
-        <div className="flex h-3 overflow-hidden rounded-full" dir="ltr" title="تسلسل حالات الحركة">
-          {motionRuns.map((r, i) => (
-            <div
-              key={i}
-              style={{
-                width: `${((r.to - r.from + 1) / count) * 100}%`,
-                background: MOTION_COLORS[r.state],
-                opacity: idx >= r.from && idx <= r.to ? 1 : 0.45,
-              }}
-            />
+        {/* motion-state timeline under the map, with every abnormal event pinned at its own spot */}
+        <div className="relative pt-5" dir="ltr">
+          {marks.map(({ ev, at }) => (
+            <button
+              key={ev.id}
+              type="button"
+              onClick={() => setIdx(nearestPointIndex(route, ev.ts))}
+              className="absolute top-0 -translate-x-1/2 leading-none transition-transform hover:scale-125"
+              style={{ left: `${at}%`, fontSize: '14px' }}
+              title={`${ev.title} — ${fmtTime(ev.ts)}`}
+              aria-label={ev.title}
+            >
+              {eventGlyph(ev.type)}
+            </button>
           ))}
+          <div className="flex h-3 overflow-hidden rounded-full" title="تسلسل حالات الحركة">
+            {motionRuns.map((r, i) => (
+              <div
+                key={i}
+                style={{
+                  width: `${((r.to - r.from + 1) / count) * 100}%`,
+                  background: MOTION_COLORS[r.state],
+                  opacity: idx >= r.from && idx <= r.to ? 1 : 0.45,
+                }}
+              />
+            ))}
+          </div>
+          <div
+            className="absolute bottom-[-3px] h-[18px] w-[3px] -translate-x-1/2 rounded-full bg-brand-700"
+            style={{ left: `${(idx / Math.max(1, count - 1)) * 100}%` }}
+            aria-hidden="true"
+          />
         </div>
         <div className="flex flex-wrap items-center gap-3" style={{ fontSize: '.72rem' }}>
           {(['WALKING', 'RIDING', 'STOPPED', 'UNKNOWN'] as const).map((s) => (

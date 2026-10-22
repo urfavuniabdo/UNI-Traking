@@ -1,12 +1,16 @@
 import { useEffect, useMemo } from 'react';
 import { CircleMarker, MapContainer, Marker, Polyline, TileLayer, Tooltip, useMap } from 'react-leaflet';
-import type { RouteResponse } from '@/api/types';
-import { MOTION_COLORS } from './icons';
+import type { MapEvent, RouteResponse } from '@/api/types';
+import { MOTION_COLORS, eventIcon } from './icons';
 import { driverIcon } from './icons';
+
+const SEVERITY_COLORS: Record<string, string> = { CRITICAL: '#dc2626', WARNING: '#d97706', INFO: '#2563eb' };
 
 interface Props {
   route: RouteResponse;
   index: number;
+  /** Abnormal events of the day, pinned where they happened. */
+  events?: MapEvent[];
   onSelectPoint?: (index: number) => void;
   className?: string;
 }
@@ -31,7 +35,7 @@ function L_latLngBounds(positions: [number, number][]): [number, number][] {
   ];
 }
 
-export default function RouteMap({ route, index, onSelectPoint, className = '' }: Props) {
+export default function RouteMap({ route, index, events = [], onSelectPoint, className = '' }: Props) {
   const coords = useMemo(() => route.points.map((p) => [p.lat, p.lng] as [number, number]), [route]);
   const current = route.points[Math.min(index, route.points.length - 1)];
 
@@ -87,9 +91,39 @@ export default function RouteMap({ route, index, onSelectPoint, className = '' }
         </CircleMarker>
       ))}
 
+      {events.map((ev) => (
+        <Marker
+          key={ev.id}
+          position={[ev.lat, ev.lng]}
+          icon={eventIcon(ev.type, SEVERITY_COLORS[ev.severity] ?? '#dc2626')}
+          eventHandlers={{ click: () => onSelectPoint?.(nearestPointIndex(route, ev.ts)) }}
+        >
+          <Tooltip direction="top" offset={[0, -14]}>
+            <span style={{ direction: 'rtl', fontFamily: 'Cairo' }}>
+              <b>{ev.title}</b>
+            </span>
+          </Tooltip>
+        </Marker>
+      ))}
+
       {current && (
         <Marker position={[current.lat, current.lng]} icon={driverIcon(current.motionState, { selected: true })} />
       )}
     </MapContainer>
   );
+}
+
+/** Which recorded point an event happened at, so tapping its symbol can jump the replay there. */
+export function nearestPointIndex(route: RouteResponse, ts: string): number {
+  const target = Date.parse(ts);
+  let best = 0;
+  let bestGap = Number.POSITIVE_INFINITY;
+  route.points.forEach((p, i) => {
+    const d = Math.abs(Date.parse(p.clientTs) - target);
+    if (d < bestGap) {
+      bestGap = d;
+      best = i;
+    }
+  });
+  return best;
 }
