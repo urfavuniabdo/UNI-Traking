@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "vite build --mode smoke --ssr src/smoke-entry.ts --outDir dist-smoke && node dist-smoke/smoke-entry.mjs"
   },
   "dependencies": {
     "chart.js": "^4.4.4",
