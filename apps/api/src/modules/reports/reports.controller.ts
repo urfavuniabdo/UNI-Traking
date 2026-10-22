@@ -1,7 +1,7 @@
 import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { JwtAuthGuard, Roles, RolesGuard } from '../../common/auth/guards';
-import { ReportsService, type ReportTabular } from './reports.service';
+import { ReportsService, type ReportResult } from './reports.service';
 
 @Controller('reports')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -44,18 +44,16 @@ export class ReportsController {
     return this.reports.liveKpis();
   }
 
-  private async deliver(load: () => Promise<ReportTabular>, format: string, res: Response, filename: string): Promise<void> {
+  private async deliver(load: () => Promise<ReportResult>, format: string, res: Response, filename: string): Promise<void> {
     const result = await load();
     if (format === 'csv') {
+      // Raw CSV text (dashboard downloadCsv() reads res.text() in real mode) — stable, Arabic-safe headers.
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}.csv"`);
       res.send(ReportsService.csvOf(result));
       return;
     }
-    // JSON: strip the CSV-only fields and return the report body.
-    const { headers: _h, rows: _r, ...body } = result;
-    void _h;
-    void _r;
-    res.status(200).json(body);
+    // JSON: the exact envelope the report pages render (rows are object arrays, not CSV cells).
+    res.status(200).json(result.body);
   }
 }

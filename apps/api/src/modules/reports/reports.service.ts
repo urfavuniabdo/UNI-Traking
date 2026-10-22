@@ -6,17 +6,57 @@ import { tabular, toCsv, type Column, type CsvValue } from './csv';
 
 type Cell = CsvValue;
 
-export interface ReportTabular {
+const TZ = () => process.env.DASHBOARD_TIMEZONE || 'Africa/Cairo';
+
+/**
+ * Every report method returns BOTH surfaces:
+ *  - `headers`/`rows`: stable, Arabic-safe CSV cells (`?format=csv` sends these raw),
+ *  - `body`: the exact JSON envelope the dashboard pages render.
+ */
+export interface ReportResult {
   headers: string[];
   rows: Cell[][];
-  data: Record<string, Cell>[];
-  [k: string]: unknown;
+  body: Record<string, unknown>;
 }
 
 const dayRange = (date: string): { gte: Date; lte: Date } => ({
   gte: new Date(`${date}T00:00:00.000Z`),
   lte: new Date(`${date}T23:59:59.999Z`),
 });
+
+/** from/to may be YYYY-MM-DD or ISO datetimes; date-only bounds expand to the full UTC day. */
+const timeRange = (from?: string, to?: string): Record<string, Date> => {
+  const r: Record<string, Date> = {};
+  if (from) r.gte = new Date(/^\d{4}-\d{2}-\d{2}$/.test(from) ? `${from}T00:00:00.000Z` : from);
+  if (to) r.lte = new Date(/^\d{4}-\d{2}-\d{2}$/.test(to) ? `${to}T23:59:59.999Z` : to);
+  return r;
+};
+
+/** Sum of consecutive RIDING-position deltas (capped at the offline gap) per bucket key. */
+function ridingMinutesBy(
+  points: Array<{ clientTs: Date }>,
+  keyOf: (p: { clientTs: Date }) => string | null,
+): Map<string, number> {
+  const byKey = new Map<string, number[]>();
+  for (const p of points) {
+    const k = keyOf(p);
+    if (!k) continue;
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k)!.push(new Date(p.clientTs).getTime());
+  }
+  const capMs = RULE_DEFAULTS.gapMinMin * 60_000;
+  const out = new Map<string, number>();
+  for (const [k, arr] of byKey) {
+    arr.sort((a, b) => a - b);
+    let s = 0;
+    for (let i = 0; i < arr.length - 1; i++) {
+      const dt = arr[i + 1] - arr[i];
+      if (dt > 0 && dt <= capMs) s += dt;
+    }
+    out.set(k, round(s / 60_000, 1) ?? 0);
+  }
+  return out;
+}
 
 @Injectable()
 export class ReportsService {
@@ -29,20 +69,20 @@ export class ReportsService {
     return emp?.id ?? null;
   }
 
-  /** GET /reports/daily?date — per-driver rollup, replayed data split out. */
-  async daily(dateInput?: string): Promise<ReportTabular> {
+  /** GET /reports/daily?date — JSON body for the Reports page; CSV stays the per-driver rollup. */
+  async daily(dateInput?: string): Promise<ReportResult> {
     const date = dateInput && /^\d{4}-\d{2}-\d{2}$/.test(dateInput) ? dateInput : workDateOf(new Date());
     const range = dayRange(date);
 
     const positions = await this.prisma.position.findMany({
       where: { clientTs: range },
       orderBy: { clientTs: 'asc' },
-      include: { employee: { select: { id: true, name: true, phone: true } } },
+      include: { employee: { select: { id: true, name: true, phone: true, kind: true } } },
     });
     const attendance = await this.prisma.attendanceRecord.findMany({ where: { workDate: date }, include: { employee: { select: { name: true } } } });
     const trips = await this.prisma.trip.findMany({ where: { startedAt: range } });
     const stops = await this.prisma.stopEvent.findMany({ where: { startedAt: range } });
-    const alerts = await this.prisma.alert.findMany({ where: { createdAt: range }, select: { employeeId: true, type: true } });
+    const alerts = await this.prisma.alert.findMany({ where: { createdAt: range }, select: { employeeId: true, type: true, status: true, severity: true } });
 
     const byEmp = new Map<string, typeof positions>();
     for (const p of positions) {
@@ -137,11 +177,46 @@ export class ReportsService {
       { label: 'stoppedMin', get: (r) => r.stoppedMin },
     ];
     const t = tabular(cols, rows);
-    return { ...t, date, meta: { drivers: rows.length, alertsByType: Object.fromEntries(rows.reduce((m, r) => { for (const [k, v] of Object.entries(r.alertsByType)) m.set(k, (m.get(k) ?? 0) + v); return m; }, new Map<string, number>())) } };
+
+    // ---- JSON body the Reports page renders (kpis + charts) ----
+    const activeEmployeeCount = await this.prisma.employee.count({ where: { active: true } });
+    const present = attendance.filter((a) => a.checkInAt).length;
+    const driverIdsWithPositions = new Set(
+      positions.filter((p) => p.employee?.kind === 'DRIVER').map((p) => p.employeeId),
+    );
+    const alertTypeMap = new Map<string, { type: string; count: number; open: number }>();
+    for (const a of alerts) {
+      const e = alertTypeMap.get(a.type) ?? { type: a.type, count: 0, open: 0 };
+      e.count += 1;
+      if (a.status === 'OPEN') e.open += 1;
+      alertTypeMap.set(a.type, e);
+    }
+    const hourFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ(), hour: '2-digit', hour12: false });
+    const hourMap = new Map<number, number>();
+    for (const p of positions) {
+      const h = parseInt(hourFmt.format(p.clientTs), 10) % 24;
+      hourMap.set(h, (hourMap.get(h) ?? 0) + 1);
+    }
+    const body = {
+      date,
+      kpis: {
+        present,
+        absent: Math.max(0, activeEmployeeCount - present),
+        activeDrivers: driverIdsWithPositions.size,
+        openAlerts: alerts.filter((a) => a.status === 'OPEN').length,
+        criticalAlerts: alerts.filter((a) => a.severity === 'CRITICAL').length,
+        kmDriven: round(trips.reduce((s, tr) => s + (tr.distanceKm ?? 0), 0), 1) ?? 0,
+        exceptions: attendance.filter((a) => a.status !== 'VALID').length,
+        offlineMinutes: round(rows.reduce((s, r) => s + r.offlineMinutes, 0), 1) ?? 0,
+      },
+      alertsByType: [...alertTypeMap.values()].sort((a, b) => b.count - a.count),
+      hourlyPositions: [...hourMap.entries()].sort((a, b) => a[0] - b[0]).map(([hour, count]) => ({ hour, count })),
+    };
+    return { headers: t.headers, rows: t.rows, body };
   }
 
   /** GET /reports/route?userId&date — tabular stop list + geometry meta. */
-  async route(userId: string, date: string): Promise<ReportTabular> {
+  async route(userId: string, date: string): Promise<ReportResult> {
     const employeeId = await this.employeeIdForUser(userId);
     const range = dayRange(date);
     const positions = employeeId
@@ -165,7 +240,11 @@ export class ReportsService {
       { label: 'lng', get: (r) => r.lng },
     ];
     const t = tabular(cols, stopRows);
-    return { ...t, userId, employeeId, date, meta: { distanceKm: round(distanceM / 1000, 2), pointCount: positions.length, replayed: positions.some((p) => p.buffered || p.stale) } };
+    return {
+      headers: t.headers,
+      rows: t.rows,
+      body: { userId, employeeId, date, stops: t.data, meta: { distanceKm: round(distanceM / 1000, 2), pointCount: positions.length, replayed: positions.some((p) => p.buffered || p.stale) } },
+    };
   }
 
   private haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -177,8 +256,8 @@ export class ReportsService {
     return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
   }
 
-  /** GET /reports/timesheet?from&to&userId — attendance rows + exceptions. */
-  async timesheet(from?: string, to?: string, userId?: string): Promise<ReportTabular> {
+  /** GET /reports/timesheet?from&to&userId — CSV stays the detail list; JSON body is the page's rows[]. */
+  async timesheet(from?: string, to?: string, userId?: string): Promise<ReportResult> {
     const employeeId = userId ? await this.employeeIdForUser(userId) : null;
     const where: Record<string, unknown> = {};
     if (employeeId) where.employeeId = employeeId;
@@ -190,7 +269,24 @@ export class ReportsService {
       if (toD) wd.lte = toD;
       where.workDate = wd;
     }
-    const rows = await this.prisma.attendanceRecord.findMany({ where, include: { employee: { select: { name: true } } }, orderBy: { workDate: 'desc' }, take: 2000 });
+    const rows = await this.prisma.attendanceRecord.findMany({ where, include: { employee: { select: { id: true, name: true } } }, orderBy: { workDate: 'desc' }, take: 2000 });
+
+    // Attendance has no `replayed` column — derive per employee+workDate from buffered/stale positions.
+    const replayedKeys = new Set<string>();
+    try {
+      const hits = await this.prisma.position.findMany({
+        where: {
+          employeeId: { in: [...new Set(rows.map((r) => r.employeeId))] },
+          ...(fromD || toD ? { clientTs: { gte: new Date(`${fromD ?? '1970-01-01'}T00:00:00Z`), lte: new Date(`${toD ?? '2999-12-31'}T23:59:59.999Z`) } } : {}),
+          OR: [{ buffered: true }, { stale: true }],
+        },
+        select: { employeeId: true, clientTs: true },
+      });
+      for (const h of hits) replayedKeys.add(`${h.employeeId}|${workDateOf(h.clientTs, TZ())}`);
+    } catch {
+      /* stub state — rows stay non-replayed */
+    }
+
     interface R { name: Cell; workDate: string; checkIn: Cell; checkOut: Cell; status: string; distanceToSiteM: Cell; exception: boolean }
     const data: R[] = rows.map((a) => ({
       name: a.employee?.name ?? '',
@@ -211,14 +307,25 @@ export class ReportsService {
       { label: 'exception', get: (r) => (r.exception ? 'YES' : 'NO') },
     ];
     const t = tabular(cols, data);
-    return { ...t, exceptions: data.filter((d) => d.exception), meta: { rows: data.length, exceptions: data.filter((d) => d.exception).length } };
+    const jsonRows = rows.map((a) => ({
+      userId: a.employeeId,
+      userName: a.employee?.name ?? '',
+      date: a.workDate,
+      checkIn: a.checkInAt ? a.checkInAt.toISOString() : null,
+      checkOut: a.checkOutAt ? a.checkOutAt.toISOString() : null,
+      hoursWorked:
+        a.checkInAt && a.checkOutAt
+          ? round((a.checkOutAt.getTime() - a.checkInAt.getTime()) / 3_600_000, 1) ?? 0
+          : 0,
+      status: a.status,
+      replayed: replayedKeys.has(`${a.employeeId}|${a.workDate}`),
+    }));
+    return { headers: t.headers, rows: t.rows, body: { rows: jsonRows } };
   }
 
-  /** GET /reports/exceptions?from&to — open/ack alerts grouped with age. */
-  async exceptions(from?: string, to?: string): Promise<ReportTabular> {
-    const range: Record<string, Date> = {};
-    if (from) range.gte = new Date(from);
-    if (to) range.lte = new Date(to);
+  /** GET /reports/exceptions?from&to — CSV keeps the open/ack detail list; JSON body is the grouped breakdown. */
+  async exceptions(from?: string, to?: string): Promise<ReportResult> {
+    const range = timeRange(from, to);
     const where: Record<string, unknown> = { status: { in: ['OPEN', 'ACK'] } };
     if (Object.keys(range).length) where.createdAt = range;
     const rows = await this.prisma.alert.findMany({ where, include: { employee: { select: { name: true } } }, orderBy: { createdAt: 'desc' }, take: 2000 });
@@ -243,16 +350,40 @@ export class ReportsService {
       { label: 'replayed', get: (r) => (r.replayed ? 'YES' : 'NO') },
     ];
     const t = tabular(cols, data);
-    const grouped: Record<string, number> = {};
-    for (const d of data) grouped[d.type] = (grouped[d.type] ?? 0) + 1;
-    return { ...t, grouped, meta: { open: data.length } };
+
+    // grouped breakdown for the page: one row per alert type, all statuses counted, unresolved = OPEN|ACK.
+    // (Aggregated in memory — Prisma groupBy + Date filters are unreliable on the SQLite dev driver.)
+    const scoped = await this.prisma.alert.findMany({
+      where: Object.keys(range).length ? { createdAt: range } : {},
+      select: { type: true, status: true },
+      take: 20000,
+    });
+    const byType = new Map<string, { type: string; count: number; unresolved: number }>();
+    for (const a of scoped) {
+      const e = byType.get(a.type) ?? { type: a.type, count: 0, unresolved: 0 };
+      e.count += 1;
+      if (a.status !== 'RESOLVED') e.unresolved += 1;
+      byType.set(a.type, e);
+    }
+    const grouped = [...byType.values()].sort((a, b) => b.count - a.count);
+    const groupedMap: Record<string, number> = {};
+    for (const g of grouped) groupedMap[g.type] = g.count;
+    return {
+      headers: t.headers,
+      rows: t.rows,
+      body: {
+        rows: grouped,
+        grouped: groupedMap,
+        total: grouped.reduce((s, g) => s + g.count, 0),
+        unresolved: grouped.reduce((s, g) => s + g.unresolved, 0),
+        meta: { open: data.length },
+      },
+    };
   }
 
-  /** GET /reports/mileage?from&to&groupBy=driver|zone */
-  async mileage(from?: string, to?: string, groupBy: 'driver' | 'zone' = 'driver'): Promise<ReportTabular> {
-    const range: Record<string, Date> = {};
-    if (from) range.gte = new Date(from);
-    if (to) range.lte = new Date(to);
+  /** GET /reports/mileage?from&to&groupBy=driver|zone — CSV keeps the total list; JSON body is the chart rows. */
+  async mileage(from?: string, to?: string, groupBy: 'driver' | 'zone' = 'driver'): Promise<ReportResult> {
+    const range = timeRange(from, to);
     const where: Record<string, unknown> = {};
     if (Object.keys(range).length) where.startedAt = range;
     const trips = await this.prisma.trip.findMany({ where, include: { employee: { select: { name: true } }, zone: { select: { name: true } } }, take: 5000 });
@@ -273,7 +404,55 @@ export class ReportsService {
       { label: 'trips', get: (r) => r.trips },
     ];
     const t = tabular(cols, data);
-    return { ...t, groupBy, meta: { total: round(data.reduce((s, r) => s + r.distanceKm, 0), 2) } };
+
+    // replayed km: distance of trips flagged replayed (offline batch ingest).
+    const replayedBy = new Map<string, number>();
+    const tripZone = new Map<string, string | null>();
+    for (const tr of trips) {
+      tripZone.set(tr.id, tr.zoneId);
+      if (!tr.replayed) continue;
+      const key = groupBy === 'zone' ? (tr.zoneId ?? 'none') : tr.employeeId;
+      replayedBy.set(key, (replayedBy.get(key) ?? 0) + (tr.distanceKm ?? 0));
+    }
+
+    // riding minutes: consecutive RIDING positions (capped at the offline gap), bucketed per group.
+    let riding = new Map<string, number>();
+    try {
+      const ridingPts = await this.prisma.position.findMany({
+        where: { ...(Object.keys(range).length ? { clientTs: range } : {}), motionState: 'RIDING' },
+        select: { employeeId: true, tripId: true, clientTs: true },
+        orderBy: { clientTs: 'asc' },
+      });
+      riding = ridingMinutesBy(
+        ridingPts,
+        (p) => {
+          const pt = p as unknown as { employeeId: string; tripId: string | null };
+          if (groupBy === 'zone') return pt.tripId ? tripZone.get(pt.tripId) ?? null : null;
+          return pt.employeeId;
+        },
+      );
+    } catch {
+      /* stub state — ridingMin stays 0 */
+    }
+
+    const jsonRows = data.map((r) => ({
+      key: r.key,
+      label: String(r.name ?? ''),
+      km: r.distanceKm,
+      ridingMin: riding.get(r.key) ?? 0,
+      replayedKm: round(replayedBy.get(r.key) ?? 0, 2) ?? 0,
+    }));
+    return {
+      headers: t.headers,
+      rows: t.rows,
+      body: {
+        groupBy,
+        from: from ?? null,
+        to: to ?? null,
+        rows: jsonRows,
+        totalKm: round(jsonRows.reduce((s, r) => s + r.km, 0), 1) ?? 0,
+      },
+    };
   }
 
   /** GET /reports/live-kpis — dashboard header cards. */
