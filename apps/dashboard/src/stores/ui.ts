@@ -53,7 +53,9 @@ export const useUi = create<UiState>()(
       setNotifyPermission: (p) => set({ notifyPermission: p }),
       pushToast: (t) => {
         const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        set({ toasts: [...get().toasts.slice(-4), { ...t, id }] });
+        // Keep the full pool (bounded) so the Toaster can collapse the overflow behind a
+        // "+N" pill; the visible cap lives in the Toaster, not here. Auto-dismiss unchanged.
+        set({ toasts: [...get().toasts, { ...t, id }].slice(-50) });
         setTimeout(() => get().dismissToast(id), 6000);
       },
       dismissToast: (id) => set({ toasts: get().toasts.filter((x) => x.id !== id) }),

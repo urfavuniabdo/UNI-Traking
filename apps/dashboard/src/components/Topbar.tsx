@@ -16,8 +16,8 @@ export default function Topbar() {
   return (
     // 60px plain bar on desktop; floating rounded card on small screens
     <header className="shrink-0 px-3 pt-3 lg:h-[60px] lg:px-4 lg:pt-0">
-      <div className="card flex items-center justify-between gap-2 px-3 lg:h-full lg:border-0 lg:bg-transparent lg:px-2 lg:shadow-none">
-        <div className="flex min-w-0 items-center gap-3">
+      <div className="card flex flex-nowrap items-center justify-between gap-2 px-3 lg:h-full lg:border-0 lg:bg-transparent lg:px-2 lg:shadow-none">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <button
             type="button"
             className="btn btn-ghost !min-h-[44px] !px-2.5 lg:hidden"
@@ -36,7 +36,7 @@ export default function Topbar() {
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 flex-nowrap items-center gap-1.5">
           <Link to="/alerts" className="btn btn-ghost relative !min-h-[44px] !px-3" title="تنبيهات حرجة جديدة">
             <Icon name="alerts" />
             {critical > 0 && (
@@ -61,7 +61,7 @@ export default function Topbar() {
           >
             <Icon name={ui.theme === 'dark' ? 'sun' : 'moon'} />
           </button>
-          <span className="ms-1 hidden font-bold muted sm:inline" style={{ fontSize: '.8rem' }}>
+          <span className="ms-1 hidden max-w-[10rem] truncate font-bold muted sm:inline-block" style={{ fontSize: '.8rem' }}>
             {user?.name}
           </span>
           <button

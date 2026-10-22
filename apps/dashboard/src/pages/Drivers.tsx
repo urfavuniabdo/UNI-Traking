@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, downloadCsv } from '@/api/client';
 import type { Employee, LivePosition } from '@/api/types';
 import { useAsync, useNow } from '@/hooks/useAsync';
-import { timeAgo, waLink } from '@/utils/format';
+import { timeAgo } from '@/utils/format';
 import { Chip, EmptyState, ErrorState, Input, MotionChip, Num, Skeleton } from '@/components/ui';
 import { Icon } from '@/components/Icon';
 
@@ -72,16 +72,13 @@ export default function DriversPage() {
                   </div>
                   <div className="flex items-center justify-between pt-1">
                     <span className="text-brand-700 font-bold">الملف ←</span>
-                    <a
-                      href={waLink(e.phone)}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(ev) => ev.preventDefault()}
+                    <span
                       className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-100 text-green-700"
                       title="واتساب"
+                      aria-hidden="true"
                     >
                       <Icon name="whatsapp" className="h-4 w-4" />
-                    </a>
+                    </span>
                   </div>
                 </div>
               </Link>
