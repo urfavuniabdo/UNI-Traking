@@ -15,6 +15,8 @@ import { Bar, Line } from 'react-chartjs-2';
 import { api, downloadCsv } from '@/api/client';
 import type { DailyReport, ExceptionRow, MileageRow, TimesheetRow } from '@/api/types';
 import { useAsync } from '@/hooks/useAsync';
+import { useAuth } from '@/stores/auth';
+import { canSee } from '@/utils/roles';
 import { fmtDateTime, fmtTime, todayISODate } from '@/utils/format';
 import { AR_ALERT_TEXT } from '@shared';
 import { Btn, Card, CardTitle, Chip, EmptyState, ErrorState, Input, Kpi, Num, Skeleton } from '@/components/ui';
@@ -26,14 +28,36 @@ const chartColors = (dark: boolean) => ({
   text: dark ? '#94a3b8' : '#64748b',
 });
 
+const TIMESHEET_STATUS_AR: Record<string, string> = {
+  VALID: 'سليم',
+  OUT_OF_FENCE: 'خارج النطاق',
+  MISSING_CHECKOUT: 'بدون انصراف',
+  AUTO_CLOSED: 'أُغلق تلقائيًا',
+  LEAVE: 'إجازة معتمدة',
+};
+
+const TIMESHEET_TONE: Record<string, 'green' | 'amber' | 'red' | 'gray' | 'violet'> = {
+  VALID: 'green',
+  OUT_OF_FENCE: 'red',
+  MISSING_CHECKOUT: 'amber',
+  AUTO_CLOSED: 'gray',
+  LEAVE: 'violet',
+};
+
 export default function ReportsPage() {
   const [date, setDate] = useState(todayISODate());
   const dark = document.documentElement.getAttribute('data-theme') === 'dark';
   const c = chartColors(dark);
+  const role = useAuth((s) => s.user?.role);
+  // HR gets the attendance half of this page only; the mileage/position panels are tracking (§1).
+  const tracking = canSee(role, '/live');
 
   const daily = useAsync<DailyReport>(() => api.get('/reports/daily', { date }), [date]);
   const [groupBy, setGroupBy] = useState<'driver' | 'zone'>('driver');
-  const mileage = useAsync<{ rows: MileageRow[]; totalKm: number }>(() => api.get('/reports/mileage', { from: date, to: date, groupBy }), [date, groupBy]);
+  const mileage = useAsync<{ rows: MileageRow[]; totalKm: number } | null>(
+    () => (tracking ? api.get('/reports/mileage', { from: date, to: date, groupBy }) : Promise.resolve(null)),
+    [date, groupBy, tracking],
+  );
   const exceptions = useAsync<{ rows: ExceptionRow[]; total: number; unresolved: number }>(() => api.get('/reports/exceptions', { from: date, to: date }), [date]);
   const timesheet = useAsync<{ rows: TimesheetRow[] }>(() => api.get('/reports/timesheet', { from: date, to: date }), [date]);
 
@@ -42,6 +66,23 @@ export default function ReportsPage() {
   }, [dark]);
 
   const d = daily.data;
+  const kpis: { label: string; value: number; suffix?: string; tone: 'green' | 'amber' | 'violet' | 'blue' | 'sky' }[] = d
+    ? [
+        { label: 'حاضرون', value: d.kpis.present, tone: 'green' },
+        { label: 'في إجازة', value: d.kpis.onLeave, tone: 'sky' },
+        { label: 'غياب', value: d.kpis.absent, tone: 'amber' },
+        { label: 'استثناءات', value: d.kpis.exceptions, tone: 'amber' },
+        ...(tracking
+          ? [
+              { label: 'سواقين نشطين', value: d.kpis.activeDrivers, tone: 'blue' as const },
+              { label: 'تنبيهات مفتوحة', value: d.kpis.openAlerts, tone: 'sky' as const },
+              { label: 'تنبيهات حرجة', value: d.kpis.criticalAlerts, tone: 'violet' as const },
+              { label: 'كيلومترات', value: d.kpis.kmDriven, suffix: 'كم', tone: 'green' as const },
+              { label: 'دقائق أوف لاين', value: d.kpis.offlineMinutes, suffix: 'د', tone: 'sky' as const },
+            ]
+          : []),
+      ]
+    : [];
 
   return (
     <div className="space-y-3">
@@ -58,20 +99,15 @@ export default function ReportsPage() {
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-[92px]" />)}</div>
       ) : d ? (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
-          <Kpi label="حاضرون" value={d.kpis.present} tone="green" />
-          <Kpi label="غياب" value={d.kpis.absent} tone="amber" />
-          <Kpi label="سواقين نشطين" value={d.kpis.activeDrivers} tone="blue" />
-          <Kpi label="تنبيهات مفتوحة" value={d.kpis.openAlerts} tone="sky" />
-          <Kpi label="تنبيهات حرجة" value={d.kpis.criticalAlerts} tone="violet" />
-          <Kpi label="كيلومترات" value={d.kpis.kmDriven} suffix="كم" tone="green" />
-          <Kpi label="استثناءات" value={d.kpis.exceptions} tone="amber" />
-          <Kpi label="دقائق أوف لاين" value={d.kpis.offlineMinutes} suffix="د" tone="sky" />
+          {kpis.map((k) => (
+            <Kpi key={k.label} label={k.label} value={k.value} suffix={k.suffix} tone={k.tone} />
+          ))}
         </div>
       ) : (
         <ErrorState message={daily.error ?? 'خطأ'} onRetry={daily.reload} />
       )}
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2" style={{ display: tracking ? undefined : 'none' }}>
         {/* mileage chart */}
         <Card>
           <CardTitle
@@ -178,6 +214,7 @@ export default function ReportsPage() {
         </Card>
 
         {/* alerts by type */}
+        {tracking && (
         <Card>
           <CardTitle>التنبيهات حسب النوع</CardTitle>
           <div className="flex flex-wrap gap-2 p-3 pt-0">
@@ -189,6 +226,7 @@ export default function ReportsPage() {
             {!d && <EmptyState />}
           </div>
         </Card>
+        )}
       </div>
 
       {/* timesheet */}
@@ -200,7 +238,7 @@ export default function ReportsPage() {
             </Btn>
           }
         >
-          كشف الورديات
+          كشف الحضور
         </CardTitle>
         <div className="overflow-x-auto p-3 pt-0">
           {timesheet.loading ? (
@@ -215,22 +253,26 @@ export default function ReportsPage() {
                 <tr className="border-b muted" style={{ borderColor: 'var(--line)', fontSize: '.74rem' }}>
                   <th className="p-2 text-start">الشخص</th>
                   <th className="p-2 text-start">اليوم</th>
-                  <th className="p-2 text-start">ان</th>
-                  <th className="p-2 text-start">أوت</th>
+                  <th className="p-2 text-start">بدء اليوم</th>
+                  <th className="p-2 text-start">إنهاء اليوم</th>
                   <th className="p-2 text-start">ساعات</th>
                   <th className="p-2 text-start">الحالة</th>
                 </tr>
               </thead>
               <tbody>
                 {timesheet.data.rows.map((r, i) => (
-                  <tr key={`${r.userId}-${r.date}`} className="border-b" style={{ borderColor: 'var(--line)', background: r.status === 'MISSING_CHECKOUT' ? '#fef3c7' : undefined }}>
+                  <tr
+                    key={`${r.userId}-${r.date}`}
+                    className="border-b"
+                    style={{ borderColor: 'var(--line)', background: r.status === 'MISSING_CHECKOUT' ? '#fef3c7' : r.status === 'LEAVE' ? '#dbeafe' : undefined }}
+                  >
                     <td className="p-2 font-bold">{r.userName}</td>
                     <td className="p-2"><Num>{r.date}</Num></td>
-                    <td className="p-2"><Num>{fmtTime(r.checkIn)}</Num></td>
-                    <td className="p-2"><Num>{fmtTime(r.checkOut)}</Num></td>
+                    <td className="p-2"><Num>{r.status === 'LEAVE' ? '—' : fmtTime(r.checkIn)}</Num></td>
+                    <td className="p-2"><Num>{r.status === 'LEAVE' ? '—' : fmtTime(r.checkOut)}</Num></td>
                     <td className="p-2"><Num>{r.hoursWorked}</Num></td>
                     <td className="p-2">
-                      <Chip tone={r.status === 'VALID' ? 'green' : r.status === 'MISSING_CHECKOUT' ? 'amber' : 'red'}>{r.status === 'VALID' ? 'سليم' : r.status === 'MISSING_CHECKOUT' ? 'بدون انصراف' : 'خارج النطاق'}</Chip>
+                      <Chip tone={TIMESHEET_TONE[r.status] ?? 'gray'}>{TIMESHEET_STATUS_AR[r.status] ?? r.status}</Chip>
                       {r.replayed && <Chip tone="violet" className="ms-1">معاد بثه</Chip>}
                     </td>
                   </tr>

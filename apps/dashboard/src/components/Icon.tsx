@@ -13,6 +13,7 @@ export type IconName =
   | 'live'
   | 'alerts'
   | 'attendance'
+  | 'leave'
   | 'reports'
   | 'drivers'
   | 'fences'
@@ -37,6 +38,7 @@ const PATHS: Record<IconName, ReactNode> = {
   live: <><circle cx="12" cy="10" r="3" /><path d="M12 2a8 8 0 0 0-8 8c0 5.4 8 12 8 12s8-6.6 8-12a8 8 0 0 0-8-8Z" /></>,
   alerts: <><path d="M12 9v4" /><path d="M12 17h.01" /><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></>,
   attendance: <><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /><path d="m9 16 2 2 4-4" /></>,
+  leave: <><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /><path d="M8.5 15.5h7" /></>,
   reports: <><path d="M3 3v18h18" /><path d="m7 9 4 4 6-8" /></>,
   drivers: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M16 3.5a3.5 3.5 0 0 1 0 7" /><path d="M17.5 13.5a6.5 6.5 0 0 1 4 6.5" /></>,
   fences: <><path d="M9 3 3 6v6l3 9h12l3-9V6l-6-3a4.2 4.2 0 0 0-6 0Z" /><path d="M12 8v5" /><path d="M12 16h.01" /></>,

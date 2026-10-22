@@ -374,6 +374,7 @@ export function buildDailyReport(date: string): DailyReport {
     kpis: {
       present: 15,
       absent: 2,
+      onLeave: 1,
       activeDrivers: drivers.filter((d) => d.online).length,
       openAlerts: open,
       criticalAlerts: crit,

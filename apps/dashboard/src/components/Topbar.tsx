@@ -3,6 +3,7 @@ import { Icon } from './Icon';
 import { NAV_ITEMS } from './Sidebar';
 import { useLive, useUi, useAlertFeed } from '@/stores/ui';
 import { useAuth } from '@/stores/auth';
+import { canSee } from '@/utils/roles';
 import { Num } from './ui';
 
 export default function Topbar() {
@@ -37,14 +38,16 @@ export default function Topbar() {
         </div>
 
         <div className="flex shrink-0 flex-nowrap items-center gap-1.5">
-          <Link to="/alerts" className="btn btn-ghost relative !min-h-[44px] !px-3" title="تنبيهات حرجة جديدة">
-            <Icon name="alerts" />
-            {critical > 0 && (
-              <span className="absolute -top-1 -start-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 font-extrabold text-white" style={{ fontSize: '.68rem' }}>
-                <Num>{critical}</Num>
-              </span>
-            )}
-          </Link>
+          {canSee(user?.role, '/alerts') && (
+            <Link to="/alerts" className="btn btn-ghost relative !min-h-[44px] !px-3" title="تنبيهات حرجة جديدة">
+              <Icon name="alerts" />
+              {critical > 0 && (
+                <span className="absolute -top-1 -start-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 font-extrabold text-white" style={{ fontSize: '.68rem' }}>
+                  <Num>{critical}</Num>
+                </span>
+              )}
+            </Link>
+          )}
           <button
             type="button"
             className="btn btn-ghost !min-h-[44px] !px-2.5"

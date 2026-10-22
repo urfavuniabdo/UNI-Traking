@@ -58,7 +58,7 @@ export function useRealtime(): void {
         }
       }),
       on(SOCKET_EVENTS.ATTENDANCE_CHANGED, () => {
-        useUi.getState().pushToast({ title: 'تحديث حضور', body: 'تم تسجيل بدء أو إنهاء وردية جديد', kind: 'info' });
+        useUi.getState().pushToast({ title: 'تحديث حضور', body: 'تم تسجيل بدء أو إنهاء يوم جديد', kind: 'info' });
       }),
     ];
     return () => offs.forEach((off) => off());

@@ -1,11 +1,11 @@
-import type { AlertType, MotionState, Severity, Role } from '@shared';
+import type { AlertType, LeaveStatus, MotionState, Severity, Role } from '@shared';
 import { ALERT_TYPES, MOTION_STATES, SEVERITY } from '@shared';
 
 export type { AlertType, MotionState, Severity, Role };
 export { ALERT_TYPES, MOTION_STATES, SEVERITY };
 
 export type AlertStatus = 'OPEN' | 'ACK' | 'RESOLVED';
-export type AttendanceStatus = 'VALID' | 'OUT_OF_FENCE' | 'MISSING_CHECKOUT' | 'AUTO_CLOSED';
+export type AttendanceStatus = 'VALID' | 'OUT_OF_FENCE' | 'MISSING_CHECKOUT' | 'AUTO_CLOSED' | 'LEAVE';
 export type WhaStatus = 'PENDING' | 'SENT' | 'NO_PROVIDER';
 
 export interface ApiUser {
@@ -239,6 +239,8 @@ export interface DailyReport {
   kpis: {
     present: number;
     absent: number;
+    /** Days covered by an approved leave request — never counted as absence (§3). */
+    onLeave: number;
     activeDrivers: number;
     openAlerts: number;
     criticalAlerts: number;
@@ -367,6 +369,34 @@ export interface SocketPresence {
   gpsEnabled: boolean;
   dataEnabled?: boolean;
   lastSeen: string;
+}
+
+/** One `LeaveRequest` row as `GET /leave` returns it (CONTRACT §3). */
+export interface LeaveRequestItem {
+  id: string;
+  employeeId: string;
+  employeeName: string | null;
+  employeeExternalId: string | null;
+  kind: string | null;
+  dateFrom: string;
+  dateTo: string;
+  days: number;
+  reason: string | null;
+  status: LeaveStatus;
+  requestedAt: string;
+  decidedById: string | null;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+}
+
+export interface LeaveListResponse {
+  items: LeaveRequestItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  /** Queue size regardless of the active filter — the sidebar badge and the KPI card. */
+  pendingCount: number;
 }
 
 export type ApiErrorCode =

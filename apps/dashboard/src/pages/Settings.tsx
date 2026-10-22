@@ -3,8 +3,10 @@ import { api } from '@/api/client';
 import type { NotificationLogEntry, RuleSettings } from '@/api/types';
 import { useAsync } from '@/hooks/useAsync';
 import { fmtDateTime } from '@/utils/format';
-import { ALERT_TYPES, AR_ALERT_TEXT, type AlertType } from '@shared';
+import { ALERT_TYPES, AR_ALERT_TEXT, ROLES, type AlertType } from '@shared';
 import { Btn, Card, CardTitle, Chip, EmptyState, ErrorState, Input, Num, Skeleton, Toggle } from '@/components/ui';
+import { useAuth } from '@/stores/auth';
+import { HR_RULE_KEYS } from '@/utils/roles';
 import { useUi } from '@/stores/ui';
 
 interface SettingsResponse {
@@ -20,9 +22,12 @@ export default function SettingsPage() {
     [],
   );
   const ui = useUi();
+  const role = useAuth((s) => s.user?.role);
   const [rules, setRules] = useState<RuleSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const toast = ui.pushToast;
+  // HR owns attendance policy only; the tracking thresholds and the delivery log are not his (§1).
+  const hrOnly = role === ROLES.HR;
 
   useEffect(() => {
     if (res.data) setRules(res.data.rules);
@@ -32,7 +37,10 @@ export default function SettingsPage() {
     if (!rules) return;
     setSaving(true);
     try {
-      await api.patch('/settings', { rules });
+      const payload = hrOnly
+        ? Object.fromEntries(Object.entries(rules).filter(([k]) => HR_RULE_KEYS.includes(k)))
+        : rules;
+      await api.patch('/settings', { rules: payload });
       toast({ title: 'تم حفظ الإعدادات', kind: 'info' });
     } catch {
       toast({ title: 'فشل الحفظ', kind: 'error' });
@@ -61,16 +69,20 @@ export default function SettingsPage() {
           {res.error && <ErrorState message={res.error} onRetry={res.reload} />}
           {rules && (
             <div className="grid grid-cols-2 gap-3">
-              <Field label="حد السرعة (كم/س)" value={rules.maxSpeedKmh} onChange={(v) => setRules({ ...rules, maxSpeedKmh: v })} />
-              <Field label="تنبيه التوقف (دقيقة)" value={rules.stopAlertMin} onChange={(v) => setRules({ ...rules, stopAlertMin: v })} />
-              <Field label="سماح النطاق (ثانية)" value={rules.geofenceGraceS} onChange={(v) => setRules({ ...rules, geofenceGraceS: v })} />
-              <Field label="تحول السرعة لحرج (ثانية)" value={rules.speedingCriticalS} onChange={(v) => setRules({ ...rules, speedingCriticalS: v })} />
-              <Field label="كولداون التنبيه (ثانية)" value={rules.cooldownS} onChange={(v) => setRules({ ...rules, cooldownS: v })} />
-              <Field label="فجوة المسار (دقيقة)" value={rules.gapMinMin} onChange={(v) => setRules({ ...rules, gapMinMin: v })} />
-              <Field label="سماح نهاية الوردية (دقيقة)" value={rules.shiftGraceMin} onChange={(v) => setRules({ ...rules, shiftGraceMin: v })} />
-              <Field label="أقصى عمر لإعادة البث (ساعة)" value={rules.replayMaxAgeHours} onChange={(v) => setRules({ ...rules, replayMaxAgeHours: v })} />
+              {!hrOnly && (
+                <>
+                  <Field label="حد السرعة (كم/س)" value={rules.maxSpeedKmh} onChange={(v) => setRules({ ...rules, maxSpeedKmh: v })} />
+                  <Field label="تنبيه التوقف (دقيقة)" value={rules.stopAlertMin} onChange={(v) => setRules({ ...rules, stopAlertMin: v })} />
+                  <Field label="سماح النطاق (ثانية)" value={rules.geofenceGraceS} onChange={(v) => setRules({ ...rules, geofenceGraceS: v })} />
+                  <Field label="تحول السرعة لحرج (ثانية)" value={rules.speedingCriticalS} onChange={(v) => setRules({ ...rules, speedingCriticalS: v })} />
+                  <Field label="كولداون التنبيه (ثانية)" value={rules.cooldownS} onChange={(v) => setRules({ ...rules, cooldownS: v })} />
+                  <Field label="فجوة المسار (دقيقة)" value={rules.gapMinMin} onChange={(v) => setRules({ ...rules, gapMinMin: v })} />
+                  <Field label="أقصى عمر لإعادة البث (ساعة)" value={rules.replayMaxAgeHours} onChange={(v) => setRules({ ...rules, replayMaxAgeHours: v })} />
+                </>
+              )}
+              <Field label="سماح نهاية اليوم (دقيقة)" value={rules.shiftGraceMin} onChange={(v) => setRules({ ...rules, shiftGraceMin: v })} />
               <label className="col-span-2 flex items-center justify-between gap-2 font-bold ink2" style={{ fontSize: '.82rem' }}>
-                رفض بدء الوردية خارج النطاق (strictReject)
+                رفض بدء اليوم خارج النطاق (strictReject)
                 <Toggle checked={rules.attendanceStrictReject} onChange={(v) => setRules({ ...rules, attendanceStrictReject: v })} label="strictReject" />
               </label>
               <div className="col-span-2">
@@ -112,7 +124,7 @@ export default function SettingsPage() {
               <div>
                 <span className="label">الأنواع التي تصلني</span>
                 <div className="flex flex-wrap gap-1.5">
-                  {ALERT_TYPES.map((t) => {
+                  {alertTypesFor(role).map((t) => {
                     const on = prefs.data!.types.includes(t);
                     return (
                       <button
@@ -137,6 +149,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* delivery health */}
+      {!hrOnly && (
       <Card className="lg:col-span-2">
         <CardTitle action={<Btn size="sm" onClick={res.reload}>تحديث</Btn>}>حالة التوصيل — لا إشعار ضائع بصمت</CardTitle>
         <div className="overflow-x-auto p-3 pt-0">
@@ -175,8 +188,15 @@ export default function SettingsPage() {
           )}
         </div>
       </Card>
+      )}
     </div>
   );
+}
+
+/** An HR admin is notified about attendance policy only — a speed alert is not his to receive (§1). */
+function alertTypesFor(role: string | undefined): readonly AlertType[] {
+  if (role === ROLES.HR) return ALERT_TYPES.filter((t) => t === 'CHECK_IN_OUT_OF_FENCE' || t === 'CHECKOUT_MISSING');
+  return ALERT_TYPES;
 }
 
 function Field({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
