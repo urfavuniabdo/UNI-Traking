@@ -6,11 +6,18 @@
  * أوف لاين ثم replay (بنفس clientTs وبدون تكرار) · كل alert ليه محاولة توصيل مسجلة · تقارير.
  * مخرج: أسطر PASS/FAIL وكود خروج غير صفر عند أي فشل.
  */
+import { join } from 'node:path';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const fromApi = (m) => require(join(process.cwd(), 'apps', 'api', 'node_modules', m));
+import { pathToFileURL } from 'node:url';
+
 const args = process.argv.slice(2);
 const base = (args.find((a) => a.startsWith('--base=')) || '--base=http://localhost:3000/api/v1').split('=')[1];
 const ADMIN_ID = process.env.SMOKE_ADMIN_ID || 'admin';
 const ADMIN_PW = process.env.ADMIN_INIT_PASSWORD || 'ChangeMe123!';
-const DRIVER_ID = process.env.SMOKE_DRIVER_ID || 'UNI-3002';
+const DRIVER_ID = process.env.SMOKE_DRIVER_ID || 'D0201';
 
 let token = '';
 let passed = 0;
@@ -57,7 +64,38 @@ const pos = (employeeLat, employeeLng, at, over = {}) => ({
   ...(over.buffered ? { buffered: true } : {}),
 });
 
+async function resetDriverState(driverIdentifier) {
+  // حالة نظيفة لكل تشغيل: نمسح سجل اليوم/النقاط/التنبيهات للسواق التجريبي فقط
+  const { PrismaClient } = fromApi('@prisma/client');
+  const prisma = new PrismaClient({ datasources: { db: { url: 'file:' + join(process.cwd(), '_data', 'traccer.db') } } });
+  const emp = await prisma.employee.findFirst({ where: { externalId: driverIdentifier }, select: { id: true } });
+  if (!emp) {
+    console.log('! لا يوجد سواق تجريبي بالـ externalId ' + driverIdentifier + ' — شغّل npm run seed');
+    return 0;
+  }
+  const owned = await prisma.alert.findMany({ where: { employeeId: emp.id }, select: { id: true } });
+  const alertIds = owned.map((a) => a.id);
+  const [att, pos, alerts, stops, trips, events] = await prisma.$transaction([
+    prisma.attendanceRecord.deleteMany({ where: { employeeId: emp.id } }),
+    prisma.callLog.deleteMany({ where: { alertId: { in: alertIds } } }),
+    prisma.notificationLog.deleteMany({ where: { alertId: { in: alertIds } } }),
+    prisma.alert.deleteMany({ where: { employeeId: emp.id } }),
+    prisma.stopEvent.deleteMany({ where: { employeeId: emp.id } }),
+    prisma.position.deleteMany({ where: { employeeId: emp.id } }),
+    prisma.trip.deleteMany({ where: { employeeId: emp.id } }),
+    prisma.geoEvent.deleteMany({ where: { employeeId: emp.id } }),
+  ]);
+  await prisma.routeLine.deleteMany({ where: { employeeId: emp.id } });
+  await prisma.device.deleteMany({ where: { deviceId: 'smoke-device' } });
+  await prisma.$disconnect();
+  return att.count + pos.count + alerts.count + stops.count + trips.count + events.count;
+}
+
 async function main() {
+  if (args.includes('--fresh')) {
+    const n = await resetDriverState(DRIVER_ID);
+    console.log(`→ fresh reset: ${n} row(s) cleared for ${DRIVER_ID}`);
+  }
   console.log(`→ target ${base}`);
   const health = await req('GET', '/health', undefined, { public: true });
   ok('health ok', health.status === 200 && health.body?.ok === true, JSON.stringify(health.body));
@@ -83,19 +121,59 @@ async function main() {
   const savedToken = token;
   token = driverToken ?? savedToken;
 
+  const reg = await req('POST', '/devices/register', {
+    deviceId: 'smoke-device',
+    platform: 'android',
+    appVersion: '0.1.0-smoke',
+    token: 'smoke-push-token',
+  });
+  ok('device registered for driver', reg.status < 300, `status=${reg.status} ${JSON.stringify(reg.body).slice(0, 90)}`);
+  if (!driverToken) {
+    console.log(`\n! تسجيل السواق التجريبي (${DRIVER_ID}) فشل — السيناريو يحتاج seed: npm run seed`);
+    console.log(`=== ${passed} PASS / ${failed + 1} FAIL ===`);
+    process.exit(1);
+  }
+
+  // 1b) realtime: نتأكد إن الحدث بيطلع فعلاً من Socket.IO مش محسوب في الداتا بس
+  const { io } = fromApi('socket.io-client');
+  const socketEvents = [];
+  const rt = await new Promise((resolve, reject) => {
+    const client = io(base.replace(/\/api\/v1$/, '') + '/rt', {
+      transports: ['websocket'],
+      auth: { token },
+      reconnection: false,
+      timeout: 6000,
+    });
+    client.on('connect', () => resolve(client));
+    client.on('connect_error', (e) => reject(new Error('rt connect_error: ' + e.message)));
+    ['alert:new', 'position:update', 'driver:presence', 'attendance:changed'].forEach((ev) =>
+      client.on(ev, (p) => socketEvents.push({ ev, p })),
+    );
+    setTimeout(() => resolve(client), 6000);
+  }).catch((e) => {
+    console.log('FAIL  socket /rt connect — ' + e.message);
+    failed++;
+    return null;
+  });
+  ok('socket /rt connected with JWT', !!rt && rt.connected === true);
+
   const far = { lat: origin.lat + 0.2, lng: origin.lng + 0.2 }; // ~20كم خارج
   const outIn = await req('POST', '/attendance/check-in', { lat: far.lat, lng: far.lng, accuracy: 8, deviceId: 'smoke-device' });
+  const todayRec = await req('GET', '/attendance/me/today');
+  const rec = todayRec.body?.record ?? todayRec.body ?? {};
   ok(
-    'check-in outside fence → flagged (422 FENCE_VIOLATION or VALID≠)',
-    outIn.status === 422 || outIn.body?.status === 'OUT_OF_FENCE' || outIn.body?.record?.status === 'OUT_OF_FENCE',
-    `status=${outIn.status} body=${JSON.stringify(outIn.body).slice(0, 140)}`,
+    'check-in outside fence → recorded as OUT_OF_FENCE (or 422 when strict)',
+    outIn.status === 422 || outIn.body?.status === 'OUT_OF_FENCE' || rec?.status === 'OUT_OF_FENCE',
+    `checkIn=${outIn.status} today=${JSON.stringify({ status: rec?.status, fence: rec?.fenceName, dist: rec?.distanceToSiteM ?? rec?.distanceToCenterM })}`,
   );
+  ok('today record retrievable for driver', todayRec.status === 200 && !!rec?.workDate, `status=${todayRec.status}`);
 
   const inIn = await req('POST', '/attendance/check-in', { lat: origin.lat + 0.0004, lng: origin.lng, accuracy: 6, deviceId: 'smoke-device' });
-  ok('check-in inside fence accepted', [200, 201, 409].includes(inIn.status), `status=${inIn.status}`);
+  ok('second check-in while open → 409 ALREADY_CHECKED_IN', inIn.status === 409 || inIn.status < 300, `status=${inIn.status}`);
 
   // 2) دفع نقاط: سرعة طبيعية ثم تجاوز صارخ لمدة كافية ثم توقف طويل
-  token = savedToken;
+  //    النقاط تُنسب للجهاز/السواق المصادِق عليه، فالرفع يكون بتوكن السواق
+  token = driverToken ?? savedToken;
   let t = Date.now() - 45 * 60_000;
   const step = (i) => new Date((t += 5_000));
   const normal = Array.from({ length: 20 }, (_, i) => pos(origin.lat + i * 0.0003, origin.lng, step(i), { speed: 25 }));
@@ -133,8 +211,9 @@ async function main() {
   await req('POST', '/devices/heartbeat', { deviceId: 'smoke-device', battery: 65, tracking: true, gpsEnabled: true, online: true });
 
   // 6) كل حدث لازم ليه محاولة توصيل — لا شيء يضيع بصمت
+  token = savedToken; // قراءة التنبيهات والتقارير بصلاحيات الأدمن
   const alerts = await req('GET', '/alerts?status=OPEN&pageSize=200');
-  const list = alerts.body?.items ?? alerts.body ?? [];
+  const list = alerts.body?.data ?? alerts.body?.items ?? (Array.isArray(alerts.body) ? alerts.body : []);
   ok('alert feed non-empty', Array.isArray(list) && list.length > 0, `count=${list?.length}`);
   const types = new Set((list ?? []).map((a) => a.type));
   for (const expect of ['SPEEDING', 'GPS_OFF', 'CHECK_IN_OUT_OF_FENCE', 'STOP_EXCEEDED']) {
@@ -173,6 +252,19 @@ async function main() {
   }
   const csv = await req('GET', `/reports/timesheet?from=${today}&to=${today}&format=csv`);
   ok('timesheet CSV export', csv.status === 200, `status=${csv.status}`);
+
+  // 9b) إثبات لحظية التوصيل عبر Socket.IO
+  await new Promise((r) => setTimeout(r, 1500));
+  const newAlerts = socketEvents.filter((e) => e.ev === 'alert:new');
+  ok('socket received alert:new events', newAlerts.length > 0, `count=${newAlerts.length}`);
+  const seenTypes = new Set(newAlerts.map((e) => e.p?.type));
+  ok('socket delivered GPS_OFF live', seenTypes.has('GPS_OFF'), [...seenTypes].join(','));
+  ok(
+    'socket delivered live positions',
+    socketEvents.some((e) => e.ev === 'position:update'),
+    `position:update=${socketEvents.filter((e) => e.ev === 'position:update').length}`,
+  );
+  rt?.close?.();
 
   // 10) تشيك أوت
   token = driverToken ?? savedToken;

@@ -9,7 +9,7 @@
     "seed": "cd apps/api && npm run seed",
     "api": "cd apps/api && npm run dev",
     "dashboard": "cd apps/dashboard && npm run dev",
-    "dashboard:mock": "cd apps/dashboard && npm run dev:mock",
+    "dashboard:mock": "cd apps/dashboard && npm run dev",
     "mobile": "cd apps/mobile && flutter run --dart-define=API_URL=http://10.0.2.2:3000/api/v1",
     "test": "cd apps/api && npm run test",
     "shared:sync": "node tools/gen-shared.mjs"
