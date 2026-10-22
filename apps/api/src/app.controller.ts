@@ -15,6 +15,6 @@ export class AppController {
     } catch {
       db = false;
     }
-    return { ok: db, service: 'traccer-api', version: process.env.npm_package_version ?? '0.1.0', time: new Date().toISOString() };
+    return { ok: db, service: 'uni-tracking-api', version: process.env.npm_package_version ?? '0.1.0', time: new Date().toISOString() };
   }
 }
