@@ -1,5 +1,6 @@
 import {
   IsEnum,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -78,6 +79,8 @@ export class RuleOverrideDto {
   @IsOptional() @IsNumber() geofenceGraceS?: number | null;
   @IsOptional() @IsNumber() speedSamples?: number | null;
   @IsOptional() @IsString() disabledTypes?: string | null;
+  /** Reassign the employee's zone in the same call (DriverDetail page edits it alongside the rules). */
+  @IsOptional() @IsString() zoneId?: string | null;
 }
 
 export class ListEmployeesQueryDto {
@@ -85,6 +88,8 @@ export class ListEmployeesQueryDto {
   @IsOptional() pageSize?: number;
   @IsOptional() @IsString() search?: string;
   @IsOptional() @IsEnum(EMPLOYEE_KIND) kind?: keyof typeof EMPLOYEE_KIND;
+  /** Dashboard alias for `kind` — Drivers/Live pages send `role=DRIVER`. */
+  @IsOptional() @IsIn(Object.values(EMPLOYEE_KIND)) role?: string;
   @IsOptional() @IsString() siteId?: string;
   @IsOptional() @IsString() zoneId?: string;
   @IsOptional() active?: boolean;

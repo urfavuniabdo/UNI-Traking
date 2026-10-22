@@ -50,6 +50,25 @@ export class EmployeesController {
     return this.employees.one(id);
   }
 
+  // Supervisor needs these too: the Drivers/Live/DriverDetail pages are a supervising role's job.
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  @Get(':id/devices')
+  devices(@Param('id') id: string) {
+    return this.employees.devicesOf(id);
+  }
+
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  @Get(':id/summary')
+  summary(@Param('id') id: string) {
+    return this.employees.summaryOf(id);
+  }
+
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  @Get(':id/rules')
+  getRules(@Param('id') id: string) {
+    return this.employees.getRules(id);
+  }
+
   // ---- writes: ADMIN only ----
   @Roles(ROLES.ADMIN)
   @Post()
@@ -75,12 +94,6 @@ export class EmployeesController {
   @HttpCode(200)
   assignZone(@Param('id') id: string, @Body() dto: AssignZoneDto) {
     return this.employees.assignZone(id, dto.zoneId ?? null);
-  }
-
-  @Roles(ROLES.ADMIN)
-  @Get(':id/rules')
-  getRules(@Param('id') id: string) {
-    return this.employees.getRules(id);
   }
 
   @Roles(ROLES.ADMIN)
