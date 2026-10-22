@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Circle, MapContainer, Marker, Polygon, Polyline, TileLayer, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { centerIcon, radiusHandleIcon, vertexIcon } from './icons';
@@ -82,8 +82,20 @@ function PanToDraft({ target }: { target: [number, number] | null }) {
   return null;
 }
 
-function pathStyle(color: string, weight: number, fillOpacity: number, dash?: string) {
-  // bubblingMouseEvents:false keeps a tap on a fence from falling through to the map and
+/** The saved fences are what this page is for, so the first draw frames them all instead of a fixed city. */
+function FitFences({ signature, spots }: { signature: string; spots: [number, number][] }) {
+  const map = useMap();
+  const framed = useRef(false);
+  useEffect(() => {
+    if (framed.current || !signature || !spots.length) return;
+    framed.current = true;
+    map.fitBounds(L.latLngBounds(spots.map(([a, b]) => [a, b] as L.LatLngExpression)), { padding: [40, 40], maxZoom: 13 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature, map]);
+  return null;
+}
+
+function pathStyle(color: string, weight: number, fillOpacity: number, dash?: string) {  // bubblingMouseEvents:false keeps a tap on a fence from falling through to the map and
   // starting a brand-new draft under the user's feet.
   return { color, weight, dashArray: dash, fillOpacity, bubblingMouseEvents: false };
 }
@@ -105,10 +117,17 @@ export default function FenceMap(props: Props) {
   const handlePos: [number, number] | null =
     draft?.kind === 'circle' ? [draft.center[0] + draft.radiusM / M_PER_DEG_LAT, draft.center[1]] : null;
 
+  // A circle's edge is part of it too, so a wide fence is not cut off by the frame.
+  const spots: [number, number][] = [
+    ...existingCircles.flatMap((c) => [c.center, [c.center[0] + c.radiusM / M_PER_DEG_LAT, c.center[1]] as [number, number]]),
+    ...existingPolygons.flatMap((p) => p.points),
+  ];
+
   return (
     <MapContainer center={center} zoom={12} className="h-full w-full">
       <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
       <ClickCatcher onMapClick={props.onMapClick} onDoubleClick={props.onDoubleClick} />
+      <FitFences signature={`${existingCircles.length}-${existingPolygons.length}`} spots={spots} />
       <PanToDraft target={draft?.kind === 'circle' ? draft.center : null} />
 
       {existingCircles.map((c) => {
