@@ -24,8 +24,26 @@ export class SyncSourcesService {
     return JSON.stringify(masked);
   }
 
-  private toSafe<T extends { id: string; config: string }>(s: T): T & { config: string } {
-    return { ...s, config: this.maskConfig(s.config) };
+  /**
+   * Safe read shape: masked config (as today) + the dashboard's flat fields.
+   * The webhook secret is NEVER returned in clear text — `webhookSecret` is a masked
+   * placeholder present only when a secret exists, plus `hasSecret` for the UI.
+   */
+  private toSafe<T extends { id: string; config: string; lastRunAt?: Date | null }>(s: T): T & {
+    config: string;
+    lastRunAt: string | null;
+    hasSecret: boolean;
+    webhookSecret: string | null;
+  } {
+    const cfg = parseJson<Record<string, unknown>>(s.config, {});
+    const hasSecret = Boolean(cfg.secret ?? cfg.webhookSecret);
+    return {
+      ...s,
+      config: this.maskConfig(s.config),
+      lastRunAt: s.lastRunAt ? new Date(s.lastRunAt).toISOString() : null,
+      hasSecret,
+      webhookSecret: hasSecret ? '••••••••' : null,
+    };
   }
 
   async list(): Promise<unknown[]> {

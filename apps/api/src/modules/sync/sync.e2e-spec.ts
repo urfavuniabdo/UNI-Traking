@@ -244,7 +244,9 @@ describe('sources API — secrets never leave in clear text', () => {
       code: 'hr_sql', name: 'HR SQL', kind: 'sql',
       config: { connectionString: 'postgresql://hr:Str0ngPass@db.internal:5432/hr', table: 'employees' },
     });
-    const list = (await controller.listSources()) as { code: string; config: string }[];
+    const wrapped = (await controller.listSources()) as { sources: { code: string; config: string; webhookSecret?: string | null; hasSecret?: boolean }[] };
+    const list = wrapped.sources;
+    expect(wrapped).toHaveProperty('sources');
     const rest = list.find((s) => s.code === 'hr_rest')!;
     const sqls = list.find((s) => s.code === 'hr_sql')!;
     expect(rest.config).not.toContain('SUP3R-T0KEN');
@@ -252,6 +254,9 @@ describe('sources API — secrets never leave in clear text', () => {
     expect(JSON.parse(rest.config).token).toBe('****');
     expect(sqls.config).not.toContain('Str0ngPass');
     expect(JSON.parse(sqls.config).connectionString).toBe('postgresql://hr:****@db.internal:5432/hr');
+    // dashboard flat fields: masked webhook secret only — never plaintext
+    expect(rest.webhookSecret).toBe('••••••••');
+    expect(rest.hasSecret).toBe(true);
     const detail = (await controller.getRun('nope').catch(() => null));
     expect(detail).toBeNull(); // run غير موجود ⇒ 404 عبر NotFoundException
   });
@@ -268,22 +273,18 @@ describe('sources API — secrets never leave in clear text', () => {
 });
 
 describe('matrix / preview / ad-hoc / scheduler / issue resolution', () => {
-  it('GET /sync/matrix — freshness + reachability per synced employee', async () => {
+  it('GET /sync/matrix — wrapped { rows } per-source freshness summary', async () => {
     await waitRun((await sync.startRun({ sourceId }, 'MANUAL')).runId);
-    const matrix = (await controller.matrix()) as Record<string, unknown>[];
-    expect(matrix).toHaveLength(3);
-    const e1 = matrix.find((m) => m.externalId === 'E1')!;
-    expect(Object.keys(e1).sort()).toEqual([
-      'active', 'employeeId', 'externalId', 'hasAccount', 'hasPhone', 'kind', 'lastSyncedAt',
-      'mustChangePassword', 'name', 'orgUnitCode', 'phone', 'siteCode', 'source', 'zoneCode',
-    ]);
-    expect(e1.hasPhone).toBe(true);
-    expect(e1.hasAccount).toBe(true);
-    expect(e1.siteCode).toBe('HR1');
-    const e3 = matrix.find((m) => m.externalId === 'E3')!;
-    expect(e3.hasPhone).toBe(false);
-    expect(e3.siteCode).toBeNull(); // مجهول ⇒ بلا تعيين لكن موجود
-    expect(matrix.every((m) => m.lastSyncedAt)).toBe(true);
+    const wrapped = await controller.matrix();
+    expect(wrapped).toHaveProperty('rows');
+    const rows = (wrapped as { rows: Record<string, unknown>[] }).rows;
+    expect(Array.isArray(rows)).toBe(true);
+    const hr = rows.find((r) => r.source === 'HR CSV')!;
+    expect(Object.keys(hr).sort()).toEqual(['field', 'freshnessMin', 'lastSyncAt', 'rows', 'source']);
+    expect(hr.field).toBe('employees');
+    expect(hr.rows).toBe(3); // scanned in the latest finished run
+    expect(hr.freshnessMin).toBeGreaterThanOrEqual(0);
+    expect(new Date(hr.lastSyncAt as string).getTime()).toBeGreaterThan(0);
   });
 
   it('POST /sync/preview-upload — sanitized filename inside _data/uploads, rows previewed, nothing written', async () => {
@@ -331,12 +332,30 @@ describe('matrix / preview / ad-hoc / scheduler / issue resolution', () => {
 
   it('GET /sync/issues?resolved=false + POST resolve flips the flag', async () => {
     await waitRun((await sync.startRun({ sourceId }, 'MANUAL')).runId);
-    const open = (await controller.listIssues({})) as { id: string; reason: string; resolved: boolean }[];
+    const open = ((await controller.listIssues({})) as { issues: { id: string; reason: string; code: string; name: string; createdAt: string | null; resolved: boolean }[] }).issues;
     expect(open.length).toBeGreaterThan(0);
     expect(open.every((i) => i.resolved === false)).toBe(true);
+    // dashboard flat fields: code = reason, name resolved from Employee, createdAt from the owning run
+    expect(open.every((i) => i.code === i.reason)).toBe(true);
+    expect(open.every((i) => typeof i.name === 'string' && i.name.length > 0)).toBe(true);
+    expect(open.every((i) => i.createdAt !== null)).toBe(true);
     const target = open.find((i) => i.reason === 'UNKNOWN_SITE')!;
     await controller.resolveIssue(target.id);
-    const after = (await controller.listIssues({ resolved: false })) as { id: string }[];
+    const after = ((await controller.listIssues({ resolved: false })) as { issues: { id: string }[] }).issues;
     expect(after.find((i) => i.id === target.id)).toBeUndefined();
+  });
+
+  it('GET /sync/runs — wrapped { runs } with triggeredBy + sourceName', async () => {
+    await waitRun((await sync.startRun({ sourceId }, 'MANUAL')).runId);
+    const wrapped = await controller.listRuns({ limit: 10 });
+    expect(wrapped).toHaveProperty('runs');
+    const runs = (wrapped as { runs: Record<string, unknown>[] }).runs;
+    expect(runs.length).toBeGreaterThan(0);
+    const r = runs[0];
+    expect(r.triggeredBy).toBe('MANUAL');
+    expect(r.sourceName).toBe('HR CSV');
+    expect(Object.keys(r).sort()).toEqual(
+      ['created', 'deactivated', 'error', 'finishedAt', 'id', 'scanned', 'sourceId', 'sourceName', 'startedAt', 'status', 'triggeredBy', 'unchanged', 'updated'].sort(),
+    );
   });
 });

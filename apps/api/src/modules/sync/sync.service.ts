@@ -355,15 +355,30 @@ export class SyncService {
     return created;
   }
 
-  // ---------- reads ----------
+  // ---------- reads (dashboard envelope shapes; wrapped by the controller) ----------
 
+  /** GET /sync/runs item: run + joined source name; `triggeredBy` = the trigger column. */
   async listRuns(limit = 50): Promise<unknown[]> {
     const runs = await this.prisma.syncRun.findMany({
       orderBy: { startedAt: 'desc' },
       take: Math.min(Math.max(limit, 1), 200),
       include: { source: { select: { id: true, code: true, name: true, kind: true } } },
     });
-    return runs;
+    return runs.map((r) => ({
+      id: r.id,
+      sourceId: r.sourceId,
+      sourceName: r.source?.name ?? null,
+      startedAt: r.startedAt.toISOString(),
+      finishedAt: r.finishedAt ? r.finishedAt.toISOString() : null,
+      status: r.status,
+      scanned: r.scanned,
+      created: r.created,
+      updated: r.updated,
+      unchanged: r.unchanged,
+      deactivated: r.deactivated,
+      triggeredBy: r.trigger,
+      error: r.error,
+    }));
   }
 
   /** GET /sync/runs/:id — التشغيل + ملفه + مشاكله + noPhone مشتق من المشاكل. */
@@ -393,12 +408,34 @@ export class SyncService {
     return { run: { ...run, source: undefined, issues: undefined }, source, counts, issues };
   }
 
-  listIssues(resolved?: boolean) {
-    return this.prisma.syncIssue.findMany({
+  /**
+   * GET /sync/issues item: `code` = the reason column; `name` is resolved from the Employee
+   * row with the same externalId (SyncIssue has no name column); `createdAt` uses the owning
+   * run's startedAt (SyncIssue has no createdAt column — schema frozen).
+   */
+  async listIssues(resolved?: boolean): Promise<unknown[]> {
+    const issues = await this.prisma.syncIssue.findMany({
       where: resolved === undefined ? {} : { resolved },
       orderBy: { id: 'desc' },
       take: 500,
+      include: { run: { select: { startedAt: true, sourceId: true } } },
     });
+    const names = await this.prisma.employee.findMany({
+      where: { externalId: { in: [...new Set(issues.map((i) => i.externalId))] } },
+      select: { externalId: true, name: true },
+    });
+    const nameByExternal = new Map(names.map((n) => [n.externalId, n.name]));
+    return issues.map((i) => ({
+      id: i.id,
+      runId: i.runId,
+      externalId: i.externalId,
+      code: i.reason,
+      reason: i.reason,
+      name: nameByExternal.get(i.externalId) ?? i.externalId,
+      detail: i.detail,
+      resolved: i.resolved,
+      createdAt: i.run?.startedAt ? i.run.startedAt.toISOString() : null,
+    }));
   }
 
   async resolveIssue(id: string): Promise<unknown> {
@@ -407,34 +444,34 @@ export class SyncService {
     return this.prisma.syncIssue.update({ where: { id }, data: { resolved: true } });
   }
 
-  /** لوحة المتابعة: مدى نضارة مزامنة كل موظف وإمكانية الوصول إليه. */
+  /**
+   * GET /sync/matrix row: per-source, per-field freshness for the dashboard table.
+   * The only synced "field" this system carries per source is the employee record set, so each
+   * source yields one row: rows = scanned in its latest finished run, lastSyncAt = that run's
+   * finishedAt (falling back to SyncSource.lastRunAt; epoch when never run so the page shows stale/red).
+   */
   async matrix(): Promise<unknown[]> {
-    const employees = await this.prisma.employee.findMany({
-      where: { source: 'MASTER' },
-      include: {
-        user: { select: { id: true, mustChangePassword: true } },
-        site: { select: { code: true, name: true } },
-        zone: { select: { code: true, name: true } },
-        orgUnit: { select: { code: true } },
-      },
-      orderBy: [{ syncedAt: 'desc' }, { externalId: 'asc' }],
+    const [sources, runs] = await this.prisma.$transaction([
+      this.prisma.syncSource.findMany({ orderBy: { code: 'asc' } }),
+      this.prisma.syncRun.findMany({
+        where: { finishedAt: { not: null } },
+        orderBy: { finishedAt: 'desc' },
+      }),
+    ]);
+    const latestBySource = new Map<string, (typeof runs)[number]>();
+    for (const r of runs) if (!latestBySource.has(r.sourceId)) latestBySource.set(r.sourceId, r);
+    const now = Date.now();
+    return sources.map((s) => {
+      const last = latestBySource.get(s.id);
+      const ts = last?.finishedAt ?? s.lastRunAt ?? new Date(0);
+      return {
+        source: s.name,
+        field: 'employees',
+        lastSyncAt: ts.toISOString(),
+        freshnessMin: Math.max(0, Math.round((now - ts.getTime()) / 60_000)),
+        rows: last?.scanned ?? 0,
+      };
     });
-    return employees.map((e) => ({
-      externalId: e.externalId,
-      employeeId: e.id,
-      name: e.name,
-      kind: e.kind,
-      active: e.active,
-      source: e.source,
-      lastSyncedAt: e.syncedAt,
-      hasPhone: !!e.phone,
-      phone: e.phone || null,
-      siteCode: e.site?.code ?? null,
-      zoneCode: e.zone?.code ?? null,
-      orgUnitCode: e.orgUnit?.code ?? null,
-      hasAccount: !!e.user,
-      mustChangePassword: e.user?.mustChangePassword ?? false,
-    }));
   }
 
   // ---------- webhook ----------

@@ -49,13 +49,13 @@ export class SyncController {
   }
 
   @Get('runs')
-  @Roles(ROLES.ADMIN)
-  listRuns(@Query() q: ListRunsDto): Promise<unknown[]> {
-    return this.sync.listRuns(q.limit ?? 50);
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  async listRuns(@Query() q: ListRunsDto): Promise<unknown> {
+    return { runs: await this.sync.listRuns(q.limit ?? 50) };
   }
 
   @Get('runs/:id')
-  @Roles(ROLES.ADMIN)
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
   getRun(@Param('id') id: string): Promise<unknown> {
     return this.sync.getRun(id);
   }
@@ -63,9 +63,9 @@ export class SyncController {
   // ---------- issues ----------
 
   @Get('issues')
-  @Roles(ROLES.ADMIN)
-  listIssues(@Query() q: ListIssuesDto): Promise<unknown[]> {
-    return this.sync.listIssues(q.resolved);
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  async listIssues(@Query() q: ListIssuesDto): Promise<unknown> {
+    return { issues: await this.sync.listIssues(q.resolved) };
   }
 
   @Post('issues/:id/resolve')
@@ -78,13 +78,13 @@ export class SyncController {
   // ---------- sources (config secrets masked in every response) ----------
 
   @Get('sources')
-  @Roles(ROLES.ADMIN)
-  listSources(): Promise<unknown[]> {
-    return this.sources.list();
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  async listSources(): Promise<unknown> {
+    return { sources: await this.sources.list() };
   }
 
   @Get('sources/:id')
-  @Roles(ROLES.ADMIN)
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
   getSource(@Param('id') id: string): Promise<unknown> {
     return this.sources.get(id);
   }
@@ -148,8 +148,8 @@ export class SyncController {
   // ---------- dashboard freshness panel ----------
 
   @Get('matrix')
-  @Roles(ROLES.ADMIN)
-  matrix(): Promise<unknown[]> {
-    return this.sync.matrix();
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  async matrix(): Promise<unknown> {
+    return { rows: await this.sync.matrix() };
   }
 }
