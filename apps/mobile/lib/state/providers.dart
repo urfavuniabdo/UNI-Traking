@@ -29,6 +29,9 @@ final Provider<ApiClient> apiClientProvider =
 final Provider<LocationAdapter> locationAdapterProvider =
     Provider<LocationAdapter>((_) => const LocationAdapter());
 
+final Provider<ConnectivityAdapter> connectivityAdapterProvider =
+    Provider<ConnectivityAdapter>((_) => ConnectivityAdapter());
+
 final Provider<PositionDao> positionDaoProvider = Provider<PositionDao>((_) => PositionDao());
 
 final Provider<NotificationsAdapter> notificationsProvider =
@@ -258,19 +261,23 @@ class HomeController extends StateNotifier<HomeState> {
     await refreshToday();
     await _watchSensors();
     await _refreshPending();
-    final SessionStore session = _ref.read(sessionStoreProvider);
-    final bool driver = session.user?.isDriver ?? false;
-    if (driver && session.isCheckedIn) {
-      // Cold start with an open shift: the foreground tracking service must resume.
-      await BackgroundServiceAdapter.instance.startTracking();
-      state = state.copyWith(tracking: true);
-    }
-    // Any signed-in device, driver or not, owns the keepalive: an employee who never
-    // tracks still has to keep lastSeenAt fresh or the dashboard shows them as offline.
-    if (session.isLoggedIn) await initKeepAliveFromHome();
+    // Wired before the best-effort platform calls below: losing this subscription would
+    // leave the screen deaf to every tracking event with nothing on screen to show it.
     _ref.listen<AsyncValue<TrackingUiEvent>>(trackingEventsProvider, (_, AsyncValue<TrackingUiEvent> next) {
       next.whenData(_applyEvent);
     });
+    final SessionStore session = _ref.read(sessionStoreProvider);
+    final bool driver = session.user?.isDriver ?? false;
+    try {
+      if (driver && session.isCheckedIn) {
+        // Cold start with an open shift: the foreground tracking service must resume.
+        await BackgroundServiceAdapter.instance.startTracking();
+        state = state.copyWith(tracking: true);
+      }
+      // Any signed-in device, driver or not, owns the keepalive: an employee who never
+      // tracks still has to keep lastSeenAt fresh or the dashboard shows them as offline.
+      if (session.isLoggedIn) await initKeepAliveFromHome();
+    } catch (_) {/* WorkManager / background service unavailable — indicators still work */}
   }
 
   void _applyEvent(TrackingUiEvent e) {
@@ -315,7 +322,7 @@ class HomeController extends StateNotifier<HomeState> {
   /// isn't tracking they sat on HomeState's optimistic defaults and lied. Read the device.
   Future<void> _watchSensors() async {
     final LocationAdapter loc = _ref.read(locationAdapterProvider);
-    final ConnectivityAdapter conn = ConnectivityAdapter();
+    final ConnectivityAdapter conn = _ref.read(connectivityAdapterProvider);
     try {
       state = state.copyWith(
         gpsEnabled: await loc.isServiceEnabled(),
