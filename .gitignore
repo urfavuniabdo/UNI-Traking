@@ -17,3 +17,8 @@ apps/dashboard/dist/
 *.log
 .DS_Store
 _references/
+
+# temp test databases and build outputs
+apps/api/prisma/tmp-*.db
+apps/api/tmp-*.db
+apps/api/dist-smoke/
