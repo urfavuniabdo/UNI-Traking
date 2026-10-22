@@ -104,7 +104,7 @@ class _TraccerAppState extends ConsumerState<TraccerApp> {
   Widget build(BuildContext context) {
     final bool dark = ref.watch(darkModeProvider);
     return MaterialApp.router(
-      title: 'Traccer',
+      title: 'UNI Tracking',
       debugShowCheckedModeBanner: false,
       routerConfig: _router,
       theme: TraccerTheme.light(),

@@ -1,5 +1,5 @@
 <!--
-  Android manifest for Traccer (UNI Track).
+  Android manifest for UNI Tracking.
   Placeholders that the real Flutter toolchain generates around this file are noted.
   NOTE (ic_launcher): branded adaptive set lives in res/mipmap-* (legacy PNGs +
   res/mipmap-anydpi-v26/ic_launcher.xml over @color/ic_launcher_background).
@@ -30,7 +30,7 @@
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
     <application
-        android:label="Traccer"
+        android:label="UNI Tracking"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:enableOnBackInvokedCallback="true"

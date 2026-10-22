@@ -340,7 +340,7 @@ void trackingOnStart(ServiceInstance service) async {
   service.on('START').listen((Map<String, dynamic>? _) async {
     await engine.start();
     if (service is AndroidServiceInstance && await service.isForegroundService()) {
-      unawaited(service.setForegroundNotificationInfo(title: 'Traccer', content: 'التتبع يعمل تلقائيًا'));
+      unawaited(service.setForegroundNotificationInfo(title: 'UNI Tracking', content: 'التتبع يعمل تلقائيًا'));
     }
   });
 
@@ -363,7 +363,7 @@ void trackingOnStart(ServiceInstance service) async {
     try {
       await service.setAsForegroundService();
       await service.setForegroundNotificationInfo(
-        title: 'Traccer',
+        title: 'UNI Tracking',
         content: 'التتبع يعمل تلقائيًا',
       );
     } catch (e) {

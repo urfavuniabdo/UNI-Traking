@@ -28,7 +28,7 @@ class S {
   static String t(String key) => _strings[key] ?? key;
 
   static const Map<String, String> _fallback = <String, String>{
-    'appName': 'Traccer',
+    'appName': 'UNI Tracking',
     'checkIn': 'تشيك ان',
     'checkOut': 'تشيك أوت',
     'insideFence': 'داخل النطاق',

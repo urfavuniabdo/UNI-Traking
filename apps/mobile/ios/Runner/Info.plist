@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  ios/Runner/Info.plist — Traccer (UNI Track).
+  ios/Runner/Info.plist — UNI Tracking.
   These are the *relevant* keys the app needs; the Flutter template contributes the rest.
   Merge, don't blindly overwrite, the generated file.
 -->
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Traccer</string>
+	<string>UNI Tracking</string>
 	<key>CFBundleName</key>
 	<string>traccer</string>
 	<key>CFBundleIdentifier</key>
@@ -18,9 +18,9 @@
 
 	<!-- Location: in-use and always (background tracking for drivers) -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>يحتاج Traccer موقعك لتسجيل حضورك داخل نطاق الموقع والتحقق من النطاق عند التشيك ان/أوت.</string>
+	<string>يحتاج UNI Tracking موقعك لتسجيل حضورك داخل نطاق الموقع والتحقق من النطاق عند التشيك ان/أوت.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>يستمر Traccer في تسجيل خط السير في الخلفية أثناء عملك، حتى والشاشة مقفلة، ليعرض المسار والحضور للمشرفين تلقائيًا.</string>
+	<string>يستمر UNI Tracking في تسجيل خط السير في الخلفية أثناء عملك، حتى والشاشة مقفلة، ليعرض المسار والحضور للمشرفين تلقائيًا.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>تتبع تلقائي في الخلفية أثناء الدوام.</string>
 

@@ -42,7 +42,7 @@ class NotificationsAdapter {
     await _android?.createNotificationChannel(
       const AndroidNotificationChannel(
         alertsChannelId,
-        'تنبيهات Traccer',
+        'تنبيهات UNI Tracking',
         description: 'تنبيهات الحضور والتتبع',
         importance: Importance.high,
         enableVibration: true,
@@ -77,7 +77,7 @@ class NotificationsAdapter {
       NotificationDetails(
         android: AndroidNotificationDetails(
           alertsChannelId,
-          'تنبيهات Traccer',
+          'تنبيهات UNI Tracking',
           channelDescription: 'تنبيهات الحضور والتتبع',
           importance: Importance.high,
           priority: Priority.high,

@@ -124,7 +124,7 @@ class AlertService {
 
   ({String title, String body}) _fallbackAr(String type) {
     final entry = ArAlertText.byType[type];
-    return (title: entry?.title ?? 'تنبيه Traccer', body: entry?.body ?? '');
+    return (title: entry?.title ?? 'تنبيه UNI Tracking', body: entry?.body ?? '');
   }
 
   Future<void> dispose() async {

@@ -29,7 +29,7 @@ class BackgroundServiceAdapter {
         autoStart: true, // boot receiver restarts it; onStart no-ops unless checked-in
         isForegroundMode: true,
         notificationChannelId: NotificationsAdapter.trackingChannelId,
-        initialNotificationTitle: 'Traccer',
+        initialNotificationTitle: 'UNI Tracking',
         initialNotificationContent: 'التتبع يعمل تلقائيًا',
         foregroundServiceNotificationId: _notifId,
         foregroundServiceTypes: const <AndroidForegroundType>[AndroidForegroundType.location],
