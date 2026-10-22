@@ -13,6 +13,24 @@ describe('MotionClassifierService (pure)', () => {
     expect(c.instantState(null)).toBe('UNKNOWN');
   });
 
+  it('takes the higher of the reported and the GPS-derived speed (a walking phone reads ~0)', () => {
+    expect(c.resolveSpeed(0.4, 4.6)).toBe(4.6);
+    expect(c.resolveSpeed(58, 3)).toBe(58);
+    expect(c.resolveSpeed(null, 4.6)).toBe(4.6);
+    expect(c.resolveSpeed(4.6, null)).toBe(4.6);
+    expect(c.resolveSpeed(null, null)).toBeNull();
+  });
+
+  it('walks out of STOPPED: three covered-metre samples commit WALKING', () => {
+    const t = c.newTrack();
+    c.classify(t, 0);
+    expect(t.state).toBe('STOPPED');
+    // the device keeps saying ~0.4 km/h; only the displacement proves the driver is walking
+    expect(c.classify(t, c.resolveSpeed(0.4, 4.6)).state).toBe('STOPPED');
+    expect(c.classify(t, c.resolveSpeed(0.4, 4.6)).state).toBe('STOPPED');
+    expect(c.classify(t, c.resolveSpeed(0.4, 4.6)).state).toBe('WALKING');
+  });
+
   it('commits the first usable sample immediately (cold start out of UNKNOWN)', () => {
     const t = c.newTrack();
     const r = c.classify(t, 40);

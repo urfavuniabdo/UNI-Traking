@@ -49,6 +49,18 @@ export class MotionClassifierService {
     return 'RIDING';
   }
 
+  /**
+   * Best speed for a sample. A phone walking slowly reports a GPS-Doppler speed of 0–1 km/h
+   * (the receiver averages over the last second and a hand-held device swings), which would
+   * pin a walking driver in STOPPED. The metres actually covered between two fixes say
+   * otherwise, so the higher of the two wins.
+   */
+  resolveSpeed(reported: number | null, derived: number | null): number | null {
+    if (reported === null || !Number.isFinite(reported)) return derived;
+    if (derived === null || !Number.isFinite(derived)) return reported;
+    return Math.max(reported, derived);
+  }
+
   /** true when a sample must be discarded before classification (poor accuracy or sub-interval dt). */
   isDroppable(gate: SampleGate): { dropped: boolean; reason?: string } {
     if (gate.accuracyM !== null && Number.isFinite(gate.accuracyM) && gate.accuracyM > MOTION.ACCURACY_REJECT_M) {
