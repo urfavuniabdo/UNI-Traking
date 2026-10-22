@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Traccer — مراقبة الموظفين والسواقين</title>
+    <script>
+      // No-FOUC theme bootstrap: apply persisted theme before first paint.
+      (function () {
+        try {
+          var raw = localStorage.getItem('traccer.ui');
+          var theme = 'light';
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            if (parsed && parsed.state && parsed.state.theme) theme = parsed.state.theme;
+          }
+          var el = document.documentElement;
+          el.setAttribute('data-theme', theme);
+          if (theme === 'dark') el.classList.add('dark');
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

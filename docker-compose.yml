@@ -1,0 +1,45 @@
+version: '3.9'
+
+# إنتاج/اختبار متكامل: PostgreSQL + Redis (لطوابر الإشعارات) + API + Dashboard
+# التطوير المحلي لا يحتاج Docker: sqlite + worker داخلي.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: traccer
+      POSTGRES_PASSWORD: traccer
+      POSTGRES_DB: traccer
+    volumes:
+      - traccer_pg:/var/lib/postgresql/data
+    ports: ['5432:5432']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U traccer']
+      interval: 10s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports: ['6379:6379']
+
+  api:
+    build: ./apps/api
+    depends_on: { db: { condition: service_healthy }, redis: { condition: service_started } }
+    environment:
+      DATABASE_URL: postgresql://traccer:traccer@db:5432/traccer?schema=public
+      PORT: '3000'
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      FCM_CREDENTIALS_JSON: ${FCM_CREDENTIALS_JSON}
+      SYNC_CRON: ${SYNC_CRON}
+    ports: ['3000:3000']
+
+  dashboard:
+    build: ./apps/dashboard
+    depends_on: [api]
+    environment:
+      VITE_API_URL: http://api:3000/api/v1
+    ports: ['8080:80']
+
+volumes:
+  traccer_pg:

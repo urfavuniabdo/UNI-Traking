@@ -1,0 +1,409 @@
+// Prisma base schema. The datasource block below is replaced by
+// `npm run prisma:dev` (sqlite) or `npm run prisma:prod` (postgresql) — see tools/gen-schema.mjs
+// Keep it provider-portable: no native enums, no Json type, no @db.* annotations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "__PROVIDER__"
+  url      = env("DATABASE_URL")
+}
+
+model OrgUnit {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  parentId  String?
+  parent    OrgUnit? @relation("OrgTree", fields: [parentId], references: [id])
+  children  OrgUnit[] @relation("OrgTree")
+  sites      Site[]
+  zones      Zone[]
+  users      User[]
+  employees  Employee[]
+}
+
+// مكان عمل الموظف العام (نطاق تشيك ان/أوت)
+model Site {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  orgUnitId   String
+  orgUnit     OrgUnit  @relation(fields: [orgUnitId], references: [id])
+  lat         Float
+  lng         Float
+  radiusM     Int      @default(250)
+  // polygon اختياري يتجاوز الدائرة: JSON string [[lat,lng],...]
+  polygon     String?
+  strictReject Boolean @default(false)
+  active      Boolean  @default(true)
+  employees   Employee[]
+  attendance  AttendanceRecord[]
+}
+
+// المنطقة التشغيلية للسواق (نطاق العمل + أساس GEOFENCE_EXIT)
+model Zone {
+  id           String   @id @default(cuid())
+  code         String   @unique
+  name         String
+  orgUnitId    String
+  orgUnit      OrgUnit  @relation(fields: [orgUnitId], references: [id])
+  lat          Float
+  lng          Float
+  radiusM      Int      @default(8000)
+  polygon      String?
+  maxSpeedKmh  Float?   // override للمنطقة
+  stopAlertMin Int?     // override
+  active       Boolean  @default(true)
+  drivers      Employee[]
+  trips        Trip[]
+  stops        StopEvent[]
+}
+
+model Employee {
+  id          String    @id @default(cuid())
+  externalId  String    @unique // معرّف الموظف في الداتا الرئيسية — مفتاح المزامنة
+  name        String
+  phone       String    // E.164، إلزامي للتنبيهات/واتساب
+  email       String?
+  jobTitle    String?
+  kind        String    @default("EMPLOYEE") // EMPLOYEE | DRIVER
+  active      Boolean   @default(true)
+  source      String    @default("MASTER") // MASTER | MANUAL
+  orgUnitId   String?
+  orgUnit     OrgUnit?  @relation(fields: [orgUnitId], references: [id])
+  siteId      String?
+  site        Site?     @relation(fields: [siteId], references: [id])
+  zoneId      String?
+  zone        Zone?     @relation(fields: [zoneId], references: [id])
+  user        User?
+  syncedAt    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  attendance  AttendanceRecord[]
+  positions   Position[]
+  alerts      Alert[]
+  trips       Trip[]
+  stops       StopEvent[]
+  devices     Device[]
+  rule        RuleOverride?
+  shifts      ShiftAssignment[]
+}
+
+model User {
+  id             String   @id @default(cuid())
+  identifier     String   @unique // login: employee externalId أو email
+  passwordHash   String
+  role           String   // ADMIN | SUPERVISOR | EMPLOYEE | DRIVER
+  name           String
+  employeeId     String?  @unique
+  employee       Employee? @relation(fields: [employeeId], references: [id])
+  scopeOrgUnitId String?
+  scopeOrgUnit   OrgUnit? @relation(fields: [scopeOrgUnitId], references: [id])
+  mustChangePassword Boolean @default(false)
+  disabled       Boolean  @default(false)
+  lastLoginAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  sessions       Session[]
+  devices        Device[]
+  alertAcks      Alert[]  @relation("AlertAck")
+  preferences    UserPreference[]
+  callLogs       CallLog[]
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  refreshTokenHash String
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+}
+
+model Device {
+  id           String   @id @default(cuid())
+  deviceId     String   @unique
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id])
+  employeeId   String?
+  employee     Employee? @relation(fields: [employeeId], references: [id])
+  platform     String   // android | ios
+  pushToken    String?
+  appVersion   String?
+  lastSeenAt   DateTime?
+  tracking     Boolean  @default(false)
+  gpsEnabled   Boolean  @default(true)
+  online       Boolean  @default(true)
+  batteryPct   Int?
+  lastBatchSeq Int      @default(0)
+  positions    Position[]
+  events       GeoEvent[]
+}
+
+model AttendanceRecord {
+  id          String    @id @default(cuid())
+  employeeId  String
+  employee    Employee  @relation(fields: [employeeId], references: [id])
+  siteId      String?
+  site        Site?     @relation(fields: [siteId], references: [id])
+  zoneId      String?
+  workDate    String    // YYYY-MM-DD (تسهّل التجميع في sqlite/pg)
+  checkInAt   DateTime?
+  checkOutAt  DateTime?
+  checkInLat  Float?
+  checkInLng  Float?
+  checkOutLat Float?
+  checkOutLng Float?
+  checkInAccuracy Float?
+  status      String    // VALID | OUT_OF_FENCE | MISSING_CHECKOUT | AUTO_CLOSED
+  distanceToSiteM Float?
+  deviceId    String?
+  note        String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([employeeId, workDate])
+  @@index([workDate])
+  @@index([status])
+}
+
+model ShiftSchedule {
+  id           String  @id @default(cuid())
+  code         String  @unique
+  name         String
+  startMinDay  Int     // minutes from midnight
+  endMinDay    Int
+  crossMidnight Boolean @default(false)
+  graceMin     Int     @default(30)
+  assignments  ShiftAssignment[]
+}
+
+model ShiftAssignment {
+  id         String        @id @default(cuid())
+  employeeId String
+  employee   Employee      @relation(fields: [employeeId], references: [id])
+  scheduleId String
+  schedule   ShiftSchedule @relation(fields: [scheduleId], references: [id])
+  weekday    Int?          // 0=Sunday … null = يومي
+  @@unique([employeeId, scheduleId, weekday])
+}
+
+model Position {
+  id          String   @id @default(cuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  deviceId    String?
+  device      Device?  @relation(fields: [deviceId], references: [id])
+  clientTs    DateTime // زمن الجهاز — المرجع في التحليل والتقارير
+  serverTs    DateTime @default(now())
+  lat         Float
+  lng         Float
+  speedKmh    Float?
+  bearing     Float?
+  accuracyM   Float?
+  altitudeM   Float?
+  batteryPct  Int?
+  provider    String?  // gps | network | fused
+  motionState String   // STOPPED | WALKING | RIDING | UNKNOWN
+  insideZone  Boolean?
+  buffered    Boolean  @default(false) // وصلت في إعادة بث بعد أوف لاين
+  stale       Boolean  @default(false)
+  ingestHash  String   @unique // dedupe: sha1(employeeId|clientTs|lat|lng)
+  tripId      String?
+  trip        Trip?    @relation(fields: [tripId], references: [id])
+
+  @@index([employeeId, clientTs])
+  @@index([clientTs])
+}
+
+model Trip {
+  id          String   @id @default(cuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  zoneId      String?
+  zone        Zone?    @relation(fields: [zoneId], references: [id])
+  startedAt   DateTime
+  endedAt     DateTime?
+  distanceKm  Float    @default(0)
+  maxSpeedKmh Float?
+  avgSpeedKmh Float?
+  startPoint  String?  // "lat,lng"
+  endPoint    String?
+  polyline    String?  // GeoJSON coordinates بعد التبسيط
+  state       String   @default("OPEN") // OPEN | CLOSED
+  replayed    Boolean  @default(false)
+  positions   Position[]
+  stops       StopEvent[]
+
+  @@index([employeeId, startedAt])
+}
+
+model StopEvent {
+  id          String   @id @default(cuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  tripId      String?
+  trip        Trip?    @relation(fields: [tripId], references: [id])
+  zoneId      String?
+  zone        Zone?    @relation(fields: [zoneId], references: [id])
+  lat         Float
+  lng         Float
+  startedAt   DateTime
+  endedAt     DateTime?
+  durationS   Int      @default(0)
+  kind        String   @default("UNPLANNED") // PLANNED | UNPLANNED | UNKNOWN
+  alerted     Boolean  @default(false)
+
+  @@index([employeeId, startedAt])
+}
+
+// خط سير مبسّط محفوظ لكل يوم/سواق (يُعاد حسابه من الـ positions)
+model RouteLine {
+  id         String   @id @default(cuid())
+  employeeId String
+  workDate   String
+  geojson    String
+  gaps       String?  // JSON: [{from,to}]
+  updatedAt  DateTime @updatedAt
+
+  @@unique([employeeId, workDate])
+}
+
+model GeoEvent {
+  id         String   @id @default(cuid())
+  deviceId   String?
+  device     Device?  @relation(fields: [deviceId], references: [id])
+  employeeId String?
+  kind       String   // GPS_OFF | GPS_ON | DATA_OFF | DATA_ON | APP_KILLED | BUFFER_FLUSH | HEARTBEAT_MISSING
+  at         DateTime
+  count      Int?     // عدد النقاط المخزنة محليًا في حالة BUFFER_FLUSH
+  meta       String?
+
+  @@index([employeeId, at])
+}
+
+model Alert {
+  id         String   @id @default(cuid())
+  type       String
+  severity   String   // INFO | WARNING | CRITICAL
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  userId     String?  // صاحب التنبيه لو موجه لشخص بعينه
+  zoneId     String?
+  siteId     String?
+  title      String
+  body       String
+  meta       String   // JSON string
+  status     String   @default("OPEN") // OPEN | ACK | RESOLVED
+  ackById    String?
+  ackBy      User?    @relation("AlertAck", fields: [ackById], references: [id])
+  ackAt      DateTime?
+  resolvedAt DateTime?
+  resolveNote String?
+  replayed   Boolean  @default(false) // وُلد من دفعة معاد بثها
+  cooldownKey String  @default("")    // dedupe/cooldown
+  createdAt  DateTime @default(now())
+  callLogs   CallLog[]
+  notifications NotificationLog[]
+
+  @@index([status, createdAt])
+  @@index([employeeId, createdAt])
+  @@index([cooldownKey])
+}
+
+model CallLog {
+  id       String   @id @default(cuid())
+  alertId  String
+  alert    Alert    @relation(fields: [alertId], references: [id])
+  userId   String
+  user     User     @relation(fields: [userId], references: [id])
+  called   Boolean
+  note     String?
+  at       DateTime @default(now())
+}
+
+model RuleOverride {
+  id            String   @id @default(cuid())
+  employeeId    String   @unique
+  employee      Employee @relation(fields: [employeeId], references: [id])
+  maxSpeedKmh   Float?
+  stopAlertMin  Int?
+  geofenceGraceS Int?
+  speedSamples  Int?
+  disabledTypes String?  // CSV لأنواع مطفّية
+}
+
+model NotificationLog {
+  id        String   @id @default(cuid())
+  alertId   String?
+  alert     Alert?   @relation(fields: [alertId], references: [id])
+  userId    String?
+  channel   String   // PUSH | SOCKET | WHATSAPP | SMS | EMAIL
+  target    String
+  status    String   @default("PENDING") // PENDING | SENT | FAILED | NO_PROVIDER
+  attempts  Int      @default(0)
+  error     String?
+  payload   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, updatedAt])
+}
+
+model UserPreference {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+  key    String
+  value  String
+
+  @@unique([userId, key])
+}
+
+model SyncSource {
+  id         String   @id @default(cuid())
+  code       String   @unique
+  name       String
+  kind       String   // sql | rest | csv
+  config     String   // JSON (connection / url / mapping / secret ref)
+  scheduleCron String?
+  enabled    Boolean  @default(true)
+  lastRunAt  DateTime?
+  runs       SyncRun[]
+}
+
+model SyncRun {
+  id          String     @id @default(cuid())
+  sourceId    String
+  source      SyncSource @relation(fields: [sourceId], references: [id])
+  startedAt   DateTime   @default(now())
+  finishedAt  DateTime?
+  trigger     String     // MANUAL | CRON | WEBHOOK
+  status      String     @default("RUNNING") // RUNNING | SUCCESS | FAILED | PARTIAL
+  scanned     Int        @default(0)
+  created     Int        @default(0)
+  updated     Int        @default(0)
+  unchanged   Int        @default(0)
+  deactivated Int        @default(0)
+  error       String?
+  issues      SyncIssue[]
+}
+
+model SyncIssue {
+  id        String   @id @default(cuid())
+  runId     String
+  run       SyncRun  @relation(fields: [runId], references: [id])
+  externalId String
+  reason    String   // MISSING_PHONE | BAD_ROLE | DUPLICATE | BAD_COORDS ...
+  detail    String?
+  resolved  Boolean  @default(false)
+}
+
+model Setting {
+  key       String @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

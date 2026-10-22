@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ios/Runner/Info.plist — Traccer (UNI Track).
+  These are the *relevant* keys the app needs; the Flutter template contributes the rest.
+  Merge, don't blindly overwrite, the generated file.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>Traccer</string>
+	<key>CFBundleName</key>
+	<string>traccer</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+
+	<!-- Location: in-use and always (background tracking for drivers) -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>يحتاج Traccer موقعك لتسجيل حضورك داخل نطاق الموقع والتحقق من النطاق عند التشيك ان/أوت.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>يستمر Traccer في تسجيل خط السير في الخلفية أثناء عملك، حتى والشاشة مقفلة، ليعرض المسار والحضور للمشرفين تلقائيًا.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>تتبع تلقائي في الخلفية أثناء الدوام.</string>
+
+	<!-- Background modes that keep tracking + buffering alive -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>audio</string>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
+
+	<!-- BGTaskScheduler identifiers used by `workmanager` (buffer catch-up + heartbeat).
+	     Keep these in sync with the identifiers registered in Swift/AppDelegate. -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>traccer.catchup</string>
+		<string>traccer.heartbeat</string>
+	</array>
+
+	<!-- APNs / Push (firebase_messaging) -->
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<true/>
+
+	<!-- Custom URL scheme so a notification tap opens /me -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.unigroup.traccer</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>traccer</string>
+			</array>
+		</dict>
+	</array>
+
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+</dict>
+</plist>

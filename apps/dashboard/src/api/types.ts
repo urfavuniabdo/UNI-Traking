@@ -1,0 +1,345 @@
+import type { AlertType, MotionState, Severity, Role } from '@shared';
+import { ALERT_TYPES, MOTION_STATES, SEVERITY } from '@shared';
+
+export type { AlertType, MotionState, Severity, Role };
+export { ALERT_TYPES, MOTION_STATES, SEVERITY };
+
+export type AlertStatus = 'OPEN' | 'ACK' | 'RESOLVED';
+export type AttendanceStatus = 'VALID' | 'OUT_OF_FENCE' | 'MISSING_CHECKOUT' | 'AUTO_CLOSED';
+export type WhaStatus = 'PENDING' | 'SENT' | 'NO_PROVIDER';
+
+export interface ApiUser {
+  id: string;
+  identifier: string;
+  name: string;
+  role: Role;
+  employeeId: string;
+  phone: string;
+  siteId?: string | null;
+  zoneId?: string | null;
+  driver: boolean;
+}
+
+export interface LoginResponse {
+  accessToken: string;
+  refreshToken: string;
+  user: ApiUser;
+}
+
+export interface AlertMeta {
+  lat?: number;
+  lng?: number;
+  speedKmh?: number;
+  stopDurationS?: number;
+  threshold?: number;
+  offlineSince?: string;
+  bufferCount?: number;
+  fenceName?: string;
+  distanceToCenterM?: number;
+}
+
+export interface AlertPayload {
+  id: string;
+  type: AlertType;
+  severity: Severity;
+  userId: string;
+  userName: string;
+  phone: string;
+  orgUnitId?: string | null;
+  zoneId?: string | null;
+  siteId?: string | null;
+  title: string;
+  body: string;
+  createdAt: string;
+  status: AlertStatus;
+  ackBy?: string | null;
+  ackAt?: string | null;
+  meta: AlertMeta;
+  channel: { push: boolean; socket: boolean; whatsapp?: WhaStatus | null };
+}
+
+export interface LivePosition {
+  userId: string;
+  userName?: string;
+  lat: number;
+  lng: number;
+  speedKmh: number;
+  motionState: MotionState;
+  ts: string;
+  battery?: number;
+  accuracy?: number;
+  online: boolean;
+  tracking: boolean;
+  gpsEnabled: boolean;
+  dataEnabled: boolean;
+  lastSeen: string;
+}
+
+export interface RoutePoint {
+  clientTs: string;
+  lat: number;
+  lng: number;
+  speedKmh: number;
+  bearing?: number;
+  accuracy?: number;
+  motionState: MotionState;
+  buffered: boolean;
+}
+
+export interface RouteStop {
+  startTs: string;
+  endTs: string;
+  lat: number;
+  lng: number;
+  durationMin: number;
+}
+
+export interface RouteGap {
+  fromTs: string;
+  toTs: string;
+  minutes: number;
+}
+
+export interface RouteResponse {
+  userId: string;
+  userName: string;
+  date: string;
+  geojson: { type: 'LineString'; coordinates: [number, number][] };
+  points: RoutePoint[];
+  stops: RouteStop[];
+  gaps: RouteGap[];
+  distanceKm: number;
+  replayedPoints: number;
+}
+
+export type GeoShape = 'CIRCLE' | 'POLYGON';
+
+export interface Site {
+  id: string;
+  name: string;
+  code: string;
+  city: string;
+  lat: number;
+  lng: number;
+  radiusM: number;
+  strictReject: boolean;
+  attendance: { expected: number; present: number; outOfFence: number };
+}
+
+export interface Zone {
+  id: string;
+  name: string;
+  code: string;
+  city: string;
+  shape: GeoShape;
+  lat: number;
+  lng: number;
+  radiusM?: number | null;
+  polygon?: [number, number][] | null;
+  strictReject: boolean;
+  maxSpeedKmh?: number | null;
+  stopAlertMin?: number | null;
+  driverCount: number;
+  activeDriverIds: string[];
+}
+
+export interface FencesResponse {
+  sites: Site[];
+  zones: Zone[];
+  outside: string[];
+}
+
+export interface Employee {
+  id: string;
+  identifier: string;
+  name: string;
+  phone: string;
+  role: Role;
+  driver: boolean;
+  siteId?: string | null;
+  zoneId?: string | null;
+  zoneName?: string | null;
+  siteName?: string | null;
+  active: boolean;
+  maxSpeedKmh?: number | null;
+  stopAlertMin?: number | null;
+  motionMinutes?: { stopped: number; walking: number; riding: number };
+  openAlerts?: number;
+}
+
+export interface DeviceInfo {
+  id: string;
+  deviceId: string;
+  platform: 'android' | 'ios';
+  appVersion: string;
+  token: string;
+  lastSeen: string;
+  battery?: number | null;
+  tracking: boolean;
+  gpsEnabled: boolean;
+  online: boolean;
+}
+
+export interface AttendanceRecord {
+  id: string;
+  userId: string;
+  userName: string;
+  siteId?: string | null;
+  siteName?: string | null;
+  zoneId?: string | null;
+  zoneName?: string | null;
+  date: string;
+  checkInTs?: string | null;
+  checkOutTs?: string | null;
+  checkInStatus: AttendanceStatus;
+  checkOutStatus?: AttendanceStatus | null;
+  distanceToCenterM?: number | null;
+  fenceName?: string | null;
+  exception: boolean;
+  replayed: boolean;
+}
+
+export interface DailyReport {
+  date: string;
+  kpis: {
+    present: number;
+    absent: number;
+    activeDrivers: number;
+    openAlerts: number;
+    criticalAlerts: number;
+    kmDriven: number;
+    exceptions: number;
+    offlineMinutes: number;
+  };
+  alertsByType: { type: AlertType; count: number }[];
+  hourlyPositions: { hour: number; count: number }[];
+}
+
+export interface MileageRow {
+  key: string;
+  label: string;
+  km: number;
+  ridingMin: number;
+  replayedKm: number;
+}
+
+export interface ExceptionRow {
+  type: string;
+  count: number;
+  unresolved: number;
+}
+
+export interface TimesheetRow {
+  userId: string;
+  userName: string;
+  date: string;
+  checkIn?: string | null;
+  checkOut?: string | null;
+  hoursWorked: number;
+  status: AttendanceStatus;
+  replayed: boolean;
+}
+
+export interface SyncSource {
+  id: string;
+  name: string;
+  kind: 'sql' | 'rest' | 'csv';
+  enabled: boolean;
+  scheduleCron: string;
+  lastRunAt?: string | null;
+  webhookSecret?: string;
+}
+
+export interface SyncRun {
+  id: string;
+  sourceId: string;
+  sourceName: string;
+  startedAt: string;
+  finishedAt?: string | null;
+  status: 'RUNNING' | 'SUCCESS' | 'FAILED';
+  created: number;
+  updated: number;
+  unchanged: number;
+  deactivated: number;
+  triggeredBy: 'CRON' | 'MANUAL' | 'WEBHOOK';
+}
+
+export interface SyncIssue {
+  id: string;
+  runId: string;
+  code: 'MISSING_PHONE' | 'UNKNOWN_SITE' | 'IDENTIFIER_COLLISION';
+  externalId: string;
+  name: string;
+  detail: string;
+  resolved: boolean;
+  createdAt: string;
+}
+
+export interface SyncMatrixRow {
+  source: string;
+  field: string;
+  lastSyncAt: string;
+  freshnessMin: number;
+  rows: number;
+}
+
+export interface NotificationLogEntry {
+  id: string;
+  alertId: string;
+  alertType: AlertType;
+  channel: 'push' | 'whatsapp' | 'socket';
+  userId: string;
+  userName: string;
+  status: 'SENT' | 'PENDING' | 'FAILED' | 'NO_PROVIDER';
+  attempts: number;
+  at: string;
+  error?: string | null;
+}
+
+export interface RuleSettings {
+  maxSpeedKmh: number;
+  stopAlertMin: number;
+  geofenceGraceS: number;
+  speedingCriticalS: number;
+  cooldownS: number;
+  gapMinMin: number;
+  shiftGraceMin: number;
+  replayMaxAgeHours: number;
+  attendanceStrictReject: boolean;
+}
+
+export interface NotificationPrefs {
+  push: boolean;
+  whatsapp: boolean;
+  email: boolean;
+  sound: boolean;
+  types: AlertType[];
+}
+
+export interface SocketPositionUpdate {
+  userId: string;
+  lat: number;
+  lng: number;
+  speedKmh: number;
+  motionState: MotionState;
+  ts: string;
+}
+
+export interface SocketPresence {
+  userId: string;
+  online: boolean;
+  tracking: boolean;
+  gpsEnabled: boolean;
+  dataEnabled?: boolean;
+  lastSeen: string;
+}
+
+export type ApiErrorCode =
+  | 'FENCE_VIOLATION'
+  | 'ALREADY_CHECKED_IN'
+  | 'NO_OPEN_RECORD'
+  | 'INVALID_CREDENTIALS'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN_ROLE_ADMIN'
+  | 'FORBIDDEN_ROLE_SUPERVISOR'
+  | `FORBIDDEN_ROLE:${string}`;

@@ -1,0 +1,331 @@
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:dio/dio.dart';
+
+import 'api_error.dart';
+import 'app_config.dart';
+import 'session_store.dart';
+import '../models/alert.dart';
+import '../models/attendance.dart';
+import '../models/position.dart';
+import '../models/user.dart';
+
+/// The only place that talks HTTP to apps/api. Everything else goes through this.
+///
+/// Responsibilities (task brief):
+///  * base URL from `--dart-define=API_URL` (default Android-emulator host alias)
+///  * `Authorization: Bearer <accessToken>` on every call except `/auth/login` & `/health`
+///  * single-flight refresh on 401 (one refresh even if N requests 401 at once)
+///  * typed errors for FENCE_VIOLATION / ALREADY_CHECKED_IN / NO_OPEN_RECORD (§3)
+///  * exponential backoff + jitter, retried ONLY on network failures (never on 4xx)
+class ApiClient {
+  ApiClient({required this.session, Dio? dio, Random? random})
+      : _random = random ?? math.Random(),
+        _dio = dio ??
+            Dio(BaseOptions(
+              baseUrl: AppConfig.apiUrl,
+              connectTimeout: const Duration(seconds: 10),
+              receiveTimeout: const Duration(seconds: 20),
+              headers: <String, Object?>{'Accept': 'application/json'},
+            )) {
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (RequestOptions options, RequestInterceptorHandler handler) {
+          final String? token = session.accessToken;
+          if (token != null && token.isNotEmpty && !options.path.contains('/auth/login')) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
+          final String? device = session.deviceId;
+          if (device != null && device.isNotEmpty) {
+            options.headers['x-device-id'] = device;
+          }
+          handler.next(options);
+        },
+      ),
+    );
+  }
+
+  final Dio _dio;
+  final SessionStore session;
+  final math.Random _random;
+
+  /// Guard so concurrent 401s trigger exactly one `/auth/refresh`.
+  Future<String?>? _refreshFlight;
+
+  // ===========================================================================
+  // Auth & devices (§2)
+  // ===========================================================================
+
+  Future<AuthTokens> login({required String identifier, required String password}) async {
+    final Map<String, Object?> data = await _send(
+      () => _dio.post<Map<String, Object?>>(
+        '/auth/login',
+        data: <String, Object?>{'identifier': identifier, 'password': password},
+      ),
+      retry: false,
+    );
+    final AuthTokens tokens = AuthTokens.fromJson(data);
+    await session.saveTokens(tokens);
+    return tokens;
+  }
+
+  Future<AuthTokens> refresh(String refreshToken) async {
+    final Map<String, Object?> data = await _send(
+      () => _dio.post<Map<String, Object?>>(
+        '/auth/refresh',
+        data: <String, Object?>{'refreshToken': refreshToken},
+      ),
+      retry: false,
+    );
+    final AuthTokens tokens = AuthTokens.fromJson(data);
+    await session.saveTokens(tokens);
+    return tokens;
+  }
+
+  Future<AppUser> me() async {
+    final Map<String, Object?> data = await _guarded(() => _dio.get<Map<String, Object?>>('/auth/me'));
+    return AppUser.fromJson(data);
+  }
+
+  /// Forced password change for first-login accounts (`changeOnLogin=true`, §8).
+  /// Endpoint not spelled out in CONTRACT §2 — we POST `/auth/change-password`; if the API
+  /// hasn't implemented it we surface the typed error so the caller can fall back to re-login.
+  Future<void> changePassword({required String oldPassword, required String newPassword}) async {
+    await _guarded(
+      () => _dio.post<Map<String, Object?>>(
+        '/auth/change-password',
+        data: <String, Object?>{'oldPassword': oldPassword, 'newPassword': newPassword},
+      ),
+    );
+  }
+
+  Future<void> logout() async {
+    try {
+      await _send(() => _dio.post<Map<String, Object?>>('/auth/logout'));
+    } on ApiException {
+      // best-effort — always clear locally
+    }
+    await session.clear();
+  }
+
+  Future<void> registerDevice({
+    required String token,
+    required String platform, // "android" | "ios"
+    required String deviceId,
+  }) async {
+    await _guarded(
+      () => _dio.post<Map<String, Object?>>(
+        '/devices/register',
+        data: <String, Object?>{
+          'token': token,
+          'platform': platform,
+          'appVersion': AppConfig.appVersion,
+          'deviceId': deviceId,
+        },
+      ),
+    );
+  }
+
+  Future<void> heartbeat({
+    required String deviceId,
+    required bool tracking,
+    required bool gpsEnabled,
+    required bool online,
+    int? battery,
+  }) async {
+    await _guarded(
+      () => _dio.post<Map<String, Object?>>(
+        '/devices/heartbeat',
+        data: <String, Object?>{
+          'deviceId': deviceId,
+          'battery': battery,
+          'tracking': tracking,
+          'gpsEnabled': gpsEnabled,
+          'online': online,
+        },
+      ),
+    );
+  }
+
+  /// kind ∈ {GPS_OFF, GPS_ON, DATA_OFF, DATA_ON, APP_KILLED, BUFFER_FLUSH} (§2 / §6).
+  Future<void> toggleEvent({required String deviceId, required String kind}) async {
+    await _guarded(
+      () => _dio.post<Map<String, Object?>>(
+        '/devices/toggle-event',
+        data: <String, Object?>{'deviceId': deviceId, 'kind': kind},
+      ),
+    );
+  }
+
+  // ===========================================================================
+  // Attendance (§3)
+  // ===========================================================================
+
+  Future<AttendanceResult> checkIn({
+    required double lat,
+    required double lng,
+    double? accuracy,
+    required String deviceId,
+  }) async {
+    final Map<String, Object?> data = await _guarded(
+      () => _dio.post<Map<String, Object?>>(
+        '/attendance/check-in',
+        data: <String, Object?>{'lat': lat, 'lng': lng, 'accuracy': accuracy, 'deviceId': deviceId},
+      ),
+    );
+    return AttendanceResult.fromJson(data);
+  }
+
+  Future<AttendanceResult> checkOut({
+    required double lat,
+    required double lng,
+    double? accuracy,
+    required String deviceId,
+  }) async {
+    final Map<String, Object?> data = await _guarded(
+      () => _dio.post<Map<String, Object?>>(
+        '/attendance/check-out',
+        data: <String, Object?>{'lat': lat, 'lng': lng, 'accuracy': accuracy, 'deviceId': deviceId},
+      ),
+    );
+    return AttendanceResult.fromJson(data);
+  }
+
+  Future<TodayState> today() async {
+    final Map<String, Object?> data = await _guarded(
+      () => _dio.get<Map<String, Object?>>('/attendance/me/today'),
+    );
+    return TodayState.fromJson(data);
+  }
+
+  Future<List<AttendanceDay>> history({required DateTime from, required DateTime to}) async {
+    final List<Object?> rows = await _guarded(
+      () => _dio.get<List<Object?>>(
+        '/attendance',
+        queryParameters: <String, Object?>{
+          'from': from.toUtc().toIso8601String(),
+          'to': to.toUtc().toIso8601String(),
+          'page': 1,
+        },
+      ),
+    );
+    return rows
+        .whereType<Map<String, Object?>>()
+        .map(AttendanceDay.fromJson)
+        .toList(growable: false);
+  }
+
+  // ===========================================================================
+  // Position ingest (§4) — the ONLY position entrypoint
+  // ===========================================================================
+
+  Future<BatchResponse> postBatch(BatchPayload payload) async {
+    final Map<String, Object?> data = await _guarded(
+      () => _dio.post<Map<String, Object?>>('/positions/batch', data: payload.toJson()),
+    );
+    return BatchResponse.fromJson(data);
+  }
+
+  // ===========================================================================
+  // Alerts (§6/§7) — own list only for employee/driver
+  // ===========================================================================
+
+  Future<List<TraccerAlert>> myAlerts() async {
+    final List<Object?> rows = await _guarded(
+      () => _dio.get<List<Object?>>('/alerts', queryParameters: <String, Object?>{}),
+    );
+    return rows.whereType<Map<String, Object?>>().map(TraccerAlert.fromJson).toList(growable: false);
+  }
+
+  // ===========================================================================
+  // Transport internals
+  // ===========================================================================
+
+  /// Sends [action], retrying on *network* failures with exp backoff + jitter, and doing a
+  /// single-flight refresh + one replay on 401.
+  Future<T> _guarded<T>(Future<T> Function() action) => _send(action, retry: true);
+
+  Future<T> _send<T>(
+    Future<T> Function() action, {
+    required bool retry,
+    int attempt = 0,
+    bool allowRefresh = true,
+  }) async {
+    try {
+      return await action();
+    } on DioException catch (e) {
+      // 401 -> single-flight refresh then one replay (never for login/refresh themselves).
+      if (e.response?.statusCode == 401 && allowRefresh && !e.requestOptions.path.contains('/auth/')) {
+        final String? newToken = await _ensureRefreshed();
+        if (newToken != null) {
+          return _send<T>(action, retry: retry, attempt: attempt, allowRefresh: false);
+        }
+        throw UnauthorizedException();
+      }
+      if (retry && _isNetworkFailure(e)) {
+        if (attempt < 4) {
+          await _backoff(attempt);
+          return _send<T>(action, retry: true, attempt: attempt + 1, allowRefresh: allowRefresh);
+        }
+        throw NetworkException(message: 'تعذر الاتصال بالخادم');
+      }
+      throw _toApiError(e);
+    }
+  }
+
+  Future<String?> _ensureRefreshed() {
+    // Reuse the in-flight refresh if another request already started one.
+    return _refreshFlight ??= () async {
+      try {
+        final String? rt = session.refreshToken;
+        if (rt == null) return null;
+        final AuthTokens t = await refresh(rt);
+        return t.accessToken;
+      } catch (_) {
+        await session.clear();
+        return null;
+      } finally {
+        // allow the next 401 burst after this one settles
+        Timer(const Duration(seconds: 1), () => _refreshFlight = null);
+      }
+    }();
+  }
+
+  bool _isNetworkFailure(DioException e) =>
+      e.type == DioExceptionType.connectionError ||
+      e.type == DioExceptionType.connectionTimeout ||
+      e.type == DioExceptionType.sendTimeout ||
+      e.type == DioExceptionType.receiveTimeout ||
+      (e.response == null && e.type == DioExceptionType.unknown);
+
+  Future<void> _backoff(int attempt) async {
+    // 200ms, 400ms, 800ms, 1600ms * (0.5..1.0 jitter)
+    final double base = 200 * math.pow(2, attempt).toDouble();
+    final double jitter = base * (0.5 + _random.nextDouble() * 0.5);
+    await Future<void>.delayed(Duration(milliseconds: jitter.round()));
+  }
+
+  ApiException _toApiError(DioException e) {
+    final int? status = e.response?.statusCode;
+    final Object? body = e.response?.data;
+    final Map<String, Object?> json =
+        body is Map<String, Object?> ? body : <String, Object?>{};
+    final String code = (json['code'] ?? json['error'] ?? '') as String;
+    final String message = (json['message'] ?? 'خطأ في الاتصال') as String;
+
+    if (status == 401) return UnauthorizedException(message: message);
+    switch (code) {
+      case 'FENCE_VIOLATION':
+        return FenceViolationException.fromJson(json);
+      case 'ALREADY_CHECKED_IN':
+        return AlreadyCheckedInException(message: message, statusCode: status, data: json);
+      case 'NO_OPEN_RECORD':
+        return NoOpenRecordException(message: message, statusCode: status, data: json);
+      default:
+        return ApiException(message: message, statusCode: status, code: code.isEmpty ? null : code, data: json);
+    }
+  }
+
+  void close() => _dio.close(force: true);
+}

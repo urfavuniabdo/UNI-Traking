@@ -1,0 +1,20 @@
+import { Controller, Get } from '@nestjs/common';
+import { Public } from './common/auth/guards';
+import { PrismaService } from './common/prisma.service';
+
+@Controller()
+export class AppController {
+  constructor(private readonly prisma: PrismaService) {}
+
+  @Public()
+  @Get('health')
+  async health() {
+    let db = true;
+    try {
+      await this.prisma.$queryRaw`SELECT 1`;
+    } catch {
+      db = false;
+    }
+    return { ok: db, service: 'traccer-api', version: process.env.npm_package_version ?? '0.1.0', time: new Date().toISOString() };
+  }
+}

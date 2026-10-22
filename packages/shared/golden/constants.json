@@ -1,0 +1,155 @@
+{
+  "_source": "packages/shared/src/constants.ts",
+  "_generator": "tools/generate_constants_golden.mjs",
+  "MOTION": {
+    "STATIONARY_SPEED_KMH": 1.5,
+    "WALK_MAX_KMH": 7,
+    "SPEED_EMA_ALPHA": 0.35,
+    "HYSTERESIS_SAMPLES": 3,
+    "ACCURACY_REJECT_M": 35,
+    "MIN_INTERVAL_S": 2
+  },
+  "RULE_DEFAULTS": {
+    "maxSpeedKmh": 80,
+    "stopAlertMin": 30,
+    "geofenceGraceS": 120,
+    "speedSamples": 3,
+    "speedingCriticalS": 120,
+    "harshBrakingMs2": -2.2,
+    "harshAccelMs2": 2.8,
+    "cooldownS": 180,
+    "heartbeatIntervalS": 300,
+    "heartbeatMissedCycles": 3,
+    "gapMinMin": 10,
+    "replayMaxAgeHours": 72,
+    "shiftGraceMin": 30,
+    "accuracyDriftM": 120,
+    "dedupeWindowS": 20
+  },
+  "MOTION_STATES": [
+    "STOPPED",
+    "WALKING",
+    "RIDING",
+    "UNKNOWN"
+  ],
+  "ALERT_TYPES": [
+    "GEOFENCE_EXIT",
+    "GEOFENCE_ENTER",
+    "CHECK_IN_OUT_OF_FENCE",
+    "SPEEDING",
+    "HARSH_BRAKING",
+    "HARSH_ACCELERATION",
+    "STOP_EXCEEDED",
+    "GPS_OFF",
+    "DATA_OFF",
+    "APP_OFFLINE",
+    "HEARTBEAT_MISSING",
+    "BUFFER_REPLAYED",
+    "CHECKOUT_MISSING",
+    "ROUTE_GAP",
+    "IDLE_LONG"
+  ],
+  "DRIVER_VISIBLE_ALERTS": [
+    "GEOFENCE_EXIT",
+    "SPEEDING",
+    "STOP_EXCEEDED",
+    "GPS_OFF",
+    "DATA_OFF",
+    "CHECK_IN_OUT_OF_FENCE",
+    "CHECKOUT_MISSING"
+  ],
+  "GEO_EVENT_KINDS": [
+    "GPS_OFF",
+    "GPS_ON",
+    "DATA_OFF",
+    "DATA_ON",
+    "APP_KILLED",
+    "BUFFER_FLUSH",
+    "HEARTBEAT_MISSING"
+  ],
+  "SEVERITY": [
+    "INFO",
+    "WARNING",
+    "CRITICAL"
+  ],
+  "ROLES": [
+    "ADMIN",
+    "SUPERVISOR",
+    "EMPLOYEE",
+    "DRIVER"
+  ],
+  "ATTENDANCE_STATUS": [
+    "VALID",
+    "OUT_OF_FENCE",
+    "MISSING_CHECKOUT",
+    "AUTO_CLOSED"
+  ],
+  "AR_ALERT_TEXT": {
+    "GEOFENCE_EXIT": {
+      "title": "خروج عن المنطقة المحددة",
+      "body": "خرجت عن نطاق منطقتك المصرّح لك بها"
+    },
+    "GEOFENCE_ENTER": {
+      "title": "دخول المنطقة",
+      "body": "عدت إلى نطاق منطقتك"
+    },
+    "CHECK_IN_OUT_OF_FENCE": {
+      "title": "تشيك ان خارج النطاق",
+      "body": "تم تسجيل حضورك خارج النطاق المحدد"
+    },
+    "SPEEDING": {
+      "title": "تجاوز السرعة",
+      "body": "السرعة أعلى من الحد المسموح في هذه المنطقة"
+    },
+    "HARSH_BRAKING": {
+      "title": "فرملة مفاجئة",
+      "body": "تم رصد فرملة قوية مفاجئة"
+    },
+    "HARSH_ACCELERATION": {
+      "title": "تسارع مفاجئ",
+      "body": "تم رصد تسارع قوي مفاجئ"
+    },
+    "STOP_EXCEEDED": {
+      "title": "توقف طويل",
+      "body": "توقف تجاوز المدة المسموحة بدون إشعار"
+    },
+    "GPS_OFF": {
+      "title": "إيقاف الـ GPS",
+      "body": "خدمة الموقع مقفلة والتتبع متوقف"
+    },
+    "DATA_OFF": {
+      "title": "إيقاف الداتا",
+      "body": "الإنترنت مقطوع — يتم تخزين خط السير محليًا"
+    },
+    "APP_OFFLINE": {
+      "title": "التطبيق غير متصل",
+      "body": "لم تصل بيانات من جهازك منذ فترة"
+    },
+    "HEARTBEAT_MISSING": {
+      "title": "انقطاع نبض الجهاز",
+      "body": "الجهاز لم يرسل نبضًا في الموعد المحدد"
+    },
+    "BUFFER_REPLAYED": {
+      "title": "استعادة بيانات أوف لاين",
+      "body": "تم رفع خط السير المخزّن محليًا وإظهاره كأنه لحظي"
+    },
+    "CHECKOUT_MISSING": {
+      "title": "نهاية وردية بدون تشيك أوت",
+      "body": "انتهت الوردية ولم يتم تسجيل الخروج"
+    },
+    "ROUTE_GAP": {
+      "title": "فجوة في خط السير",
+      "body": "انقطاع في تسجيل المسار أثناء الرحلة"
+    },
+    "IDLE_LONG": {
+      "title": "سكون طويل",
+      "body": "لم يتم رصد أي حركة لفترة طويلة"
+    }
+  },
+  "MOTION_STATE_AR": {
+    "STOPPED": "واقف",
+    "WALKING": "ماشي",
+    "RIDING": "في رحلة",
+    "UNKNOWN": "غير معروف"
+  }
+}
