@@ -24,14 +24,14 @@ class S {
     _loaded = true;
   }
 
-  /// t('checkIn') → "بدء وردية". Missing keys return the key itself (easy to spot).
+  /// t('checkIn') → "بدء اليوم". Missing keys return the key itself (easy to spot).
   static String t(String key) => _strings[key] ?? key;
 
   static const Map<String, String> _fallback = <String, String>{
     'appName': 'UNI Tracking',
-    'checkIn': 'بدء وردية',
+    'checkIn': 'بدء اليوم',
     'dismiss': 'إخفاء',
-    'checkOut': 'إنهاء وردية',
+    'checkOut': 'إنهاء اليوم',
     'insideFence': 'داخل النطاق',
     'outsideFence': 'خارج النطاق',
     'fenceUnknown': 'جارٍ التحقق من النطاق',
@@ -46,6 +46,8 @@ class S {
     'emergencyStop': 'إيقاف التتبع الطارئ',
     'contactSupervisor': 'اتصل بالمشرف',
     'history': 'سجل الحضور',
+    'leaveTodayStatus': 'يومك إجازة معتمدة — مش مطلوب تبدأ اليوم',
+    'leaveTodayButton': 'إجازة معتمدة',
     'notifications': 'التنبيهات',
     'settings': 'الإعدادات',
     'logout': 'تسجيل الخروج',

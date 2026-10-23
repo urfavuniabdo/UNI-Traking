@@ -204,9 +204,11 @@ class LeaveStatus {
     cancelled,
   ];
 
+  /// Same Arabic the dashboard HR queue uses, so a requester and the person deciding
+  /// read one wording for one status.
   static const Map<String, String> ar = <String, String>{
-    pending: 'قيد المراجعة',
-    approved: 'مقبولة',
+    pending: 'بانتظار القرار',
+    approved: 'معتمدة',
     rejected: 'مرفوضة',
     cancelled: 'ملغاة',
   };

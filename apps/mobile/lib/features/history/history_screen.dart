@@ -302,6 +302,9 @@ class _RecordRow extends StatelessWidget {
 
   static ({String label, Color color}) _statusOf(AttendanceDay record) {
     final String? status = record.status;
+    if (status == AttendanceStatus.leave) {
+      return (label: S.t('statusLeave'), color: TraccerTheme.leave);
+    }
     if (record.exception || status == AttendanceStatus.outOfFence) {
       return (label: S.t('outsideFence'), color: TraccerTheme.amber);
     }

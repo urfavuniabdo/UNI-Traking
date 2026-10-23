@@ -60,6 +60,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             onPressed: () => context.push('/history'),
           ),
           IconButton(
+            tooltip: S.t('leaveRequests'),
+            icon: const Icon(Icons.beach_access_outlined),
+            onPressed: () => context.push('/leave'),
+          ),
+          IconButton(
             tooltip: S.t('notifications'),
             icon: const Icon(Icons.notifications_none),
             onPressed: () => context.push('/me/notifications'),
@@ -326,10 +331,13 @@ class _StatusCard extends StatelessWidget {
         ? S.t('fenceUnknown')
         : (insideFence ? S.t('insideFence') : S.t('outsideFence'));
     final String motionLabel = MotionStates.ar[home.motionState] ?? '';
-    final String shiftText = home.checkedIn && home.shiftStart != null
-        ? '${S.t('shiftTime')}: ${CairoTime.formatTime(home.shiftStart!)} — '
-            '${CairoTime.elapsedLabel(DateTime.now().difference(home.shiftStart!))}'
-        : S.t('noShift');
+    final bool onLeave = home.onLeave && !home.checkedIn;
+    final String shiftText = onLeave
+        ? S.t('leaveTodayStatus')
+        : home.checkedIn && home.shiftStart != null
+            ? '${S.t('shiftTime')}: ${CairoTime.formatTime(home.shiftStart!)} — '
+                '${CairoTime.elapsedLabel(DateTime.now().difference(home.shiftStart!))}'
+            : S.t('noShift');
 
     return _Panel(
       isDark: isDark,
@@ -369,7 +377,11 @@ class _StatusCard extends StatelessWidget {
           const SizedBox(height: 6),
           Row(
             children: <Widget>[
-              Icon(Icons.schedule, size: 16, color: _legible(TraccerTheme.muted, isDark)),
+              Icon(
+                onLeave ? Icons.event_available : Icons.schedule,
+                size: 16,
+                color: onLeave ? _legible(TraccerTheme.leave, isDark) : _legible(TraccerTheme.muted, isDark),
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -378,7 +390,7 @@ class _StatusCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 14,
-                    color: _inkOf(context),
+                    color: onLeave ? _legible(TraccerTheme.leave, isDark) : _inkOf(context),
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -391,7 +403,7 @@ class _StatusCard extends StatelessWidget {
   }
 }
 
-/// THE pill button: تشيك ان ⇄ تشيك أوت. The only action on this screen.
+/// THE pill button: بدء اليوم ⇄ إنهاء اليوم. The only action on this screen.
 class _CheckButton extends StatelessWidget {
   const _CheckButton({
     required this.home,
@@ -405,6 +417,27 @@ class _CheckButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool checkedIn = home.checkedIn;
+    // An approved leave day is already accounted for — the CTA goes inert, it doesn't lie.
+    final bool locked = home.onLeave && !checkedIn;
+    if (locked) {
+      return FilledButton(
+        style: FilledButton.styleFrom(
+          backgroundColor: TraccerTheme.leave.withValues(alpha: 0.16),
+          foregroundColor: TraccerTheme.leave,
+        ),
+        onPressed: null,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            const Icon(Icons.event_available),
+            const SizedBox(width: 12),
+            Flexible(
+              child: Text(S.t('leaveTodayButton'), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+          ],
+        ),
+      );
+    }
     return FilledButton(
       style: FilledButton.styleFrom(
         backgroundColor: checkedIn ? TraccerTheme.brandDark : TraccerTheme.brand,

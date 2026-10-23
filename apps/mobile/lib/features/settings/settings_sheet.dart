@@ -30,6 +30,7 @@ String _roleAr(String role) => switch (role) {
       'ADMIN' => S.t('roleAdmin'),
       'SUPERVISOR' => S.t('roleSupervisor'),
       'DRIVER' => S.t('roleDriver'),
+      'HR' => S.t('roleHr'),
       _ => S.t('roleEmployee'),
     };
 

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/api_client.dart';
 import '../core/api_error.dart';
+import '../core/app_strings.dart';
 import '../core/session_store.dart';
 import '../core/traccer_constants.dart';
 import '../data/position_dao.dart';
@@ -190,6 +191,7 @@ class HomeState {
     this.notice,
     this.fenceViolation,
     this.amberOutOfFence = false,
+    this.onLeave = false,
   });
 
   final bool checkedIn;
@@ -206,6 +208,9 @@ class HomeState {
   final FenceViolationException? fenceViolation; // null unless a check-in was hard-rejected
   final bool amberOutOfFence; // OUT_OF_FENCE accepted → admins alerted (amber banner)
 
+  /// Today is covered by an approved leave request — the start-the-day button is locked.
+  final bool onLeave;
+
   HomeState copyWith({
     bool? checkedIn,
     bool? tracking,
@@ -220,6 +225,7 @@ class HomeState {
     Object? notice = _unset,
     Object? fenceViolation = _unset,
     bool? amberOutOfFence,
+    bool? onLeave,
   }) =>
       HomeState(
         checkedIn: checkedIn ?? this.checkedIn,
@@ -236,6 +242,7 @@ class HomeState {
         fenceViolation:
             fenceViolation == _unset ? this.fenceViolation : fenceViolation as FenceViolationException?,
         amberOutOfFence: amberOutOfFence ?? this.amberOutOfFence,
+        onLeave: onLeave ?? this.onLeave,
       );
 }
 
@@ -307,6 +314,7 @@ class HomeController extends StateNotifier<HomeState> {
         shiftStart: today.record?.checkInAt,
         fenceName: today.fenceName ?? state.fenceName,
         insideFence: today.insideFence ?? state.insideFence,
+        onLeave: today.onLeave,
       );
       await _ref.read(sessionStoreProvider).setCheckedIn(today.isCheckedIn);
     } on ApiException {
@@ -387,8 +395,13 @@ class HomeController extends StateNotifier<HomeState> {
     super.dispose();
   }
 
-  /// تشيك ان — request permissions → read location → POST → auto-start tracking.
+  /// بدء اليوم — request permissions → read location → POST → auto-start tracking.
   Future<void> checkIn() async {
+    // HR approved a leave for today: the day is already accounted for, so the button is inert.
+    if (state.onLeave) {
+      state = state.copyWith(busy: false, notice: S.t('leaveTodayButton'));
+      return;
+    }
     state = state.copyWith(busy: true, notice: null, fenceViolation: null, amberOutOfFence: false);
     final AppUser? user = _ref.read(sessionStoreProvider).user;
     try {
@@ -396,7 +409,7 @@ class HomeController extends StateNotifier<HomeState> {
           .read(locationAdapterProvider)
           .requestPermissions(background: user?.isDriver ?? false);
       if (perm == PermissionResult.denied) {
-        state = state.copyWith(busy: false, notice: 'لا يمكن بدء الوردية بدون إذن الموقع');
+        state = state.copyWith(busy: false, notice: 'لا يمكن بدء اليوم بدون إذن الموقع');
         return;
       }
       final fix = await _ref.read(locationAdapterProvider).currentFix();
@@ -441,8 +454,8 @@ class HomeController extends StateNotifier<HomeState> {
       state = state.copyWith(
         busy: false,
         notice: open
-            ? 'وردتك مفتوحة بالفعل — اضغط إنهاء وردية لإنهائها'
-            : 'تم بدء ورديتك وانتهى اليوم — لا يمكن بدء وردية أخرى بنفس التاريخ',
+            ? 'بدأت يومك بالفعل — اضغط «إنهاء اليوم» لينتهي'
+            : 'تم بدء اليوم وإنهائه — لا يمكن بدء يوم آخر بنفس التاريخ',
       );
     } on NetworkException {
       state = state.copyWith(busy: false, notice: 'لا يوجد اتصال — حاول لاحقًا');
@@ -451,7 +464,7 @@ class HomeController extends StateNotifier<HomeState> {
     }
   }
 
-  /// تشيك أوت — auto-stops tracking.
+  /// إنهاء اليوم — auto-stops tracking.
   Future<void> checkOut() async {
     state = state.copyWith(busy: true, notice: null);
     try {
@@ -477,7 +490,7 @@ class HomeController extends StateNotifier<HomeState> {
       if (_ref.read(sessionStoreProvider).user?.isDriver ?? false) {
         await BackgroundServiceAdapter.instance.stopTracking();
       }
-      state = state.copyWith(busy: false, checkedIn: false, notice: 'لا توجد وردية مفتوحة');
+      state = state.copyWith(busy: false, checkedIn: false, notice: 'لم يبدأ يومك بعد — لا يوجد يوم لإنهائه');
     } on NetworkException {
       state = state.copyWith(busy: false, notice: 'لا يوجد اتصال — حاول لاحقًا');
     } on ApiException catch (e) {
@@ -518,8 +531,12 @@ const Map<String, String> _errorAr = <String, String>{
   'CURRENT_PASSWORD_REQUIRED': 'أدخل كلمة مرورك الحالية أولًا',
   'INVALID_REFRESH_TOKEN': 'انتهت الجلسة، سجّل الدخول مرة أخرى',
   'BAD_TOKEN': 'انتهت الجلسة، سجّل الدخول مرة أخرى',
-  'ALREADY_CHECKED_IN': 'دوامك مفتوح بالفعل — سجّل الخروج أولًا',
-  'NO_OPEN_RECORD': 'لا يوجد دوام مفتوح لتسجيل خروجه',
+  'ALREADY_CHECKED_IN': 'بدأت يومك بالفعل — أنهِ أولًا قبل بدء يوم جديد',
+  'NO_OPEN_RECORD': 'لم يبدأ يومك بعد — لا يوجد يوم لإنهائه',
+  'ON_APPROVED_LEAVE': 'يومك معتمد كإجازة — لا حاجة لبدء اليوم',
+  'LEAVE_OVERLAP': 'لديك طلب إجازة قائم يغطي هذه الفترة',
+  'LEAVE_NOT_PENDING': 'الطلب صدر فيه قرار — لا يمكن إلغاؤه',
+  'LEAVE_BAD_RANGE': 'تاريخ النهاية يجب أن يكون بعد تاريخ البداية',
   'DEVICE_NOT_REGISTERED': 'لم يُسجَّل هذا الجهاز — أعد تسجيل الدخول',
   'DEVICE_ID_REQUIRED': 'تعذّر تعريف الجهاز — أعد تشغيل التطبيق',
 };

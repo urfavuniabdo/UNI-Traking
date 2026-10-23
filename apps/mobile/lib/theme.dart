@@ -14,6 +14,9 @@ class TraccerTheme {
   static const Color green = Color(0xFF16A34A);
   static const Color red = Color(0xFFDC2626);
 
+  /// Approved-leave accent — the same violet the dashboard uses for a LEAVE attendance row.
+  static const Color leave = Color(0xFF6D28D9);
+
   static const double cardRadius = 16;
 
   /// Cairo's Arabic marks (shadda, kasratan, superscript alef) sit outside Material's

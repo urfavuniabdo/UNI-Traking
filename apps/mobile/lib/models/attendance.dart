@@ -93,12 +93,16 @@ class TodayState {
     this.record,
     this.fenceName,
     this.insideFence,
+    this.onLeave = false,
   });
 
   final bool isCheckedIn;
   final AttendanceDay? record;
   final String? fenceName;
   final bool? insideFence; // null = unknown / not yet computed
+
+  /// HR approved a leave covering today, and no day has been started — "بدء اليوم" is locked.
+  final bool onLeave;
 
   static const TodayState notCheckedIn =
       TodayState(isCheckedIn: false);
@@ -115,6 +119,7 @@ class TodayState {
           : null,
       fenceName: json['fenceName'] as String?,
       insideFence: json['insideFence'] as bool?,
+      onLeave: json['currentStatus'] == 'ON_LEAVE',
     );
   }
 }

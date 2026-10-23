@@ -7,6 +7,7 @@ import 'features/auth/change_password_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/history/history_screen.dart';
 import 'features/home/home_screen.dart';
+import 'features/leave/leave_screen.dart';
 import 'features/notifications/notifications_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'state/providers.dart';
@@ -41,6 +42,7 @@ GoRouter buildRouter(WidgetRef ref) {
       GoRoute(path: '/onboarding', builder: (_, __) => const OnboardingScreen()),
       GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
       GoRoute(path: '/history', builder: (_, __) => const HistoryScreen()),
+      GoRoute(path: '/leave', builder: (_, __) => const LeaveScreen()),
       GoRoute(path: '/me/notifications', builder: (_, __) => const NotificationsScreen()),
     ],
     errorBuilder: (_, GoRouterState s) => Scaffold(

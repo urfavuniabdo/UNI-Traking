@@ -14,11 +14,13 @@ import 'package:traccer/data/position_dao.dart';
 import 'package:traccer/features/auth/login_screen.dart';
 import 'package:traccer/features/history/history_screen.dart';
 import 'package:traccer/features/home/home_screen.dart';
+import 'package:traccer/features/leave/leave_screen.dart';
 import 'package:traccer/features/notifications/notifications_screen.dart';
 import 'package:traccer/features/onboarding/onboarding_screen.dart';
 import 'package:traccer/features/settings/settings_sheet.dart';
 import 'package:traccer/models/alert.dart';
 import 'package:traccer/models/attendance.dart';
+import 'package:traccer/models/leave.dart';
 import 'package:traccer/models/user.dart';
 import 'package:traccer/state/providers.dart';
 import 'package:traccer/theme.dart';
@@ -36,14 +38,17 @@ class _FakeApi extends ApiClient {
     TodayState? today,
     List<AttendanceDay>? history,
     List<TraccerAlert>? alerts,
+    List<LeaveRequest>? leave,
   })  : _today = today ?? const TodayState(isCheckedIn: false),
         _history = history,
         _alerts = alerts,
+        _leave = leave,
         super(session: session);
 
   final TodayState _today;
   final List<AttendanceDay>? _history;
   final List<TraccerAlert>? _alerts;
+  final List<LeaveRequest>? _leave;
 
   @override
   Future<TodayState> today() async => _today;
@@ -57,6 +62,22 @@ class _FakeApi extends ApiClient {
 
   @override
   Future<List<TraccerAlert>> myAlerts() async => _alerts ?? const <TraccerAlert>[];
+
+  @override
+  Future<LeavePage> myLeaveRequests() async =>
+      LeavePage(items: _leave ?? const <LeaveRequest>[]);
+
+  @override
+  Future<LeaveRequest> createLeave({
+    required String dateFrom,
+    String? dateTo,
+    String? reason,
+  }) async =>
+      LeaveRequest(id: 'lv-new', dateFrom: dateFrom, dateTo: dateTo ?? dateFrom, days: 1, status: LeaveStatus.pending);
+
+  @override
+  Future<LeaveRequest> cancelLeave(String id) async =>
+      LeaveRequest(id: id, dateFrom: '2026-10-22', dateTo: '2026-10-22', days: 1, status: LeaveStatus.cancelled);
 }
 
 class _FakeDao extends PositionDao {
@@ -87,11 +108,12 @@ List<Override> _overrides({
   TodayState? today,
   List<AttendanceDay>? history,
   List<TraccerAlert>? alerts,
+  List<LeaveRequest>? leave,
 }) =>
     <Override>[
       sessionStoreProvider.overrideWithValue(session),
       apiClientProvider.overrideWithValue(
-        _FakeApi(session, today: today, history: history, alerts: alerts),
+        _FakeApi(session, today: today, history: history, alerts: alerts, leave: leave),
       ),
       positionDaoProvider.overrideWithValue(_FakeDao()),
       trackingEventsProvider.overrideWith(
@@ -376,5 +398,77 @@ void main() {
     expect(find.text(S.t('settingsNotificationsSubtitle')), findsOneWidget);
     expect(find.text(S.t('trackingIdle')), findsOneWidget);
     _expectNoLayoutErrors(tester, 'settings sheet');
+  });
+
+  testWidgets('leave screen lists my requests with the HR decision', (WidgetTester tester) async {
+    final SessionStore session = await SessionStore.open();
+    await session.saveUser(_employee);
+    _usePhone(tester, 360, 780);
+
+    const LeaveRequest pending = LeaveRequest(
+      id: 'lv-1',
+      dateFrom: '2026-11-03',
+      dateTo: '2026-11-03',
+      days: 1,
+      status: LeaveStatus.pending,
+      reason: 'ظرف عائلي',
+    );
+    final LeaveRequest approved = LeaveRequest(
+      id: 'lv-2',
+      dateFrom: '2026-10-12',
+      dateTo: '2026-10-13',
+      days: 2,
+      status: LeaveStatus.approved,
+      decidedByName: 'شؤون الموظفين',
+      decidedAt: DateTime.now(),
+    );
+    await tester.pumpWidget(_app(
+      const LeaveScreen(),
+      _overrides(session: session, leave: <LeaveRequest>[pending, approved]),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text(S.t('leaveFormTitle')), findsOneWidget);
+    expect(find.text(LeaveStatus.ar[LeaveStatus.pending]!), findsOneWidget);
+    expect(find.text(S.t('leaveCancel')), findsOneWidget);
+    expect(find.text('ظرف عائلي'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text(LeaveStatus.ar[LeaveStatus.approved]!),
+      240,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    // An already-decided request is HR's record: the only cancel button on screen is the
+    // pending one, so the approved row carries no way to undo a decision.
+    expect(find.textContaining('${S.t('leaveDecidedBy')}:'), findsOneWidget);
+    expect(find.text(S.t('leaveCancel')), findsOneWidget);
+    _expectNoLayoutErrors(tester, 'leave 360x780');
+  });
+
+  testWidgets('an approved leave day locks بدء اليوم instead of hiding it',
+      (WidgetTester tester) async {
+    final SessionStore session = await SessionStore.open();
+    await session.saveUser(_employee);
+    _usePhone(tester, 360, 800);
+
+    await tester.pumpWidget(_app(
+      const HomeScreen(),
+      _overrides(
+        session: session,
+        today: const TodayState(isCheckedIn: false, onLeave: true),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text(S.t('leaveTodayStatus')), findsOneWidget);
+    expect(find.text(S.t('noShift')), findsNothing);
+    final FilledButton cta = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, S.t('leaveTodayButton')),
+    );
+    expect(cta.onPressed, isNull, reason: 'a covered day must not be startable');
+    expect(find.text(S.t('checkIn')), findsNothing);
+    _expectNoLayoutErrors(tester, 'home on leave 360x800');
   });
 }

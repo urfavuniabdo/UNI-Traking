@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 
 import '../models/alert.dart';
 import '../models/attendance.dart';
+import '../models/leave.dart';
 import '../models/position.dart';
 import '../models/user.dart';
 import 'api_error.dart';
@@ -270,6 +271,39 @@ class ApiClient {
       '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   // ===========================================================================
+  // Leave (§3) — own requests only; the HR desk decides them on the dashboard
+  // ===========================================================================
+
+  Future<LeaveRequest> createLeave({
+    required String dateFrom,
+    String? dateTo,
+    String? reason,
+  }) async {
+    final Map<String, Object?> data = await _postJson(
+      '/leave',
+      data: <String, Object?>{
+        'dateFrom': dateFrom,
+        if (dateTo != null) 'dateTo': dateTo,
+        if (reason != null && reason.isNotEmpty) 'reason': reason,
+      },
+    );
+    return LeaveRequest.fromJson(data);
+  }
+
+  Future<LeavePage> myLeaveRequests() async {
+    final Map<String, Object?> data = await _getJson(
+      '/leave/mine',
+      query: <String, Object?>{'page': 1, 'pageSize': 100},
+    );
+    return LeavePage.fromJson(data);
+  }
+
+  Future<LeaveRequest> cancelLeave(String id) async {
+    final Map<String, Object?> data = await _patchJson('/leave/${Uri.encodeComponent(id)}/cancel');
+    return LeaveRequest.fromJson(data);
+  }
+
+  // ===========================================================================
   // Position ingest (§4) — the ONLY position entrypoint
   // ===========================================================================
 
@@ -303,6 +337,17 @@ class ApiClient {
       _send(
         () async =>
             (await _dio.post<Map<String, Object?>>(path, data: data)).data ?? <String, Object?>{},
+        retry: retry,
+      );
+
+  Future<Map<String, Object?>> _patchJson(
+    String path, {
+    Object? data,
+    bool retry = true,
+  }) =>
+      _send(
+        () async =>
+            (await _dio.patch<Map<String, Object?>>(path, data: data)).data ?? <String, Object?>{},
         retry: retry,
       );
 
