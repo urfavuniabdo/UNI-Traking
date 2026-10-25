@@ -14,6 +14,25 @@ export interface SampleGate {
   speedKmh: number | null;
 }
 
+export interface GroundSpeedInput {
+  /** what the phone's Doppler says this fix is doing (km/h) */
+  deviceKmh: number | null;
+  stepM: number; // metres covered since the previous accepted fix
+  stepDtS: number | null;
+  anchorM: number; // metres since the last position whose movement was confirmed
+  anchorDtS: number | null;
+  /** his own accuracy circle, floored — inside it a "move" is a guess, not a fact */
+  noiseRadiusM: number;
+}
+
+export interface GroundSpeedResult {
+  speedKmh: number | null;
+  /** true when the coordinates put him outside the anchor's noise circle — a confirmed move. */
+  moved: boolean;
+  /** true when the coordinates conclusive prove he did not move — no hysteresis needed. */
+  stationary: boolean;
+}
+
 export interface ClassifyResult {
   state: MotionState;
   ema: number | null;
@@ -33,6 +52,7 @@ export interface HarshResult {
  *  - EMA speed smoothing (SPEED_EMA_ALPHA)
  *  - hysteresis: HYSTERESIS_SAMPLES consecutive same-state samples before switching
  *  - sample gating: drop poor-accuracy (ACCURACY_REJECT_M) / too-fast (MIN_INTERVAL_S) samples
+ *  - groundSpeed: the coordinates, not the phone's speed field, decide whether he moved
  * Thresholds are §5 of the CONTRACT. No DB access → trivially unit-testable.
  */
 @Injectable()
@@ -70,6 +90,42 @@ export class MotionClassifierService {
       return { dropped: true, reason: 'TOO_FAST' };
     }
     return { dropped: false };
+  }
+
+  /**
+   * The speed the *ground* supports, from coordinates alone.
+   *  - movement confirmed (anchorM past the noise circle) → the phone's reading stands, and the
+   *    metres actually covered can raise it (a walking phone under-reports by design).
+   *  - no confirmed movement → he is where we last saw him, so nothing can be faster than the
+   *    radius allows over the time since that anchor. A parked phone reporting 150 km/h reads
+   *    ~0 here: the Doppler value cannot outrun a position that never changed.
+   */
+  groundSpeed(i: GroundSpeedInput): GroundSpeedResult {
+    const stepDerived = i.stepDtS !== null && i.stepDtS > 0 ? (i.stepM / i.stepDtS) * 3.6 : null;
+    const anchorDerived = i.anchorDtS !== null && i.anchorDtS > 0 ? (i.anchorM / i.anchorDtS) * 3.6 : null;
+    const derived = this.resolveSpeed(stepDerived, anchorDerived);
+    if (i.anchorM > i.noiseRadiusM) return { speedKmh: this.resolveSpeed(i.deviceKmh, derived), moved: true, stationary: false };
+    if (i.anchorDtS === null || i.anchorDtS <= 0) return { speedKmh: this.resolveSpeed(i.deviceKmh, derived), moved: false, stationary: false };
+    const cap = (i.noiseRadiusM / i.anchorDtS) * 3.6;
+    const candidate = this.resolveSpeed(i.deviceKmh, derived);
+    const speedKmh = candidate === null ? null : Math.min(candidate, cap);
+    // Nothing it reports can outrun the radius over the time since the anchor, and once that
+    // bound falls inside the stationary band the reading is no longer an estimate — it is a fact.
+    return { speedKmh, moved: false, stationary: cap <= MOTION.STATIONARY_SPEED_KMH };
+  }
+
+  /**
+   * Commits STOPPED straight away. Hysteresis damps noisy speed *estimates*; "he has not left his
+   * accuracy circle in a minute" is not one, and smoothing it would keep a parked driver showing a
+   * trip for the eight samples it takes the average to forget a stale fast reading.
+   */
+  confirmStationary(track: MotionTrack, speedKmh: number | null): ClassifyResult {
+    const changed = track.state !== 'STOPPED';
+    track.state = 'STOPPED';
+    track.pending = 'STOPPED';
+    track.pendingCount = 0;
+    track.ema = speedKmh;
+    return { state: 'STOPPED', ema: speedKmh, changed, dropped: false };
   }
 
   /** Absurd-jump guard: a GPS jump larger than accuracyDriftM within <2s is not credible. */

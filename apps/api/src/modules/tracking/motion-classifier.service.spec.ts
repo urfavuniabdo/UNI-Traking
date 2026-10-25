@@ -38,6 +38,37 @@ describe('MotionClassifierService (pure)', () => {
     expect(r.changed).toBe(true);
   });
 
+  it('a fix that never left the anchor cannot outrun the radius over its window', () => {
+    // parked, phone screaming a stale 150 km/h: 12 m of noise over a minute is 0.72 km/h at best
+    const frozen = c.groundSpeed({ deviceKmh: 150, stepM: 0, stepDtS: 60, anchorM: 0, anchorDtS: 60, noiseRadiusM: 12 });
+    expect(frozen.speedKmh).toBeCloseTo(0.72, 2);
+    expect(frozen.moved).toBe(false);
+    expect(frozen.stationary).toBe(true);
+    // the same reading a heartbeat apart: still no trip's worth of ground, but not conclusive yet
+    const justLanded = c.groundSpeed({ deviceKmh: 150, stepM: 0, stepDtS: 5, anchorM: 0, anchorDtS: 5, noiseRadiusM: 12 });
+    expect(justLanded.speedKmh).toBeLessThanOrEqual(8.64);
+    expect(justLanded.stationary).toBe(false);
+  });
+
+  it('confirms a move the coordinates show — walking included', () => {
+    const moved = c.groundSpeed({ deviceKmh: 40, stepM: 100, stepDtS: 15, anchorM: 100, anchorDtS: 15, noiseRadiusM: 12 });
+    expect(moved).toEqual({ speedKmh: 40, moved: true, stationary: false });
+    // Doppler ~0 at walking pace: the metres covered carry the driver out of STOPPED
+    const walking = c.groundSpeed({ deviceKmh: 0.4, stepM: 6.7, stepDtS: 5, anchorM: 6.7, anchorDtS: 5, noiseRadiusM: 12 });
+    expect(walking.speedKmh).toBeCloseTo(4.8, 1);
+  });
+
+  it('stops the averaging dead when the ground is conclusive', () => {
+    const t = c.newTrack();
+    c.classify(t, 150);
+    expect(t.state).toBe('RIDING');
+    const r = c.confirmStationary(t, 0.5);
+    expect(r.state).toBe('STOPPED');
+    expect(r.changed).toBe(true);
+    expect(t.ema).toBe(0.5);
+    expect(t.pendingCount).toBe(0);
+  });
+
   it('applies hysteresis — needs HYSTERESIS_SAMPLES consistent samples before switching', () => {
     const t = c.newTrack();
     c.classify(t, 0); // → STOPPED (cold start)

@@ -450,8 +450,8 @@ describe('POST /positions/batch — an office employee is never tracked (CONTRAC
       batchSeq: 1,
       positions: [
         { clientTs: iso(t0), lat: 30.0, lng: 30.0, speed: 60, accuracy: 5 },
-        { clientTs: iso(t0 + 15000), lat: 30.02, lng: 30.0, speed: 190, accuracy: 5 },
-        { clientTs: iso(t0 + 30000), lat: 30.04, lng: 30.0, speed: 0, accuracy: 5 },
+        { clientTs: iso(t0 + 60000), lat: 30.0009, lng: 30.0, speed: 190, accuracy: 5 },
+        { clientTs: iso(t0 + 120000), lat: 30.0018, lng: 30.0, speed: 0, accuracy: 5 },
       ],
     });
     expect(res.accepted).toBe(3);

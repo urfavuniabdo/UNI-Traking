@@ -2,7 +2,7 @@ import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nest
 import { Interval } from '@nestjs/schedule';
 import { createHash } from 'node:crypto';
 import type { MotionState } from '../../shared/constants';
-import { EMPLOYEE_KIND, SEVERITY, type AlertType } from '../../shared/constants';
+import { EMPLOYEE_KIND, MOTION, RULE_DEFAULTS, SEVERITY, type AlertType } from '../../shared/constants';
 import { PrismaService } from '../../common/prisma.service';
 import { GeoService } from '../../common/geo/geo.service';
 import { json, parseJson, round, workDateOf, isValidLat, isValidLng } from '../../common/utils';
@@ -22,6 +22,11 @@ import type { BatchResult, BatchRejectedItem, PositionBatchDto, PositionItemDto 
 interface Track {
   motion: MotionTrack;
   last: { lat: number; lng: number; ts: number; speedKmh: number | null } | null;
+  /**
+   * Last position whose *movement* was confirmed by the coordinates. Held still while the phone
+   * stays inside its own noise circle, so drift can never be read as a trip.
+   */
+  anchor: { lat: number; lng: number; ts: number } | null;
   speedOverStreak: number;
   overRunActive: boolean;
   overSinceTs: number | null;
@@ -47,6 +52,12 @@ interface Track {
 }
 
 const MAX_BATCH = 500;
+
+/**
+ * Tightest radius treated as "he did not move". A phone with 1 m accuracy still jitters a few
+ * metres when parked, so the accuracy circle alone is not a floor.
+ */
+const NOISE_FLOOR_M = 12;
 
 /** Employee identity/geo metadata used to enrich a live item (cached; `at` = epoch ms). */
 interface EmployeeMeta {
@@ -78,6 +89,21 @@ interface RouteGapRaw {
   gapS?: number;
 }
 
+/** A stored position row projected for the coordinate replay (`route()` read path). */
+interface ReplayRow {
+  lat: number;
+  lng: number;
+  clientTs: Date;
+  speedKmh: number | null;
+  accuracyM: number | null;
+  bearing: number | null;
+  buffered: boolean;
+  stale: boolean;
+}
+
+/** A replayed position: the raw fix plus what the coordinates say about it. */
+type ReplayPoint = ReplayRow & { motionState: MotionState; speedKmh: number | null; credible: boolean };
+
 const META_TTL_MS = 60_000;
 
 @Injectable()
@@ -106,6 +132,7 @@ export class PositionsService {
     return {
       motion: this.classifier.newTrack(),
       last: null,
+      anchor: null,
       speedOverStreak: 0,
       overRunActive: false,
       overSinceTs: null,
@@ -288,22 +315,36 @@ export class PositionsService {
     const dtS = track.last ? (p.ts - track.last.ts) / 1000 : null;
     const distanceFromLast = track.last ? this.geo.distanceM(track.last, { lat: p.lat, lng: p.lng }) : 0;
 
-    // Speed: the device reading, but never below what the GPS actually covered since the
-    // previous fix — a hand-held phone under-reports walking speed to ~0 and reads as STOPPED.
-    // Displacement inside the accuracy circle is noise, not movement, so it is ignored.
-    const derived =
-      track.last && distanceFromLast > (p.accuracyM ?? 0)
-        ? this.geo.speedKmhBetween({ lat: track.last.lat, lng: track.last.lng, at: track.last.ts }, { lat: p.lat, lng: p.lng, at: p.ts })
-        : null;
-    const speed = this.classifier.resolveSpeed(p.speedKmh, derived);
+    // Speed comes from the coordinates first. The phone's own reading only stands when the ground
+    // agrees he went somewhere: a fix that never left the anchor's noise circle is a parked phone,
+    // whatever its Doppler claims (a cached last-known position used to read as 150 km/h and open
+    // a trip for a driver sitting still at the site).
+    if (!track.anchor) track.anchor = { lat: p.lat, lng: p.lng, ts: p.ts };
+    const anchor = track.anchor;
+    const anchorM = this.geo.distanceM(anchor, { lat: p.lat, lng: p.lng });
+    const anchorDtS = (p.ts - anchor.ts) / 1000;
+    const noiseRadiusM = Math.min(Math.max(p.accuracyM ?? 0, NOISE_FLOOR_M), th?.accuracyDriftM ?? NOISE_FLOOR_M);
+    const ground = this.classifier.groundSpeed({
+      deviceKmh: p.speedKmh,
+      stepM: distanceFromLast,
+      stepDtS: dtS,
+      anchorM,
+      anchorDtS: anchorDtS > 0 ? anchorDtS : null,
+      noiseRadiusM,
+    });
+    const speed = ground.speedKmh;
+    if (ground.moved) track.anchor = { lat: p.lat, lng: p.lng, ts: p.ts };
 
-    // absurd-jump guard → UNKNOWN, don't advance state/last
+    // absurd-jump guard → the point is not credible ground. Mark it, then re-anchor and move the
+    // window there: a driver who genuinely was relocated must not stay "behind" his own position.
     if (th && this.classifier.isAbsurd(speed, distanceFromLast, dtS, th.accuracyDriftM)) {
       await this.prisma.position.update({ where: { id: p.id }, data: { motionState: 'UNKNOWN' } }).catch(() => undefined);
+      track.anchor = { lat: p.lat, lng: p.lng, ts: p.ts };
+      track.last = { lat: p.lat, lng: p.lng, ts: p.ts, speedKmh: null };
       return alertsRaised;
     }
 
-    const res = this.classifier.classify(track.motion, speed);
+    const res = ground.stationary ? this.classifier.confirmStationary(track.motion, speed) : this.classifier.classify(track.motion, speed);
     const state: MotionState = res.state;
 
     const workDate = workDateOf(new Date(p.ts));
@@ -351,8 +392,10 @@ export class PositionsService {
       }
     }
 
-    // --- trips (open on travel, close on 10-min stop / day change) ---
-    const isTravel = state === 'RIDING' || state === 'WALKING';
+    // --- trips (open on confirmed travel, close on 10-min stop / day change) ---
+    // `ground.moved` is required: a trip is a journey from somewhere to somewhere, and the first
+    // fix of a track has no "from" yet — believing its speed alone invented trips for parked phones.
+    const isTravel = (state === 'RIDING' || state === 'WALKING') && ground.moved;
     if (isTravel) {
       if (!track.openTrip || track.openTrip.workDate !== workDate) {
         if (track.openTrip) await this.finalizeTrip(track.openTrip, track.last?.ts ?? p.ts);
@@ -537,11 +580,12 @@ export class PositionsService {
 
   /** Close an open trip: compute polyline (simplified), avg speed, end point. */
   private async finalizeTrip(open: NonNullable<Track['openTrip']>, endedAt: number): Promise<void> {
-    const points = await this.prisma.position.findMany({
+    const rows = await this.prisma.position.findMany({
       where: { tripId: open.id },
       orderBy: { clientTs: 'asc' },
-      select: { lat: true, lng: true },
+      select: { lat: true, lng: true, clientTs: true, motionState: true },
     });
+    const points = this.credibleTrace(rows);
     const simplified = this.geo.simplify(points.map((pt) => ({ lat: pt.lat, lng: pt.lng })), 25);
     const distanceKm = open.distanceM / 1000;
     const hours = Math.max(1 / 3600, (endedAt - open.startedAt) / 3600_000);
@@ -569,16 +613,138 @@ export class PositionsService {
       .catch(() => undefined);
   }
 
+  /**
+   * The day without the jumps. A point that can only be reached from the previous kept one faster
+   * than MAX_CREDIBLE_SPEED_KMH was never ground — a cached last-known fix, a re-fix after a
+   * tunnel, a relocation between sites — and drawing it is what makes a parked driver look like he
+   * crossed the city. Rows the ingest already rejected (`motionState: 'UNKNOWN'`) stay out too.
+   */
+  private credibleTrace<T extends { lat: number; lng: number; clientTs: Date; motionState: string | null }>(rows: T[]): T[] {
+    const kept: T[] = [];
+    for (const r of rows) {
+      if (r.motionState === 'UNKNOWN') continue;
+      const prev = kept[kept.length - 1];
+      if (prev) {
+        const dtS = (r.clientTs.getTime() - prev.clientTs.getTime()) / 1000;
+        if (dtS > 0 && (this.geo.distanceM(prev, r) / dtS) * 3.6 > MOTION.MAX_CREDIBLE_SPEED_KMH) continue;
+      }
+      kept.push(r);
+    }
+    return kept.length ? kept : rows;
+  }
+
+  /**
+   * Pass 1 of the replay: fixes that cannot be ground. A position needing more than
+   * MAX_CREDIBLE_SPEED_KMH from the last kept one is a spike — unless the fix right after it lands
+   * on the same spot, which is what a real relocation looks like (he moved and stayed there). A
+   * cached last-known position re-published in the middle of the day is the other case: there and
+   * back, and it is what used to draw a detour across a driver who never left the yard.
+   */
+  private dropSpikes(rows: ReplayRow[]): { row: ReplayRow; credible: boolean }[] {
+    const out: { row: ReplayRow; credible: boolean }[] = [];
+    let kept: ReplayRow | null = null;
+    rows.forEach((r, i) => {
+      if (!kept) {
+        kept = r;
+        out.push({ row: r, credible: true });
+        return;
+      }
+      const dtS = (r.clientTs.getTime() - kept.clientTs.getTime()) / 1000;
+      const kmh = dtS > 0 ? (this.geo.distanceM(kept, r) / dtS) * 3.6 : Infinity;
+      if (kmh <= MOTION.MAX_CREDIBLE_SPEED_KMH) {
+        kept = r;
+        out.push({ row: r, credible: true });
+        return;
+      }
+      const n = rows[i + 1];
+      const staysThere = !!n && this.geo.distanceM(r, n) <= Math.max(n.accuracyM ?? 0, NOISE_FLOOR_M);
+      if (staysThere) kept = r;
+      out.push({ row: r, credible: staysThere });
+    });
+    return out;
+  }
+
+  /**
+   * Re-derives a whole day from the raw coordinates with the current ground rule (the same
+   * classifier the live pipeline runs). The phone's speed field never decides anything here, so a
+   * day recorded by an older build — a parked phone re-publishing its cached position at 150 km/h —
+   * reads as what actually happened: he never moved. Points the rule rejects stay in the list,
+   * flagged `credible: false`, and out of the line, the stops and the mileage.
+   */
+  private replayDay(rows: ReplayRow[]): ReplayPoint[] {
+    const motion = this.classifier.newTrack();
+    const drift = RULE_DEFAULTS.accuracyDriftM;
+    const out: ReplayPoint[] = [];
+    let last: { lat: number; lng: number; ts: number } | null = null;
+    let anchor: { lat: number; lng: number; ts: number } | null = null;
+    const day = this.dropSpikes(rows);
+    day.forEach(({ row: r, credible }, i) => {
+      const ts = r.clientTs.getTime();
+      if (!credible) {
+        out.push({ ...r, motionState: 'UNKNOWN' as MotionState, speedKmh: round(r.speedKmh, 1), credible: false });
+        return;
+      }
+      const dtS = last ? (ts - last.ts) / 1000 : null;
+      const stepM = last ? this.geo.distanceM(last, r) : 0;
+      const noiseRadiusM = Math.min(Math.max(r.accuracyM ?? 0, NOISE_FLOOR_M), drift);
+      if (this.classifier.isDroppable({ accuracyM: r.accuracyM, dtS, speedKmh: r.speedKmh }).dropped) {
+        out.push({ ...r, motionState: 'UNKNOWN' as MotionState, speedKmh: round(r.speedKmh, 1), credible: false });
+        return;
+      }
+      // The day's first fix has no "where from" behind it, so it is read against the window ahead —
+      // the evidence the live pipeline gets one sample later. A phone parked since check-in stops
+      // showing a journey that started before it had anywhere to have come from.
+      const deviceKmh = anchor ? r.speedKmh : (this.forwardSpeedKmh(day, i, noiseRadiusM) ?? r.speedKmh);
+      if (!anchor) anchor = { lat: r.lat, lng: r.lng, ts };
+      const anchorDtS = (ts - anchor.ts) / 1000;
+      const ground = this.classifier.groundSpeed({
+        deviceKmh,
+        stepM,
+        stepDtS: dtS,
+        anchorM: this.geo.distanceM(anchor, r),
+        anchorDtS: anchorDtS > 0 ? anchorDtS : null,
+        noiseRadiusM,
+      });
+      if (ground.moved) anchor = { lat: r.lat, lng: r.lng, ts };
+      const speed = ground.speedKmh;
+      if (this.classifier.isAbsurd(speed, stepM, dtS, drift)) {
+        anchor = { lat: r.lat, lng: r.lng, ts };
+        last = { lat: r.lat, lng: r.lng, ts };
+        out.push({ ...r, motionState: 'UNKNOWN' as MotionState, speedKmh: round(speed, 1), credible: false });
+        return;
+      }
+      const res = ground.stationary
+        ? this.classifier.confirmStationary(motion, speed)
+        : this.classifier.classify(motion, speed);
+      last = { lat: r.lat, lng: r.lng, ts };
+      out.push({ ...r, motionState: res.state, speedKmh: round(speed, 1), credible: true });
+    });
+    return out;
+  }
+
+  /** Speed from the window *ahead* of a sample — available only where the day is replayed whole. */
+  private forwardSpeedKmh(windowed: { row: ReplayRow }[], i: number, noiseRadiusM: number): number | null {
+    const r = windowed[i]?.row;
+    const n = windowed[i + 1]?.row;
+    if (!r || !n) return null;
+    const dtS = (n.clientTs.getTime() - r.clientTs.getTime()) / 1000;
+    if (!(dtS > 0)) return null;
+    const d = this.geo.distanceM(r, n);
+    const kmh = (d / dtS) * 3.6;
+    if (kmh > MOTION.MAX_CREDIBLE_SPEED_KMH) return null;
+    return d <= noiseRadiusM ? 0 : kmh;
+  }
+
   private async rebuildRouteLine(employeeId: string, workDate: string, track: Track): Promise<void> {
     const dayStart = new Date(`${workDate}T00:00:00.000Z`);
     const dayEnd = new Date(`${workDate}T23:59:59.999Z`);
     const positions = await this.prisma.position.findMany({
       where: { employeeId, clientTs: { gte: dayStart, lte: dayEnd } },
       orderBy: { clientTs: 'asc' },
-      select: { lat: true, lng: true },
+      select: { lat: true, lng: true, clientTs: true, motionState: true },
     });
     if (!positions.length) return;
-    const simplified = this.geo.simplify(positions.map((p) => ({ lat: p.lat, lng: p.lng })), 25);
+    const simplified = this.geo.simplify(this.credibleTrace(positions).map((p) => ({ lat: p.lat, lng: p.lng })), 25);
     await this.prisma.routeLine
       .upsert({
         where: { employeeId_workDate: { employeeId, workDate } },
@@ -747,6 +913,8 @@ export class PositionsService {
    * GET /positions/route?userId&date → { userName, distanceKm, points, replayedPoints, stops, gaps }.
    * `userId` historically accepted a login user id; the dashboard passes the EMPLOYEE id —
    * both are resolved (user id first, else employee id) via employeeIdForUserId().
+   * The day is re-derived from the coordinates (replayDay), so the states, the speeds, the line and
+   * the mileage all say what the ground shows rather than what an old phone build reported.
    * Legacy `positions` / `pointCount` keys are kept as aliases (existing spec + consumers depend on them).
    */
   async route(userId: string, date: string): Promise<unknown> {
@@ -757,8 +925,11 @@ export class PositionsService {
     const rows = await this.prisma.position.findMany({
       where: { employeeId, clientTs: { gte: dayStart, lte: dayEnd } },
       orderBy: { clientTs: 'asc' },
+      select: { lat: true, lng: true, clientTs: true, speedKmh: true, accuracyM: true, bearing: true, buffered: true, stale: true },
     });
-    const line = this.geo.simplify(rows.map((p) => ({ lat: p.lat, lng: p.lng })), 25);
+    const replayed = this.replayDay(rows);
+    const trace = replayed.filter((p) => p.credible);
+    const line = this.geo.simplify(trace.map((p) => ({ lat: p.lat, lng: p.lng })), 25);
     const routeLine = await this.prisma.routeLine.findUnique({ where: { employeeId_workDate: { employeeId, workDate: date } } });
     const stopRows = await this.prisma.stopEvent.findMany({
       where: { employeeId, startedAt: { gte: dayStart, lte: dayEnd } },
@@ -767,22 +938,23 @@ export class PositionsService {
 
     // distance (km): sum of haversine over consecutive clientTs-ordered points — credible steps only.
     let distanceM = 0;
-    for (let i = 1; i < rows.length; i++)
+    for (let i = 1; i < trace.length; i++)
       distanceM += this.geo.credibleDistanceM(
-        { lat: rows[i - 1].lat, lng: rows[i - 1].lng, at: rows[i - 1].clientTs.getTime() },
-        { lat: rows[i].lat, lng: rows[i].lng, at: rows[i].clientTs.getTime() },
+        { lat: trace[i - 1].lat, lng: trace[i - 1].lng, at: trace[i - 1].clientTs.getTime() },
+        { lat: trace[i].lat, lng: trace[i].lng, at: trace[i].clientTs.getTime() },
       );
 
-    const points = rows.map((p) => ({
+    const points = replayed.map((p) => ({
       clientTs: p.clientTs.toISOString(),
       lat: p.lat,
       lng: p.lng,
-      speedKmh: round(p.speedKmh, 1),
+      speedKmh: p.speedKmh,
       bearing: p.bearing,
       accuracy: p.accuracyM,
       motionState: p.motionState,
       buffered: p.buffered,
       stale: p.stale,
+      credible: p.credible,
     }));
 
     const rawGaps = parseJson<RouteGapRaw[]>(routeLine?.gaps ?? '[]', []);
@@ -796,6 +968,8 @@ export class PositionsService {
       distanceKm: round(distanceM / 1000, 2) ?? 0,
       replayed: rows.some((p) => p.buffered || p.stale),
       replayedPoints: rows.filter((p) => p.buffered || p.stale).length,
+      /** fixes the trace refused: too far apart to be ground, or rejected at ingest. */
+      rejectedPoints: Math.max(0, rows.length - trace.length),
       geojson: { type: 'LineString', coordinates: line.map((p) => [p.lng, p.lat]) },
       points,
       stops: stopRows.map((s) => ({
@@ -809,7 +983,7 @@ export class PositionsService {
       })),
       gaps,
       // ---- backward-compat aliases (existing tracking spec + external consumers read these) ----
-      positions: points.map((p) => ({ ts: p.clientTs, lat: p.lat, lng: p.lng, speedKmh: p.speedKmh, motionState: p.motionState, buffered: p.buffered, stale: p.stale })),
+      positions: points.filter((p) => p.credible).map((p) => ({ ts: p.clientTs, lat: p.lat, lng: p.lng, speedKmh: p.speedKmh, motionState: p.motionState, buffered: p.buffered, stale: p.stale })),
       pointCount: rows.length,
     };
   }
