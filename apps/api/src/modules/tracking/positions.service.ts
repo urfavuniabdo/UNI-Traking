@@ -1280,12 +1280,19 @@ export class PositionsService {
     }
     const thresholdMs = hb * missed * 1000;
     const cutoff = new Date(Date.now() - thresholdMs);
+    // "Offline" only means something while the day is open. A registered device that never started a
+    // shift today would otherwise raise APP_OFFLINE/HEARTBEAT_MISSING forever on every sweep.
+    const openToday = await this.prisma.attendanceRecord.findMany({
+      where: { workDate: workDateOf(new Date()), checkOutAt: null },
+      select: { employeeId: true },
+    });
+    const onShift = new Set(openToday.map((r) => r.employeeId));
     const devices = await this.prisma.device.findMany({
       where: { tracking: true, online: true, lastSeenAt: { lt: cutoff }, employee: { isNot: null } },
       include: { employee: { select: { id: true, user: { select: { id: true } } } } },
     });
     for (const d of devices) {
-      if (!d.employee) continue;
+      if (!d.employee || !onShift.has(d.employee.id)) continue;
       const ctx = await this.rules.context(d.employee.id);
       const base: RaiseAlertInput = {
         type: 'HEARTBEAT_MISSING' as AlertType,

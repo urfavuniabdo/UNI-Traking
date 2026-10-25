@@ -141,7 +141,7 @@ IDLE_ALARM_MIN         = 30      // توقف > 30 دقيقة ⇒ STOP_EXCEEDED
 | `HARSH_BRAKING` | دسليرة ≤ `-2.2 m/s²` | WARNING | المشرفون + السواق |
 | `HARSH_ACCELERATION` | ≤ `2.2 m/s²`… (تسارع > `2.8 m/s²`) | INFO | المشرفون |
 | `STOP_EXCEEDED` | `STOPPED` > 30 د | CRITICAL | المشرفون + السواق |
-| `GPS_OFF` / `DATA_OFF` / `APP_OFFLINE` | حدث من الجهاز أو فوات قلب ≥ 3 فترات | CRITICAL | المشرفون + السواق |
+| `GPS_OFF` / `DATA_OFF` / `APP_OFFLINE` | حدث من الجهاز أو فوات قلب ≥ 3 فترات — **للسواق اللي يومه مفتوح بس** (سجل حضور بلا انصراف لنفس `workDate`)؛ جهاز مسجّل وما بدءش يومه ما ينفعش يكون «متقطع» | CRITICAL | المشرفون + السواق |
 | `BUFFER_REPLAYED` | وصول دفعة `buffered=true` | INFO | المشرفون |
 | `CHECK_IN_OUT_OF_FENCE` | انطباق فاشل | WARNING | الطرفين |
 | `ROUTE_GAP` | فجوة > `gapMinMin=10` د أثناء الرحلة | WARNING | المشرفون |

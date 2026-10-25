@@ -11,6 +11,7 @@ import { AlertDispatchService } from '../notify/alert-dispatch.service';
 import { PushService } from '../notify/push.service';
 import { MotionClassifierService } from './motion-classifier.service';
 import { PositionsService } from './positions.service';
+import { workDateOf } from '../../common/utils';
 import { ALERT_DISPATCHER, REALTIME_PUBLISHER, type RealtimePublisher } from '../../common/contracts';
 
 // Isolated temp sqlite DB for the realtime-tracking integration tests.
@@ -45,6 +46,8 @@ async function reset() {
   await prisma.routeLine.deleteMany();
   await prisma.geoEvent.deleteMany();
   await prisma.userPreference.deleteMany();
+  await prisma.attendanceRecord.deleteMany();
+  await prisma.leaveRequest.deleteMany();
   await prisma.device.deleteMany();
   await prisma.ruleOverride.deleteMany();
   await prisma.user.deleteMany();
@@ -513,5 +516,49 @@ describe('POST /positions/batch — an office employee is never tracked (CONTRAC
     });
     expect(res.accepted).toBe(3);
     expect(await prisma.trip.count({ where: { employeeId } })).toBeGreaterThan(0);
+  });
+});
+
+describe('heartbeat sweep — silence is only news while the day is open', () => {
+  async function goQuiet(employeeId: string): Promise<void> {
+    const dev = await prisma.device.findFirstOrThrow({ where: { employeeId } });
+    await prisma.device.update({
+      where: { id: dev.id },
+      data: { lastSeenAt: new Date(Date.now() - 20 * 60_000), online: true, tracking: true },
+    });
+  }
+
+  it('a registered device with no open shift raises nothing', async () => {
+    const { employeeId } = await mkDriver({ lat: 30.0, lng: 30.0, radiusM: 1000 });
+    await goQuiet(employeeId);
+    await positions.heartbeatSweep();
+    expect(await countByType(employeeId, 'HEARTBEAT_MISSING')).toBe(0);
+    expect(await countByType(employeeId, 'APP_OFFLINE')).toBe(0);
+  });
+
+  it('the same device mid-shift raises HEARTBEAT_MISSING + APP_OFFLINE', async () => {
+    const { employeeId } = await mkDriver({ lat: 30.0, lng: 30.0, radiusM: 1000 });
+    await goQuiet(employeeId);
+    await prisma.attendanceRecord.create({
+      data: { employeeId, workDate: workDateOf(new Date()), status: 'VALID', checkInAt: new Date() },
+    });
+    await positions.heartbeatSweep();
+    expect(await countByType(employeeId, 'HEARTBEAT_MISSING')).toBe(1);
+    expect(await countByType(employeeId, 'APP_OFFLINE')).toBe(1);
+  });
+
+  it('stops alerting once the day is closed', async () => {
+    const { employeeId } = await mkDriver({ lat: 30.0, lng: 30.0, radiusM: 1000 });
+    await goQuiet(employeeId);
+    const rec = await prisma.attendanceRecord.create({
+      data: { employeeId, workDate: workDateOf(new Date()), status: 'VALID', checkInAt: new Date() },
+    });
+    await positions.heartbeatSweep();
+    expect(await countByType(employeeId, 'APP_OFFLINE')).toBe(1);
+
+    await prisma.alert.deleteMany({ where: { employeeId } });
+    await prisma.attendanceRecord.update({ where: { id: rec.id }, data: { checkOutAt: new Date() } });
+    await positions.heartbeatSweep();
+    expect(await countByType(employeeId, 'APP_OFFLINE')).toBe(0);
   });
 });
