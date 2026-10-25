@@ -36,8 +36,9 @@ class LocationAdapter {
   /// The live tracking stream, tuned per CONTRACT §5 / task brief:
   ///   interval 5s · distanceFilter 10m · highest accuracy.
   ///
-  /// `intervalDuration` is what keeps a stationary driver emitting fixes — without it
-  /// FusedLocationProvider only reports on movement and the route looks like a stop.
+  /// `intervalDuration` does NOT keep a stationary driver emitting: FusedLocation applies
+  /// `distanceFilter` as a gate, so a phone that has not moved 10 m delivers nothing. The
+  /// engine's own idle poll (TrackingEngine) is what keeps a stopped driver fresh on the map.
   /// The filter stays at 10m because a walking person covers 25m in ~20s, and the motion
   /// classifier needs three samples to commit a state — at 25m a short walk never reads
   /// as walking.

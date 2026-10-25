@@ -56,6 +56,7 @@ class TrackingEngine {
   StreamSubscription<ServiceStatus>? _gpsSub;
   Timer? _drainTimer;
   Timer? _heartbeatTimer;
+  Timer? _idleTimer;
 
   bool _tracking = false;
   bool _online = true;
@@ -63,6 +64,7 @@ class TrackingEngine {
   bool _outage = false; // became offline since the last clean upload
   int _batchSeq = 0;
   Position? _lastFix;
+  DateTime? _lastFixAt;
 
   bool get isTracking => _tracking;
 
@@ -91,8 +93,24 @@ class TrackingEngine {
       (_) => _heartbeat(),
     );
 
+    // 5) stationary keep-alive. FusedLocation treats distanceFilter as a gate, so a driver
+    // parked at a site emits no fix at all and the map freezes on his last point.
+    _idleTimer = Timer.periodic(const Duration(seconds: _idlePollS), (_) => _pollWhenSilent());
+
     unawaited(_heartbeat()); // immediate, so the dashboard sees the driver instantly
     _emit('STATUS', await _statusSnapshot());
+  }
+
+  static const int _idlePollS = 60;
+
+  Future<void> _pollWhenSilent() async {
+    if (!_tracking || !_gpsOn) return;
+    final DateTime? last = _lastFixAt;
+    if (last != null && DateTime.now().difference(last) < const Duration(seconds: _idlePollS - 10)) {
+      return;
+    }
+    final Position? p = await location.currentFix();
+    if (p != null) await _onFix(p);
   }
 
   Future<void> stop() async {
@@ -102,12 +120,15 @@ class TrackingEngine {
     await _gpsSub?.cancel();
     _drainTimer?.cancel();
     _heartbeatTimer?.cancel();
+    _idleTimer?.cancel();
     _posSub = null;
     _connSub = null;
     _gpsSub = null;
     _drainTimer = null;
     _heartbeatTimer = null;
+    _idleTimer = null;
     _lastFix = null;
+    _lastFixAt = null;
     _classifier.reset();
     await _drain(catchUp: true); // flush the tail before dying
     await session.markSessionAlive(false); // clean shutdown → no APP_KILLED next launch
@@ -124,6 +145,7 @@ class TrackingEngine {
       _emit('FIX_DROPPED', {'reason': 'accuracy', 'accuracy': p.accuracy});
       return;
     }
+    _lastFixAt = DateTime.now();
 
     final DateTime now = DateTime.now().toUtc();
 
