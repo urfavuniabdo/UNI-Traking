@@ -24,9 +24,9 @@ Base URL: `/api/v1` — كل الطلبات محمية بـ `Authorization: Bear
 | Method | Path | الوصف |
 |---|---|---|
 | POST | `/auth/login` | `{ identifier, password }` → `{ accessToken, refreshToken, user, mustChangePassword, changeOnLogin }` |
-| POST | `/auth/refresh` | `{ refreshToken }` → نفس شكل `login` تمامًا (`{ accessToken, refreshToken, user, mustChangePassword, changeOnLogin }`) |
+| POST | `/auth/refresh` | `{ refreshToken }` → نفس شكل `login` تمامًا (`{ accessToken, refreshToken, user, mustChangePassword, changeOnLogin }`). **لا يدوّر الـ refreshToken**: يُصدر access جديد ويزحلق انتهاء الجلسة، ويعيد نفس التوكن الذي قُدّم — الموبايل أكثر من isolate (واجهة/تتبع/WorkManager) يحدّثونه بأنفسهم، والتدوير كان يجعل ثانيهم يقدّم توكنًا قديمًا فيُقرأ كسرقة وتُلغى جلسة السائق في منتصف الوردية |
 | GET | `/auth/me` | → `{ user, profile, permissions[], mustChangePassword, scopeOrgUnitId }` — `profile` = ملفه الوظيفي (Employee) أو `null`، و`scopeOrgUnitId` نطاق رقابة المشرف (من الداتا بيز، لا من التوكن) |
-| POST | `/auth/logout` | يقبل جسمًا اختياريًا `{}` (أو `{ refreshToken }`) → `{ ok: true }`. بلا `refreshToken` يُrevokes كل جلسات المستخدم الحالية (الداش بورد يسجّل الخروج بجسم فارغ). `RefreshDto.refreshToken` اختياري (`@IsOptional`). |
+| POST | `/auth/logout` | `@Public` (لا يشترط bearer ساري): `{ refreshToken }` → يلغي تلك الجلسة بالتحديد، أو `{}` + bearer → يلغي كل جلسات المستخدم (الداش بورد يسجّل الخروج بجسم فارغ). بلا الاثنين → `401 INVALID_REFRESH_TOKEN`. جسم التوكن يُتحقق من توقيعه قبل أي إلغاء، وهو ملكية الجلسة |
 | POST | `/devices/register` | `{ token, platform: "android"\|"ios", appVersion, deviceId }` — idempotent بـ `deviceId` |
 | POST | `/devices/heartbeat` | `{ deviceId, battery?, tracking: boolean, gpsEnabled: boolean, online: boolean }` كل 5 د |
 | POST | `/devices/toggle-event` | `{ deviceId, kind: "GPS_OFF"\|"GPS_ON"\|"DATA_OFF"\|"DATA_ON"\|"APP_KILLED"\|"BUFFER_FLUSH" }` |

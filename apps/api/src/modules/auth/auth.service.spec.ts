@@ -101,23 +101,30 @@ describe('AuthService', () => {
     await expect(svc.login('EMP001', 'nope')).rejects.toThrow('INVALID_CREDENTIALS');
   });
 
-  it('rotates the refresh token (in place) keeping a single session', async () => {
+  it('refreshes the access token without rotating the session secret', async () => {
     const { svc, sessions } = build();
     const first = await svc.login('EMP001', 'pw123456');
     const second = await svc.refresh(first.refreshToken);
-    expect(second.refreshToken).not.toBe(first.refreshToken);
+    expect(second.accessToken).toEqual(expect.any(String));
+    expect(second.refreshToken).toBe(first.refreshToken);
     expect(sessions.size).toBe(1);
-    // the surviving session is still active (not revoked)
     expect([...sessions.values()][0].revokedAt).toBeNull();
   });
 
-  it('detects refresh token reuse and revokes the session', async () => {
+  it('tolerates a second refresh from another isolate with the same token', async () => {
     const { svc, sessions } = build();
     const first = await svc.login('EMP001', 'pw123456');
     await svc.refresh(first.refreshToken);
-    await expect(svc.refresh(first.refreshToken)).rejects.toThrow('REFRESH_REUSED');
-    // reuse marks the chain revoked
-    expect([...sessions.values()][0].revokedAt).not.toBeNull();
+    const again = await svc.refresh(first.refreshToken);
+    expect(again.user.identifier).toBe('EMP001');
+    expect([...sessions.values()][0].revokedAt).toBeNull();
+  });
+
+  it('a revoked session refuses to refresh', async () => {
+    const { svc } = build();
+    const { refreshToken } = await svc.login('EMP001', 'pw123456');
+    await svc.logout(refreshToken, 'u1');
+    await expect(svc.refresh(refreshToken)).rejects.toThrow('REFRESH_EXPIRED');
   });
 
   it('logout revokes the presented session', async () => {

@@ -100,9 +100,7 @@ export class AuthService {
     }
     if (session.revokedAt) throw new UnauthorizedException('REFRESH_EXPIRED');
     if (session.refreshTokenHash !== hashToken(refreshToken)) {
-      // token reuse / theft — the rotation already advanced this session. Kill the chain.
-      await this.prisma.session.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
-      throw new UnauthorizedException('REFRESH_REUSED');
+      throw new UnauthorizedException('REFRESH_EXPIRED');
     }
 
     const user = await this.prisma.user.findUnique({
@@ -111,18 +109,20 @@ export class AuthService {
     });
     if (!user || user.disabled) throw new UnauthorizedException('ACCOUNT_DISABLED');
 
-    // rotate IN PLACE: same session id, new refresh hash + extended expiry.
-    const { accessToken, refreshToken: newRefresh } = await this.mintTokens(user, session.id);
+    // The mobile app runs several isolates (UI, tracking service, WorkManager catch-up), each
+    // with its own in-memory copy of the stored token. Rotating here made the second isolate
+    // present the token the first one had just replaced, which read as theft and revoked the
+    // driver's whole session mid-shift. So a refresh mints a new ACCESS token and slides the
+    // session's expiry, but the refresh token itself stays the one this session was issued —
+    // it is still only ever revoked by an explicit logout (or the 30-day idle window).
+    const accessToken = await this.mintAccessToken(user);
     await this.prisma.session.update({
       where: { id: session.id },
-      data: {
-        refreshTokenHash: hashToken(newRefresh),
-        expiresAt: new Date(Date.now() + ttlToMs(REFRESH_TTL)),
-      },
+      data: { expiresAt: new Date(Date.now() + ttlToMs(REFRESH_TTL)) },
     });
     return {
       accessToken,
-      refreshToken: newRefresh,
+      refreshToken,
       user: await this.toUserDto(user),
       mustChangePassword: user.mustChangePassword,
       changeOnLogin: user.mustChangePassword,
@@ -218,6 +218,17 @@ export class AuthService {
     user: { id: string; identifier: string; name: string; role: string; employeeId?: string | null },
     sid: string,
   ): Promise<TokenPair> {
+    const accessToken = await this.mintAccessToken(user);
+    const refreshToken = await this.jwt.signAsync(
+      { sub: user.id, sid, kind: 'refresh', jti: randomUUID() },
+      { secret: JWT_REFRESH_SECRET(), expiresIn: REFRESH_TTL },
+    );
+    return { accessToken, refreshToken };
+  }
+
+  private async mintAccessToken(
+    user: { id: string; identifier: string; name: string; role: string; employeeId?: string | null },
+  ): Promise<string> {
     const payload: JwtPayload = {
       sub: user.id,
       role: user.role as Role,
@@ -225,12 +236,7 @@ export class AuthService {
       name: user.name,
       identifier: user.identifier,
     };
-    const accessToken = await this.jwt.signAsync(payload, { secret: JWT_SECRET(), expiresIn: ACCESS_TTL });
-    const refreshToken = await this.jwt.signAsync(
-      { sub: user.id, sid, kind: 'refresh', jti: randomUUID() },
-      { secret: JWT_REFRESH_SECRET(), expiresIn: REFRESH_TTL },
-    );
-    return { accessToken, refreshToken };
+    return this.jwt.signAsync(payload, { secret: JWT_SECRET(), expiresIn: ACCESS_TTL });
   }
 
   private async issueSession(user: {

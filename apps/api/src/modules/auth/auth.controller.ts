@@ -26,11 +26,17 @@ export class AuthController {
     return this.auth.refresh(dto.refreshToken);
   }
 
+  // Public because the app signs out locally before the request goes out: its access token may
+  // already be gone or expired. The refresh token is the proof of ownership — AuthService
+  // verifies its signature and revokes exactly that session row.
+  @Public()
   @HttpCode(200)
   @UseGuards(JwtAuthGuard)
   @Post('logout')
-  logout(@CurrentUser() user: AuthUser, @Body() dto: RefreshDto) {
-    return this.auth.logout(dto?.refreshToken, user.id);
+  logout(@CurrentUser() user: AuthUser | undefined, @Body() dto: RefreshDto) {
+    if (dto?.refreshToken) return this.auth.logout(dto.refreshToken);
+    if (user?.id) return this.auth.logout(undefined, user.id);
+    throw new UnauthorizedException('INVALID_REFRESH_TOKEN');
   }
 
   @UseGuards(JwtAuthGuard)
