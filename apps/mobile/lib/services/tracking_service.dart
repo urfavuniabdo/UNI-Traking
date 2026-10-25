@@ -64,6 +64,7 @@ class TrackingEngine {
   bool _outage = false; // became offline since the last clean upload
   int _batchSeq = 0;
   Position? _lastFix;
+  DateTime? _lastFixTs;
   DateTime? _lastFixAt;
 
   bool get isTracking => _tracking;
@@ -103,13 +104,16 @@ class TrackingEngine {
 
   static const int _idlePollS = 60;
 
+  /// Longer than this between fixes and a far-away position is a relocation, not a teleport.
+  static const double _resyncAfterS = 90;
+
   Future<void> _pollWhenSilent() async {
     if (!_tracking || !_gpsOn) return;
     final DateTime? last = _lastFixAt;
     if (last != null && DateTime.now().difference(last) < const Duration(seconds: _idlePollS - 10)) {
       return;
     }
-    final Position? p = await location.currentFix();
+    final Position? p = await location.freshFix();
     if (p != null) await _onFix(p);
   }
 
@@ -128,6 +132,7 @@ class TrackingEngine {
     _heartbeatTimer = null;
     _idleTimer = null;
     _lastFix = null;
+    _lastFixTs = null;
     _lastFixAt = null;
     _classifier.reset();
     await _drain(catchUp: true); // flush the tail before dying
@@ -148,35 +153,58 @@ class TrackingEngine {
     _lastFixAt = DateTime.now();
 
     final DateTime now = DateTime.now().toUtc();
+    final DateTime fixTs = p.timestamp.toUtc();
+    final DateTime? prevTs = _lastFixTs;
 
-    // Compute speed when the device didn't provide a usable one.
-    double speed = p.speed * 3.6; // m/s -> km/h
+    // A fix must be NEWER than the last one accepted. FusedLocation answers from its last-known
+    // cache whenever a caller did not force an update, and that cache holds the check-in point —
+    // so a phone left on a desk re-published the same coordinates for hours.
+    if (prevTs != null && !fixTs.isAfter(prevTs)) {
+      _emit('FIX_DROPPED', {'reason': 'stale', 'ageS': now.difference(fixTs).inSeconds});
+      return;
+    }
+
+    final Position? prev = _lastFix;
+    final double stepM = prev == null
+        ? 0
+        : Geo.distanceMeters(prev.latitude, prev.longitude, p.latitude, p.longitude);
+    final double stepS = prevTs == null ? 0 : fixTs.difference(prevTs).inMilliseconds / 1000.0;
+    final double stepKmh = stepS <= 0 ? 0 : stepM / stepS * 3.6;
+
+    // A step no vehicle can make inside a normal interval is a GPS teleport. Drop it from the
+    // trace, but a long silence (app killed, tunnel, no signal) is a genuine relocation and the
+    // new position has to be believed — otherwise the driver never comes back on the map.
+    if (prev != null && stepS > 0 && stepS < _resyncAfterS && stepKmh > Motion.maxCredibleSpeedKmh) {
+      _emit('FIX_DROPPED', {'reason': 'teleport', 'm': stepM, 'kmh': stepKmh});
+      return;
+    }
+
+    // Speed comes from where the fixes are, not from what the chip says it felt. A cached fix
+    // carries the Doppler speed of the moment it was taken, which is how a parked phone read
+    // 20 km/h and opened a trip; inside its own error circle the driver has not moved.
+    final bool unresolved = prev != null && stepM <= p.accuracy;
+    double deviceSpeed = p.speed * 3.6;
+    if (unresolved || deviceSpeed > Motion.maxCredibleSpeedKmh) deviceSpeed = 0;
+    double speed = deviceSpeed;
     double bearing = p.heading;
-    if (speed <= 0.01 && _lastFix != null) {
-      speed = Geo.speedKmhFromFixes(
-        lat1: _lastFix!.latitude,
-        lng1: _lastFix!.longitude,
-        t1: DateTime.fromMillisecondsSinceEpoch(_lastFix!.timestamp.millisecondsSinceEpoch),
-        lat2: p.latitude,
-        lng2: p.longitude,
-        t2: now,
-      );
-      bearing = Geo.bearingDegrees(_lastFix!.latitude, _lastFix!.longitude, p.latitude, p.longitude);
+    if (stepKmh > speed) {
+      speed = stepKmh;
+      bearing = Geo.bearingDegrees(prev!.latitude, prev.longitude, p.latitude, p.longitude);
     }
     _lastFix = p;
+    _lastFixTs = fixTs;
 
     final String motion = _classifier.addSample(
-      speedKmh: p.speed * 3.6, // raw device speed (may be 0)
+      speedKmh: deviceSpeed,
       accuracyM: p.accuracy,
-      ts: now,
+      ts: fixTs,
       computedSpeedKmh: speed,
       lat: p.latitude,
       lng: p.longitude,
     );
-    // Upload the speed the classifier actually judged. A phone carried at walking pace reports
-    // a Doppler speed of ~0.3 km/h, and the backend derives its own motion state from this
-    // number — so the metres covered since the last fix have to travel with the fix.
+    // Upload the speed the classifier actually judged, capped at what the fixes can prove.
     if (_classifier.lastRawSpeedKmh > speed) speed = _classifier.lastRawSpeedKmh;
+    if (speed > Motion.maxCredibleSpeedKmh) speed = 0;
 
     final int seq = await session.nextSeq();
     final int? batteryPct = await battery.level();

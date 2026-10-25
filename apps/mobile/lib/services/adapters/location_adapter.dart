@@ -51,27 +51,42 @@ class LocationAdapter {
     return Geolocator.getPositionStream(locationSettings: settings);
   }
 
-  /// One-shot fix for the check-in flow.
+  /// A fix that is genuinely *now*, for the live trace.
+  ///
+  /// `Geolocator.getCurrentPosition` answers from FusedLocation's last-known cache, and that
+  /// cache holds whatever the phone's last real position was — for a driver that is the
+  /// check-in point, re-published with the Doppler speed the chip had while the car was moving.
+  /// A stream subscription has no cached answer to fall back on, so its first event is a real
+  /// fix. `distanceFilter: 0` keeps a stationary phone answering.
+  ///
+  /// Returns null when nothing fresh arrived: silence is honest, a repeated old point is a lie.
+  Future<Position?> freshFix({Duration maxAge = const Duration(seconds: 45)}) async {
+    try {
+      final Position p = await Geolocator.getPositionStream(
+        locationSettings: AndroidSettings(
+          accuracy: LocationAccuracy.best,
+          distanceFilter: 0,
+          intervalDuration: const Duration(seconds: 2),
+        ),
+      ).first.timeout(const Duration(seconds: 12));
+      if (DateTime.now().toUtc().difference(p.timestamp.toUtc()) > maxAge) return null;
+      return p;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// One-shot fix for the check-in flow: a fresh fix, retried once when it reads as
+  /// approximate, and only then the cached position so the button still works indoors.
   ///
   /// Android 12+ lets the user grant *approximate* location, which lands ~3 km off and
-  /// silently corrupts fence validation — so a first fix that coarse gets one GNSS retry.
+  /// silently corrupts fence validation.
   static const double _approximateAccuracyM = 1000;
 
   Future<Position?> currentFix() async {
-    try {
-      final Position first = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.best,
-        timeLimit: const Duration(seconds: 15),
-      );
-      if (first.accuracy <= _approximateAccuracyM) return first;
-      return await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.best,
-        timeLimit: const Duration(seconds: 10),
-      );
-    } catch (_) {
-      // fall back to last known so check-in still works
-      return Geolocator.getLastKnownPosition();
-    }
+    final Position? first = await freshFix();
+    if (first != null && first.accuracy <= _approximateAccuracyM) return first;
+    return await freshFix() ?? await Geolocator.getLastKnownPosition();
   }
 }
 
