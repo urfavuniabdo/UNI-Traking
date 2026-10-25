@@ -1140,13 +1140,9 @@ export class PositionsService {
           motionState: d.motionState,
           lastTs: d.ts,
           distanceKm: round(distanceM / 1000, 2) ?? 0,
-          points: trace.map((p) => ({
-            ts: p.clientTs.toISOString(),
-            lat: p.lat,
-            lng: p.lng,
-            speedKmh: p.speedKmh,
-            motionState: p.motionState,
-          })),
+          /** the drawn line: the credible trace thinned to 8 m, so detail survives and jitter doesn't */
+          line: this.geo.simplify(trace.map((p) => ({ lat: p.lat, lng: p.lng })), 8).map((p) => [p.lat, p.lng]),
+          pointCount: trace.length,
           stops: stopRows
             .filter((s) => s.employeeId === d.employeeId)
             .map((s) => ({

@@ -351,7 +351,8 @@ type Trail = {
   employeeId: string;
   name: string;
   distanceKm: number;
-  points: { ts: string; lat: number; lng: number; motionState: string }[];
+  line: [number, number][];
+  pointCount: number;
   stops: { id: string; lat: number; lng: number; durationMin: number }[];
   gaps: unknown[];
 };
@@ -387,12 +388,11 @@ describe('GET /positions/trails — every present driver gets his own line (§5)
 
     const trail = await trailOf(employeeId);
     expect(trail?.name).toBe('سائق واقف');
-    expect(trail?.points.some((p) => p.lat === 30.3)).toBe(false);
-    expect(trail?.points).toHaveLength(6);
+    expect(trail?.pointCount).toBe(6);
+    expect(trail?.line.some(([lat]) => lat === 30.3)).toBe(false);
+    expect(trail?.line.length).toBeGreaterThanOrEqual(2);
     expect(trail?.distanceKm).toBeGreaterThan(0.3);
     expect(trail?.distanceKm).toBeLessThan(0.7);
-    // the states on the line come from the coordinates, so the map can colour walk and ride apart
-    expect(trail?.points.filter((p) => p.motionState === 'RIDING').length).toBeGreaterThan(0);
   });
 
   it('a driver whose device went quiet is off the trails — the board shows him as absent, not on the road', async () => {
