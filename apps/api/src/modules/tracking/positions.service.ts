@@ -423,11 +423,13 @@ export class PositionsService {
       }
     }
 
-    // --- stop events (only meaningful while a trip is open) ---
-    if (res.changed && state === 'STOPPED' && track.openTrip) {
+    // --- stop events ---
+    // Timed whether or not a trip is open: a driver parked at the yard all day never opens one, and
+    // tying the timer to a trip meant his long stop could never be reported to anyone.
+    if (res.changed && state === 'STOPPED' && !track.stopStart) {
       const kind = await this.stopKind(ctx, { lat: p.lat, lng: p.lng });
       const stop = await this.prisma.stopEvent.create({
-        data: { employeeId, tripId: track.openTrip.id, zoneId: ctx?.zoneId ?? null, lat: p.lat, lng: p.lng, startedAt: new Date(p.ts), kind },
+        data: { employeeId, tripId: track.openTrip?.id ?? null, zoneId: ctx?.zoneId ?? null, lat: p.lat, lng: p.lng, startedAt: new Date(p.ts), kind },
         select: { id: true },
       });
       track.stopStart = { ts: p.ts, lat: p.lat, lng: p.lng, stopId: stop.id, alerted: false };
@@ -641,6 +643,14 @@ export class PositionsService {
       track.openTrip = null;
       track.stopStart = null;
       closed++;
+    }
+    // A stop taken with no trip open (a driver parked at the yard all day) has no trip to close it,
+    // so the end of the run is what ends it.
+    const dangling = await this.prisma.stopEvent.findMany({ where: { employeeId, endedAt: null }, select: { id: true, startedAt: true } });
+    for (const s of dangling) {
+      await this.prisma.stopEvent
+        .update({ where: { id: s.id }, data: { endedAt: new Date(at), durationS: Math.max(0, Math.round((at - s.startedAt.getTime()) / 1000)) } })
+        .catch(() => undefined);
     }
     const orphans = await this.prisma.trip.findMany({ where: { employeeId, state: 'OPEN' }, orderBy: { startedAt: 'asc' } });
     for (const t of orphans) {

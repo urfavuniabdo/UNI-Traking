@@ -42,6 +42,7 @@ async function reset() {
   await prisma.geoEvent.deleteMany();
   await prisma.userPreference.deleteMany();
   await prisma.device.deleteMany();
+  await prisma.ruleOverride.deleteMany();
   await prisma.user.deleteMany();
   await prisma.employee.deleteMany();
   await prisma.zone.deleteMany();
@@ -195,6 +196,26 @@ describe('STOP_EXCEEDED (§5/§6)', () => {
     expect(await countByType(employeeId, 'STOP_EXCEEDED')).toBe(1);
     const stop = await prisma.stopEvent.findFirst({ where: { employeeId } });
     expect(stop?.alerted).toBe(true);
+  });
+
+  it('a driver who never takes a trip still trips his own 5-minute stop override', async () => {
+    const { employeeId, deviceId } = await mkDriver({ lat: 30.0, lng: 30.0, radiusM: 100000 });
+    await prisma.ruleOverride.create({ data: { employeeId, stopAlertMin: 5 } });
+    const t0 = Date.now();
+    // the parked keep-alive: the same coordinates every minute, so no trip ever opens
+    const parked = Array.from({ length: 8 }, (_, i) => ({
+      clientTs: iso(t0 + i * 60000),
+      lat: 30.0,
+      lng: 30.0,
+      speed: 0,
+      accuracy: 6,
+    }));
+    await positions.ingestBatch({ deviceId, batchSeq: 1, positions: parked });
+
+    expect(await prisma.trip.count({ where: { employeeId } })).toBe(0);
+    expect(await countByType(employeeId, 'STOP_EXCEEDED')).toBe(1);
+    const alert = await prisma.alert.findFirst({ where: { employeeId, type: 'STOP_EXCEEDED' } });
+    expect(JSON.parse(alert?.meta ?? '{}').threshold).toBe(5);
   });
 });
 
