@@ -136,5 +136,5 @@ flutter build apk --release --dart-define=API_URL=https://<اسم-الخدمة>.
 | `Prepared statements could not be prepared` من Prisma | الداتابيز شغّالة على pgbouncer pooling | ضيف `?pgbouncer=true` لـ `DATABASE_URL` من لوحة Render |
 | فشل `npm ci` في الـ build | `package-lock.json` غير متزامن مع `package.json` | استبدل `npm ci` بـ `npm install` في `render.yaml` |
 | Health check timeout | المسار بيرجع غير 2xx/3xx خلال 5 ثواني | استخدم `/api/v1/ping` (مش `/health`) |
-| الصفحة بتفتح بس البيانات فاضية | الداتابيز لسه ما اتسيّدتش | شغّل السييد يدوي من Render Shell: `npx ts-node prisma/seed.ts` |
+| الصفحة بتفتح بس البيانات فاضية | السييد بيشغّل في `startCommand`؛ لو هو فشل الخدمة أصلاً ما تقومش — يبقى المسح متعمّد | امسح/أعد المسح من `POST /ops/reset-data` (انظر CONTRACT §15). بلان Render المجاني مفيهوش Shell ولا one-off jobs فماكانش ممكن نشغّل سكربت هنا |
 | الموبايل بيقول "لا يوجد اتصال بالخادم" | الخدمة نايمة أو العنوان غلط | افتح `/api/v1/health` في المتصفح الأول، ثم راجع الإعدادات ← الخادم |

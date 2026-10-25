@@ -16,6 +16,7 @@ import { RulesModule } from './modules/rules/rules.module';
 import { NotifyModule } from './modules/notify/notify.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { OpsModule } from './modules/ops/ops.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     NotifyModule,
     SyncModule,
     ReportsModule,
+    OpsModule,
   ],
   controllers: [AppController],
 })

@@ -332,7 +332,7 @@ Push (FCM/APNs) يطابق نفس الحدث ويوصل والتطبيق مقف�
 
 **`rules` (`RulesPayload`)** = كل المفاتيح الرقمية لـ `RULE_DEFAULTS` مدموجة مع `Setting(key='rules.global')`: `maxSpeedKmh, stopAlertMin, geofenceGraceS, speedingCriticalS, cooldownS, gapMinMin, shiftGraceMin, replayMaxAgeHours, harshBrakingMs2, harshAccelMs2, speedSamples, accuracyDriftM` **بالإضافة إلى `attendanceStrictReject: boolean`**. `timezone` = `DASHBOARD_TIMEZONE`. `preferences` = تفضيلات المُشغِّل المسطَّحة.
 
-`PATCH /settings` يقبل جسمًا مسطَّحًا أو `{ rules: {...} }`؛ يتحقّق من المفاتيح الرقمية (يُثبّت السالب عند 0، وأي قيمة غير رقمية ⇒ `BAD_RULE_VALUE`) ومن `attendanceStrictReject` (يجب `boolean`)؛ يحفظ في `rules.global` **ثم ينادي `RulesService.invalidate()`** لإسقاط الكاش ذا الـ30 ثانية فيقرأ المسار/الإرسال القيم الجديدة فورًا.
+`PATCH /settings` يقبل جسمًا مسطَّحًا أو `{ rules: {...} }`؛ يتحقّق من المفاتيح الرقمية (يُثبّت السالب عند 0 **عدا `harshBrakingMs2`** — هي تباطؤ ولازم تفضل سالبة، وأي قيمة غير رقمية ⇒ `BAD_RULE_VALUE`) ومن `attendanceStrictReject` (يجب `boolean`)؛ يحفظ في `rules.global` **ثم ينادي `RulesService.invalidate()`** لإسقاط الكاش ذا الـ30 ثانية فيقرأ المسار/الإرسال القيم الجديدة فورًا. كل مفاتيح `rules.global` الرقمية بتُقرأ من نفس السلسلة (`RuleOverride → Zone → Setting → RULE_DEFAULTS`) فأي خانة في الصفحة لها أثر فعلي على المحرك.
 
 `GET /settings` / `/notifications/log` عنصر السجل: `{ id, alertId, alertType, channel:"push"|"whatsapp"|"socket"|"sms"|"email", userId, userName, status:"SENT"|"FAILED"|"PENDING"|"NO_PROVIDER", attempts, at, error, masked }` — `masked` يترك آخر 4 من هدف الـ push فقط (التوكن الخام لا يُعاد أبدًا).
 
@@ -352,3 +352,17 @@ Push (FCM/APNs) يطابق نفس الحدث ويوصل والتطبيق مقف�
 | `Device.dataEnabled` | لا عمود → يُشتق من `Device.online` (وجود وصلة حيّة يعني البيانات تعمل) في `LivePosition`/`live`/`/drivers/presence`. |
 
 مشتقات بلا أعمدة أخرى جديرة بالذكر: راية `replayed` في سجلات الحضور/التقارير لا عمود لها في `AttendanceRecord` — تُحسب من وجود نقاط `buffered/stale` لنفس الموظف+يوم العمل؛ ونطاق المشرف `scopeOrgUnitId` لا يُقرأ من التوكن بل من الداتا بيز (كاش 60ث في `JwtStrategy`).
+
+## 15. Ops — أدوات التشغيل
+
+| Method | Path | الوصف |
+|---|---|---|
+| POST | `/ops/reset-data` | `ADMIN`+`SUPERVISOR` → يمسح التاريخ التشغيلي كله ويترك المنظّمَة (السواقين/المناطق/الأجهزة/القواعد). |
+
+**الجسم**: `{ apply?: boolean, confirm?: "RESET-OPS-DATA" }`. بدون `apply:true` يرجع **معاينة** فقط `{ apply:false, wouldDelete, total }`؛ ومع `apply:true` بلا عبارة التأكيد ⇒ `400 CONFIRM_REQUIRED`.
+
+**المحذوف** (بترتيب آمن على المفاتيح الأجنبية، أولاد قبل آبائهم، في transaction واحد): `CallLog, NotificationLog, Alert, GeoEvent, RouteLine, StopEvent, Position, Trip, AttendanceRecord, LeaveRequest, SyncIssue, SyncRun` → `{ apply:true, deleted, total, remaining:0, kept }`.
+
+**المبقي**: `OrgUnit, Site, Zone, Employee, User, Device, RuleOverride, Setting, SyncSource, ShiftSchedule, ShiftAssignment, UserPreference` (تُعاد أعداده في `kept`). بعد الحذف تُنادى `PositionsService.clearTrack()` لكل موظف حتى تُفرَّج مسارات الرحلات الحية في الذاكرة ولا يعرضها اللود من `RAM` بعد مسح الداتا.
+
+**لماذا endpoint؟** بلان Render المجاني لا يعطي Shell ولا one-off jobs، فمفيش مكان تاني يقدر يشغّل سكربتًا بقيمة `DATABASE_URL` بتاعة التطبيق نفسه (سكربت `scripts/reset-ops-data.mjs` اتكتب الأول ومبقاش له محل على البلان ده، فاتشيل).

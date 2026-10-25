@@ -9,6 +9,7 @@ import { EmployeesController } from '../../modules/employees/employees.controlle
 import { PlacesController } from '../../modules/places/places.controller';
 import { PositionsController } from '../../modules/tracking/positions.controller';
 import { SettingsController } from '../../modules/rules/settings.controller';
+import { OpsResetController } from '../../modules/ops/ops-reset.controller';
 
 const guard = new RolesGuard(new Reflector());
 
@@ -30,8 +31,11 @@ class OpenSurface {
 }
 
 const reflector = new Reflector();
-const rolesOf = (controller: { prototype: Record<string, Function> }, method: string): string[] =>
-  (reflector.get<string[]>(ROLES_KEY, controller.prototype[method]) ?? []) as string[];
+const rolesOf = (controller: unknown, method: string): string[] =>
+  (reflector.get<string[]>(
+    ROLES_KEY,
+    (controller as { prototype: Record<string, Function> }).prototype[method],
+  ) ?? []) as string[];
 
 describe('RolesGuard — who sees what (CONTRACT §1)', () => {
   it('passes anyone on unguarded self-service paths', () => {
@@ -70,6 +74,8 @@ describe('controller metadata — the HR split', () => {
     expect(rolesOf(EmployeesController, 'live')).not.toContain(ROLES.HR);
     expect(rolesOf(EmployeesController, 'one')).not.toContain(ROLES.HR);
     expect(rolesOf(SettingsController, 'notificationsLog')).not.toContain(ROLES.HR);
+    // wiping the whole operational history is ops traffic — HR never holds it
+    expect(rolesOf(OpsResetController, 'reset')).toEqual([ROLES.ADMIN, ROLES.SUPERVISOR]);
   });
 
   it('only HR and the IT admin can read or decide leave requests', () => {
