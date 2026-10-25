@@ -31,6 +31,9 @@ class _TraccerAppState extends ConsumerState<TraccerApp> {
     // Login/logout happens without restarting the app: rewire push + socket on user change.
     ref.listenManual<AuthState>(authControllerProvider, (AuthState? prev, AuthState next) {
       if (prev?.user?.id != next.user?.id) unawaited(_bootstrapMessaging());
+      // Signed in ↔ signed out is a route decision, so the router re-runs its redirect the
+      // same frame the state flips — no waiting on the network or on a plugin to answer.
+      if ((prev?.user != null) != (next.user != null)) appRefresh.notify();
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_bootstrapMessaging()));
   }

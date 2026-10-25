@@ -82,12 +82,19 @@ class AuthController extends StateNotifier<AuthState> {
     final SessionStore session = _ref.read(sessionStoreProvider);
     final AppUser? saved = session.user;
     state = AuthState(user: saved, mustChangePassword: session.mustChangePassword);
+    // A session the server retired (logout from the dashboard, a revoked row) has to drop the
+    // UI out too — otherwise the screen stays up with dead tokens and nothing explains why.
+    _ref.read(apiClientProvider).onSessionEnded = _onRemoteLogout;
     if (session.isLoggedIn) {
       unawaited(_ensureDeviceRegistered());
     }
   }
 
   final Ref _ref;
+
+  void _onRemoteLogout() {
+    if (mounted && state.user != null) state = const AuthState();
+  }
 
   Future<void> _ensureDeviceRegistered() async {
     try {
@@ -140,13 +147,27 @@ class AuthController extends StateNotifier<AuthState> {
     }
   }
 
+  /// Explicit sign-out. The local teardown is what the screen waits for; the server revoke is
+  /// fire-and-forget, and no step can throw the navigation away.
   Future<void> logout() async {
-    try {
-      await _ref.read(apiClientProvider).logout();
-    } catch (_) {/* local clear below */}
-    await BackgroundServiceAdapter.instance.stopTracking();
-    await _ref.read(sessionStoreProvider).setCheckedIn(false);
+    final SessionStore session = _ref.read(sessionStoreProvider);
+    final ApiClient api = _ref.read(apiClientProvider);
+    final String? refreshToken = session.refreshToken;
     state = const AuthState();
+    // The next sign-in must build its own home state, not inherit this account's.
+    _ref.invalidate(homeControllerProvider);
+    for (final Future<void> Function() step in <Future<void> Function()>[
+      BackgroundServiceAdapter.instance.stopTracking,
+      session.clear,
+      () => session.setCheckedIn(false),
+    ]) {
+      try {
+        await step();
+      } catch (_) {
+        // A stuck plugin must never leave him looking at a signed-in screen with no session.
+      }
+    }
+    unawaited(api.revokeSession(refreshToken: refreshToken));
   }
 }
 

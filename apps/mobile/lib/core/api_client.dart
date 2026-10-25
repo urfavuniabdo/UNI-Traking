@@ -33,10 +33,22 @@ class ApiClient {
             )) {
     _dio.interceptors.add(
       InterceptorsWrapper(
-        onRequest: (RequestOptions options, RequestInterceptorHandler handler) {
-          final String? token = session.accessToken;
-          if (token != null && token.isNotEmpty && !options.path.contains('/auth/login')) {
-            options.headers['Authorization'] = 'Bearer $token';
+        // Async on purpose: Dio waits for `handler.next`, so the token can be renewed here
+        // instead of the call going out on an expired one and eating a 401 round-trip.
+        onRequest: (RequestOptions options, RequestInterceptorHandler handler) async {
+          final bool public = options.path.contains('/auth/login') || options.path == '/health';
+          if (!public) {
+            String? token = session.accessToken;
+            // The refresh call itself must never recurse into a refresh.
+            if (token != null &&
+                token.isNotEmpty &&
+                !options.path.contains('/auth/refresh') &&
+                _isExpired(token)) {
+              token = await _ensureRefreshed() ?? token;
+            }
+            if (token != null && token.isNotEmpty) {
+              options.headers['Authorization'] = 'Bearer $token';
+            }
           }
           final String? device = session.deviceId;
           if (device != null && device.isNotEmpty) {
@@ -51,6 +63,11 @@ class ApiClient {
   final Dio _dio;
   final SessionStore session;
   final math.Random _random;
+
+  /// Called after the SERVER retires this session (logout elsewhere, a refresh token older
+  /// than the session window). The app wires it to the auth controller so the router moves to
+  /// /login on the spot instead of leaving the screen up with dead tokens.
+  void Function()? onSessionEnded;
 
   /// Guard so concurrent 401s trigger exactly one `/auth/refresh`.
   Future<String?>? _refreshFlight;
@@ -158,17 +175,20 @@ class ApiClient {
     );
   }
 
-  Future<void> logout() async {
+  /// Best-effort server-side revoke. The caller clears the local session and paints the login
+  /// screen first, so this is fired and forgotten with the token it captured beforehand —
+  /// `/auth/logout` proves ownership from the refresh token, not from a still-live bearer.
+  Future<void> revokeSession({required String? refreshToken}) async {
+    final String? rt = refreshToken;
+    if (rt == null || rt.isEmpty) return;
     try {
-      await _postJson(
+      await _dio.post<Map<String, Object?>>(
         '/auth/logout',
-        data: <String, Object?>{'refreshToken': session.refreshToken},
-        retry: false,
+        data: <String, Object?>{'refreshToken': rt},
       );
-    } on ApiException {
-      // best-effort — always clear locally
+    } on DioException {
+      // Offline or the server is cold: the session row ages out on its own.
     }
-    await session.clear();
   }
 
   Future<void> registerDevice({
@@ -381,6 +401,12 @@ class ApiClient {
         if (newToken != null) {
           return _send<T>(action, retry: retry, attempt: attempt, allowRefresh: false);
         }
+        // The session is still stored — the refresh just couldn't run (offline, a cold server,
+        // a 5xx). Telling him his login ended when it didn't is what sent him hunting for a
+        // re-login screen that was never needed.
+        if (session.refreshToken != null) {
+          throw const NetworkException(message: 'لا يوجد اتصال بالخادم');
+        }
         throw const UnauthorizedException();
       }
       if (retry && _isNetworkFailure(e)) {
@@ -403,16 +429,30 @@ class ApiClient {
         final AuthTokens t = await refresh(rt);
         return t.accessToken;
       } catch (e) {
-        // Only the server rejecting the refresh token ends the session. A network blip must
-        // not log a driver out mid-shift — the buffered rows and the retry loop handle it.
-        final int? status = e is ApiException ? e.statusCode : null;
-        if (status != null && status < 500) await session.clear();
+        // Only the server saying "this session no longer exists" ends the login. A network
+        // blip, a 5xx or a cold Render container must not log a driver out mid-shift — the
+        // buffered rows and the retry loop handle those, and the next call tries again.
+        if (e is ApiException && e.statusCode == 401 && _sessionIsDead(e)) await _endSession();
         return null;
       } finally {
         // allow the next 401 burst after this one settles
         Timer(const Duration(seconds: 1), () => _refreshFlight = null);
       }
     }();
+  }
+
+  /// Codes the API returns when the stored session row is gone, revoked, or older than the
+  /// refresh window. Anything else (a guard rejecting a role, a malformed body) keeps it.
+  bool _sessionIsDead(ApiException e) {
+    final String text = '${e.code ?? ''} ${e.message}';
+    return text.contains('REFRESH_EXPIRED') ||
+        text.contains('INVALID_REFRESH_TOKEN') ||
+        text.contains('ACCOUNT_DISABLED');
+  }
+
+  Future<void> _endSession() async {
+    await session.clear();
+    onSessionEnded?.call();
   }
 
   bool _isNetworkFailure(DioException e) =>

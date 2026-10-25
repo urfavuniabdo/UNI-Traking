@@ -88,9 +88,13 @@ class _SettingsSheetState extends ConsumerState<_SettingsSheet> {
   }
 
   Future<void> _completeSignOut(AuthController auth, GoRouter router) async {
-    await auth.logout();
-    appRefresh.notify();
-    router.go('/login');
+    try {
+      await auth.logout();
+    } finally {
+      // Whatever the teardown hit (a hung plugin, a dead network) the screen has to move.
+      appRefresh.notify();
+      router.go('/login');
+    }
   }
 
   /// A new server means new tokens, so a verified change always lands on the login screen.
