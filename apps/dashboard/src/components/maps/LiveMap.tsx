@@ -1,7 +1,7 @@
-import { useEffect, useMemo } from 'react';
+import { Fragment, useEffect, useMemo } from 'react';
 import { Circle, CircleMarker, MapContainer, Marker, Polygon, Polyline, TileLayer, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import type { FencesResponse, LivePosition, MapEvent, Severity } from '@/api/types';
+import type { DashboardTrail, FencesResponse, LivePosition, MapEvent, Severity } from '@/api/types';
 import { LiveSpeed } from '@/components/ui';
 import { driverIcon, eventIcon } from './icons';
 
@@ -14,6 +14,9 @@ export interface TrailLayer {
   gaps: { from: [number, number]; to: [number, number]; minutes: number }[];
   events: MapEvent[];
 }
+
+/** Every present driver's recent line, in his own colour. */
+export type BoardTrail = DashboardTrail & { color: string };
 
 function FlyTo({ target }: { target: [number, number] | null }) {
   const map = useMap();
@@ -44,6 +47,8 @@ interface Props {
   focusUserId?: string | null;
   onSelect?: (userId: string) => void;
   trail?: TrailLayer | null;
+  /** the recent line of every other driver on the board, each in his own colour */
+  trails?: BoardTrail[];
   fitSignal?: number;
   /** Jump the view somewhere the user picked (an event on the line) instead of the moving car. */
   flyTarget?: [number, number] | null;
@@ -58,6 +63,7 @@ export default function LiveMap({
   focusUserId,
   onSelect,
   trail = null,
+  trails = [],
   fitSignal = 0,
   flyTarget = null,
   onSelectEvent,
@@ -110,6 +116,40 @@ export default function LiveMap({
           </Polygon>
         );
       })}
+
+      {/* Every other present driver's recent line: his own colour, his stops marked */}
+      {trails.map((t) => (
+        <Fragment key={`board-${t.userId}`}>
+          {t.line.length > 1 && (
+            <Polyline positions={t.line} pathOptions={{ color: t.color, weight: 3, opacity: 0.62 }}>
+              <Tooltip sticky direction="top">
+                <span style={{ direction: 'rtl', fontFamily: 'Cairo' }}>
+                  <b>{t.name}</b> · <span className="num">{t.distanceKm}</span> كم
+                </span>
+              </Tooltip>
+            </Polyline>
+          )}
+          {t.gaps.map((g, i) => (
+            <Polyline key={`board-gap-${i}`} positions={[g.from, g.to]} pathOptions={{ color: t.color, weight: 2, dashArray: '2 8', opacity: 0.5 }}>
+              <Tooltip sticky direction="top">{`فجوة تغطية ${g.minutes} دقيقة`}</Tooltip>
+            </Polyline>
+          ))}
+          {t.stops.map((s) => (
+            <CircleMarker
+              key={`board-stop-${s.id}`}
+              center={[s.lat, s.lng]}
+              radius={4.5}
+              pathOptions={{ color: t.color, fillColor: '#fff', fillOpacity: 0.9, weight: 2 }}
+            >
+              <Tooltip sticky direction="top">
+                <span style={{ direction: 'rtl', fontFamily: 'Cairo' }}>
+                  <b>{t.name}</b> · {STOP_KIND_AR[s.kind] ?? 'توقف'} · <span className="num">{s.durationMin}</span> دقيقة
+                </span>
+              </Tooltip>
+            </CircleMarker>
+          ))}
+        </Fragment>
+      ))}
 
       {/* Selected driver's day: the trail, the stops, the holes in coverage, then the events on top */}
       {trail && trail.points.length > 1 && (

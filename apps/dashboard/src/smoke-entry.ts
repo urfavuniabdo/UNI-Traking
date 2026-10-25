@@ -42,6 +42,13 @@ async function main(): Promise<void> {
   check('GET /positions/route → polyline points', route.status === 200 && routeJson.points.length > 100, `${routeJson.points.length} pts, ${routeJson.distanceKm} km`);
   const replayed = buildRoute('u-kareem', '2026-10-22');
   check('offline driver route is fully buffered (replayed)', Boolean(replayed && replayed.replayedPoints === replayed.points.length));
+  const trailsRes = await get('/positions/trails', { minutes: 180 });
+  const tj = trailsRes.json as { windowMin: number; trails: { userId: string; line: [number, number][]; stops: unknown[] }[] };
+  check(
+    'GET /positions/trails → one line per online driver',
+    trailsRes.status === 200 && tj.trails.length > 1 && tj.trails.every((t) => t.line.length > 1),
+    `${tj.trails.length} trails, ${tj.trails[0]?.line.length ?? 0} pts each`,
+  );
 
   // places / fences
   const fences = await get('/places/fences');

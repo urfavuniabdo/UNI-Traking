@@ -1,14 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '@/api/client';
-import type { AlertPayload, AlertsResponse, Employee, FencesResponse, LivePosition, MapEvent, RoutePoint, RouteResponse } from '@/api/types';
+import type { AlertPayload, AlertsResponse, Employee, FencesResponse, LivePosition, MapEvent, RoutePoint, RouteResponse, TrailsResponse } from '@/api/types';
 import { useAlertFeed, useLive } from '@/stores/ui';
 import { useAsync, useNow } from '@/hooks/useAsync';
 import { fmtTime, timeAgo, todayISODate, waLink, telLink } from '@/utils/format';
-import LiveMap, { type TrailLayer } from '@/components/maps/LiveMap';
+import LiveMap, { type BoardTrail, type TrailLayer } from '@/components/maps/LiveMap';
 import { eventGlyph } from '@/components/maps/icons';
 import { Btn, Chip, EmptyState, ErrorState, LiveSpeed, MotionChip, Num, Select, SeverityChip, Skeleton } from '@/components/ui';
 import { Icon } from '@/components/Icon';
+
+/** Each present driver keeps his own colour, picked from his id so a poll never repaints the map. */
+const TRAIL_COLORS = ['#0ea5e9', '#7c3aed', '#f97316', '#059669', '#db2777', '#65a30d', '#0891b2', '#b45309'];
+const colorOf = (id: string): string => {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 997;
+  return TRAIL_COLORS[h % TRAIL_COLORS.length];
+};
 
 export default function LivePage() {
   const positions = useLive((s) => s.positions);
@@ -42,6 +50,32 @@ export default function LivePage() {
   }, [fenceBoot.data, setFences]);
 
   const driversRes = useAsync<{ employees: Employee[] }>(() => api.get('/employees', { role: 'DRIVER' }), []);
+
+  // Every present driver's recent line, in one read, re-read every 30s; the socket grows it between reads.
+  const trailsRes = useAsync<TrailsResponse>(() => api.get('/positions/trails', { minutes: 180 }), []);
+  const [tails, setTails] = useState<Record<string, [number, number][]>>({});
+  useEffect(() => {
+    const t = setInterval(() => trailsRes.reload(), 30_000);
+    return () => clearInterval(t);
+  }, [trailsRes.reload]);
+  useEffect(() => {
+    const data = trailsRes.data;
+    if (!data) return;
+    setTails((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const trail of data.trails) {
+        const p = positions[trail.userId] as LivePosition | undefined;
+        if (!p || p.ts <= trail.lastTs) continue; // already inside the line the board read
+        const arr = next[trail.userId] ?? [];
+        const last = arr[arr.length - 1];
+        if (last && last[0] === p.lat && last[1] === p.lng) continue;
+        next[trail.userId] = [...arr.slice(-1500), [p.lat, p.lng]];
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [trailsRes.data, positions]);
 
   // The selected vehicle's day: the trail from /positions/route, the abnormal events from /alerts.
   const routeRes = useAsync<RouteResponse | null>(
@@ -117,6 +151,17 @@ export default function LivePage() {
   }, [focus, routeRes.data, liveTrail, dayAlerts]);
 
   const list = useMemo(() => Object.values(positions), [positions]);
+
+  // The selected vehicle already gets his bold day line; the others are drawn in their own colour.
+  const boardTrails = useMemo<BoardTrail[]>(
+    () =>
+      isToday
+        ? (trailsRes.data?.trails ?? [])
+            .filter((t) => t.userId !== focus)
+            .map((t) => ({ ...t, color: colorOf(t.userId), line: [...t.line, ...(tails[t.userId] ?? [])] }))
+        : [],
+    [trailsRes.data, tails, focus, isToday],
+  );
   const nameOf = (id: string) => driversRes.data?.employees.find((e) => e.id === id)?.name ?? id;
   const focusedEmp = focus ? driversRes.data?.employees.find((e) => e.id === focus) : undefined;
 
@@ -215,6 +260,7 @@ export default function LivePage() {
             focusUserId={focus}
             onSelect={setFocus}
             trail={trail}
+            trails={boardTrails}
             fitSignal={fitSignal}
             flyTarget={flyTarget}
             selectedEventId={selectedEventId}

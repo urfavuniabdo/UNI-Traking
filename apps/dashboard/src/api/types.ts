@@ -129,8 +129,28 @@ export interface RouteResponse {
   replayed?: boolean;
 }
 
-export type GeoShape = 'CIRCLE' | 'POLYGON';
+/** One present driver's recent line, from `GET /positions/trails`. */
+export interface DashboardTrail {
+  userId: string;
+  employeeId: string;
+  name: string;
+  motionState: MotionState;
+  lastTs: string;
+  distanceKm: number;
+  /** the credible trace, thinned to 8 m — the shape of the line, without the jitter */
+  line: [number, number][];
+  pointCount: number;
+  stops: { id: string; kind: string; lat: number; lng: number; startTs: string; endTs: string | null; durationMin: number }[];
+  gaps: { from: [number, number]; to: [number, number]; minutes: number }[];
+}
 
+export interface TrailsResponse {
+  windowMin: number;
+  serverTs: string;
+  trails: DashboardTrail[];
+}
+
+export type GeoShape = 'CIRCLE' | 'POLYGON';
 /** An alert that knows where it happened, so the map can put a symbol on the exact spot. */
 export interface MapEvent {
   id: string;
