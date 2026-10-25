@@ -17,6 +17,9 @@ function liveFor(userId: string): LivePosition | undefined {
   };
 }
 
+/** per-driver rule overrides the mock has actually been asked to save */
+const ruleOverrides = new Map<string, { maxSpeedKmh: number | null; stopAlertMin: number | null }>();
+
 export const employeeRoutes: MockRoute[] = [
   {
     method: 'GET',
@@ -44,6 +47,7 @@ export const employeeRoutes: MockRoute[] = [
         live: liveFor(e.id),
         zoneName: zones.find((z) => z.id === e.zoneId)?.name ?? null,
         siteName: sites.find((s) => s.id === e.siteId)?.name ?? null,
+        ruleOverride: ruleOverrides.get(e.id) ?? null,
       });
     },
   },
@@ -57,8 +61,16 @@ export const employeeRoutes: MockRoute[] = [
         e.zoneId = body.zoneId === null || body.zoneId === '' ? null : String(body.zoneId);
         e.zoneName = zones.find((z) => z.id === e.zoneId)?.name ?? null;
       }
-      if (body.maxSpeedKmh !== undefined) e.maxSpeedKmh = body.maxSpeedKmh === null ? null : Number(body.maxSpeedKmh);
-      if (body.stopAlertMin !== undefined) e.stopAlertMin = body.stopAlertMin === null ? null : Number(body.stopAlertMin);
+      const stored = ruleOverrides.get(e.id) ?? { maxSpeedKmh: null, stopAlertMin: null };
+      if (body.maxSpeedKmh !== undefined) {
+        stored.maxSpeedKmh = body.maxSpeedKmh === null ? null : Number(body.maxSpeedKmh);
+        e.maxSpeedKmh = stored.maxSpeedKmh;
+      }
+      if (body.stopAlertMin !== undefined) {
+        stored.stopAlertMin = body.stopAlertMin === null ? null : Number(body.stopAlertMin);
+        e.stopAlertMin = stored.stopAlertMin;
+      }
+      ruleOverrides.set(e.id, stored);
       return ok(e);
     },
   },

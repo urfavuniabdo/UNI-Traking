@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '@/api/client';
 import type { AlertPayload, Employee, LivePosition, Zone } from '@/api/types';
@@ -11,6 +11,8 @@ interface EnrichedEmployee extends Employee {
   live?: LivePosition;
   zoneName?: string | null;
   siteName?: string | null;
+  /** what this driver's own card saved; null fields mean the number in force is inherited */
+  ruleOverride?: { maxSpeedKmh: number | null; stopAlertMin: number | null } | null;
 }
 
 export default function DriverDetailPage() {
@@ -30,18 +32,31 @@ export default function DriverDetailPage() {
 
   const [maxSpeed, setMaxSpeed] = useState<string>('');
   const [stopMin, setStopMin] = useState<string>('');
+  const [touched, setTouched] = useState<{ speed: boolean; stop: boolean }>({ speed: false, stop: false });
   const [zoneId, setZoneId] = useState<string>('');
   const [saving, setSaving] = useState(false);
 
   const e = emp.data;
   const zoneList = zones.data?.zones ?? [];
 
+  // Show the number that is actually in force in the box itself — an empty box next to a grey
+  // hint reads like a field that does nothing.
+  useEffect(() => {
+    if (!e) return;
+    setMaxSpeed(String(e.maxSpeedKmh ?? ''));
+    setStopMin(String(e.stopAlertMin ?? ''));
+    setTouched({ speed: false, stop: false });
+  }, [e?.id, e?.maxSpeedKmh, e?.stopAlertMin]);
+
   const saveRules = async () => {
     setSaving(true);
     try {
+      // an untouched box re-saves the override that was already there, so opening the page and
+      // hitting حفظ cannot silently pin an inherited number onto this driver
+      const num = (v: string): number | null => (v.trim() === '' || !Number.isFinite(Number(v)) ? null : Number(v));
       await api.patch(`/employees/${id}/rules`, {
-        maxSpeedKmh: maxSpeed === '' ? null : Number(maxSpeed),
-        stopAlertMin: stopMin === '' ? null : Number(stopMin),
+        maxSpeedKmh: touched.speed ? num(maxSpeed) : e?.ruleOverride?.maxSpeedKmh ?? null,
+        stopAlertMin: touched.stop ? num(stopMin) : e?.ruleOverride?.stopAlertMin ?? null,
         zoneId: zoneId || (e?.zoneId ?? null),
       });
       toast({ title: 'تم حفظ القواعد', kind: 'info' });
@@ -89,11 +104,37 @@ export default function DriverDetailPage() {
           <div className="grid grid-cols-2 gap-3 p-3 pt-0">
             <div>
               <label className="label">حد السرعة (كم/س)</label>
-              <Input type="number" min={10} max={160} placeholder={String(e.maxSpeedKmh ?? 'افتراضي النطاق')} value={maxSpeed} onChange={(ev) => setMaxSpeed(ev.target.value)} />
+              <Input
+                dir="ltr"
+                type="number"
+                min={10}
+                max={160}
+                value={maxSpeed}
+                onChange={(ev) => {
+                  setMaxSpeed(ev.target.value);
+                  setTouched((t) => ({ ...t, speed: true }));
+                }}
+              />
+              <div className="muted mt-1" style={{ fontSize: '.7rem' }}>
+                {e.ruleOverride?.maxSpeedKmh != null ? 'override لهذا السواق' : 'مورّث من النطاق / الإعدادات العامة'}
+              </div>
             </div>
             <div>
               <label className="label">تنبيه التوقف (دقيقة)</label>
-              <Input type="number" min={5} max={180} placeholder={String(e.stopAlertMin ?? 'افتراضي')} value={stopMin} onChange={(ev) => setStopMin(ev.target.value)} />
+              <Input
+                dir="ltr"
+                type="number"
+                min={5}
+                max={180}
+                value={stopMin}
+                onChange={(ev) => {
+                  setStopMin(ev.target.value);
+                  setTouched((t) => ({ ...t, stop: true }));
+                }}
+              />
+              <div className="muted mt-1" style={{ fontSize: '.7rem' }}>
+                {e.ruleOverride?.stopAlertMin != null ? 'override لهذا السواق' : 'مورّث من النطاق / الإعدادات العامة'}
+              </div>
             </div>
             <div className="col-span-2">
               <label className="label">النطاق المُسند</label>

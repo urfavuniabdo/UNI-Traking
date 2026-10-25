@@ -215,6 +215,11 @@ export class EmployeesService {
     if (!emp) throw new NotFoundException('EMPLOYEE_NOT_FOUND');
     const lives = await this.liveMap([id]);
     const effective = await this.effectiveNumbers(id, emp);
+    // what this driver's own card actually saved — without it the UI cannot tell an override
+    // from a number the driver merely inherits from his zone
+    const ruleOverride = await this.prisma.ruleOverride
+      .findUnique({ where: { employeeId: id }, select: { maxSpeedKmh: true, stopAlertMin: true } })
+      .catch(() => null);
     return {
       ...emp,
       identifier: emp.externalId,
@@ -224,6 +229,7 @@ export class EmployeesService {
       siteName: emp.site?.name ?? null,
       maxSpeedKmh: effective.maxSpeedKmh,
       stopAlertMin: effective.stopAlertMin,
+      ruleOverride,
       live: lives.get(id) ?? null,
     };
   }
