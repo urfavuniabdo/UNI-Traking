@@ -5,7 +5,13 @@ import {
   Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma.service';
-import { ALERT_DISPATCHER, type AlertDispatcher, type RaiseAlertInput } from '../../common/contracts';
+import {
+  ALERT_DISPATCHER,
+  TRIP_CLOSER,
+  type AlertDispatcher,
+  type RaiseAlertInput,
+  type TripCloser,
+} from '../../common/contracts';
 import { RULE_DEFAULTS, SEVERITY, AR_ALERT_TEXT, type AlertType } from '../../shared/constants';
 import { json } from '../../common/utils';
 import type { RegisterDeviceDto, HeartbeatDto, ToggleEventDto } from './dto';
@@ -33,6 +39,7 @@ export class DevicesService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(ALERT_DISPATCHER) @Optional() private readonly dispatcher?: AlertDispatcher,
+    @Inject(TRIP_CLOSER) @Optional() private readonly trips?: TripCloser,
   ) {}
 
   /** Idempotent by deviceId: create-or-update the device and (re)link the caller's identities. */
@@ -63,6 +70,7 @@ export class DevicesService {
     // Detect transitions / offline gaps before overwriting the row.
     const wasOnline = device.online;
     const wasGps = device.gpsEnabled;
+    const wasTracking = device.tracking;
     const prevSeen = device.lastSeenAt ? new Date(device.lastSeenAt).getTime() : null;
     const gapS = prevSeen ? (now.getTime() - prevSeen) / 1000 : null;
 
@@ -80,6 +88,10 @@ export class DevicesService {
     if (wasGps && !dto.gpsEnabled) this.maybeAlert(device, 'GPS_OFF');
     if (wasOnline && !dto.online) this.maybeAlert(device, 'DATA_OFF');
     if (gapS !== null && gapS > PRESENCE_WINDOW_S) this.maybeAlert(device, 'APP_OFFLINE');
+    // Tracking off is the end of the run — whoever forgot to say so.
+    if (wasTracking && !dto.tracking && device.employeeId) {
+      await this.trips?.closeOpenTrips(device.employeeId, now.getTime()).catch(() => undefined);
+    }
 
     return { serverTs: now.toISOString() };
   }

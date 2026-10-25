@@ -40,13 +40,14 @@ interface Track {
         id: string;
         workDate: string;
         startedAt: number;
-        distanceM: number;
         maxSpeed: number | null;
         lastMoveTs: number;
         replayed: boolean;
       }
     | null;
   lastRealtimeTs: number | null;
+  /** wall-clock ms of the last position heard from this driver, whatever its clientTs said */
+  seenAt: number;
   gapsByDate: Record<string, { from: string; to: string; gapS: number }[]>;
   touchedDates: Set<string>;
 }
@@ -58,6 +59,9 @@ const MAX_BATCH = 500;
  * metres when parked, so the accuracy circle alone is not a floor.
  */
 const NOISE_FLOOR_M = 12;
+
+/** A run whose device has said nothing for this long is over — check-out, a killed app or a deploy. */
+const TRIP_IDLE_MS = 600_000;
 
 /** Employee identity/geo metadata used to enrich a live item (cached; `at` = epoch ms). */
 interface EmployeeMeta {
@@ -143,6 +147,7 @@ export class PositionsService {
       stopStart: null,
       openTrip: null,
       lastRealtimeTs: null,
+      seenAt: 0,
       gapsByDate: {},
       touchedDates: new Set(),
     };
@@ -305,6 +310,7 @@ export class PositionsService {
     track: Track,
   ): Promise<number> {
     let alertsRaised = 0;
+    track.seenAt = Date.now();
     if (!this.dispatcher) {
       // no dispatcher wired → still keep live cache & motion state, but skip rules
     }
@@ -398,19 +404,14 @@ export class PositionsService {
     const isTravel = (state === 'RIDING' || state === 'WALKING') && ground.moved;
     if (isTravel) {
       if (!track.openTrip || track.openTrip.workDate !== workDate) {
-        if (track.openTrip) await this.finalizeTrip(track.openTrip, track.last?.ts ?? p.ts);
+        if (track.openTrip) await this.finalizeTrip(employeeId, track.openTrip, track.last?.ts ?? p.ts);
         const trip = await this.prisma.trip.create({
           data: { employeeId, zoneId: ctx?.zoneId ?? null, startedAt: new Date(p.ts), state: 'OPEN', replayed: p.buffered },
           select: { id: true, startedAt: true },
         });
-        track.openTrip = { id: trip.id, workDate, startedAt: p.ts, distanceM: 0, maxSpeed: null, lastMoveTs: p.ts, replayed: p.buffered };
+        track.openTrip = { id: trip.id, workDate, startedAt: p.ts, maxSpeed: null, lastMoveTs: p.ts, replayed: p.buffered };
       }
       if (track.openTrip) {
-        if (track.last)
-          track.openTrip.distanceM += this.geo.credibleDistanceM(
-            { lat: track.last.lat, lng: track.last.lng, at: track.last.ts },
-            { lat: p.lat, lng: p.lng, at: p.ts },
-          );
         if (speed !== null) track.openTrip.maxSpeed = track.openTrip.maxSpeed === null ? speed : Math.max(track.openTrip.maxSpeed, speed);
         track.openTrip.lastMoveTs = p.ts;
         if (p.buffered) track.openTrip.replayed = true;
@@ -445,12 +446,6 @@ export class PositionsService {
       const durationS = Math.round((p.ts - track.stopStart.ts) / 1000);
       await this.prisma.stopEvent.update({ where: { id: track.stopStart.stopId }, data: { endedAt: new Date(p.ts), durationS } }).catch(() => undefined);
       track.stopStart = null;
-    }
-
-    // --- trip close after 10 min of STOPPED while tracking ---
-    if (track.openTrip && track.stopStart && state === 'STOPPED' && p.ts - track.stopStart.ts > 600_000) {
-      await this.finalizeTrip(track.openTrip, track.stopStart.ts);
-      track.openTrip = null;
     }
 
     // --- route gaps (> gapMinMin minutes between consecutive tracking samples) ---
@@ -578,28 +573,43 @@ export class PositionsService {
     return 'UNPLANNED';
   }
 
-  /** Close an open trip: compute polyline (simplified), avg speed, end point. */
-  private async finalizeTrip(open: NonNullable<Track['openTrip']>, endedAt: number): Promise<void> {
+  /**
+   * Close a journey from what its positions actually say, not from a counter a process was
+   * holding: the jump-free trace of its window gives the length, the top speed and the line. A trip
+   * can be closed long after the process that opened it died (a deploy, a check-out, a kill), and
+   * it must still be able to tell the truth about the ground it covered.
+   */
+  private async finalizeTrip(employeeId: string, open: NonNullable<Track['openTrip']>, endedAt: number): Promise<void> {
     const rows = await this.prisma.position.findMany({
-      where: { tripId: open.id },
+      where: { employeeId, clientTs: { gte: new Date(open.startedAt), lte: new Date(endedAt) } },
       orderBy: { clientTs: 'asc' },
-      select: { lat: true, lng: true, clientTs: true, motionState: true },
+      select: { lat: true, lng: true, clientTs: true, speedKmh: true, accuracyM: true, bearing: true, buffered: true, stale: true },
     });
-    const points = this.credibleTrace(rows);
-    const simplified = this.geo.simplify(points.map((pt) => ({ lat: pt.lat, lng: pt.lng })), 25);
-    const distanceKm = open.distanceM / 1000;
+    const trace = this.dropSpikes(rows).filter((x) => x.credible).map((x) => x.row);
+    let distanceM = 0;
+    let maxStepKmh = 0;
+    for (let i = 1; i < trace.length; i++) {
+      const a = { lat: trace[i - 1].lat, lng: trace[i - 1].lng, at: trace[i - 1].clientTs.getTime() };
+      const b = { lat: trace[i].lat, lng: trace[i].lng, at: trace[i].clientTs.getTime() };
+      const m = this.geo.credibleDistanceM(a, b);
+      distanceM += m;
+      const dtS = (b.at - a.at) / 1000;
+      if (dtS > 0) maxStepKmh = Math.max(maxStepKmh, (m / dtS) * 3.6);
+    }
+    const distanceKm = distanceM / 1000;
     const hours = Math.max(1 / 3600, (endedAt - open.startedAt) / 3600_000);
     const avgSpeed = distanceKm / hours;
-    const lastPt = points[points.length - 1];
+    const simplified = this.geo.simplify(trace.map((pt) => ({ lat: pt.lat, lng: pt.lng })), 25);
+    const lastPt = trace[trace.length - 1];
     await this.prisma.trip
       .update({
         where: { id: open.id },
         data: {
-          endedAt: new Date(endedAt),
+          endedAt: new Date(Math.max(endedAt, open.startedAt)),
           distanceKm: round(distanceKm, 3) ?? 0,
-          maxSpeedKmh: round(open.maxSpeed ?? undefined, 1) ?? null,
+          maxSpeedKmh: round(Math.max(maxStepKmh, open.maxSpeed ?? 0), 1) ?? null,
           avgSpeedKmh: round(avgSpeed, 1) ?? null,
-          startPoint: `${points[0]?.lat ?? ''},${points[0]?.lng ?? ''}`,
+          startPoint: trace[0] ? `${trace[0].lat},${trace[0].lng}` : '',
           endPoint: lastPt ? `${lastPt.lat},${lastPt.lng}` : null,
           polyline: this.geo.geoJsonLine(simplified),
           state: 'CLOSED',
@@ -611,6 +621,89 @@ export class PositionsService {
     await this.prisma.stopEvent
       .updateMany({ where: { tripId: open.id, endedAt: null }, data: { endedAt: new Date(endedAt), durationS: Math.max(0, Math.round((endedAt - open.startedAt) / 1000)) } })
       .catch(() => undefined);
+  }
+
+  /**
+   * Ends the journey a driver is on right now. Check-out (through the device reporting tracking
+   * stopped) lands here: a trip left OPEN is a vehicle the dashboard still shows on the road.
+   */
+  async closeOpenTrips(employeeId: string, at: number = Date.now()): Promise<number> {
+    let closed = 0;
+    const track = this.tracks.get(employeeId);
+    const open = track?.openTrip;
+    if (open) {
+      await this.finalizeTrip(employeeId, open, Math.max(at, open.startedAt));
+      track.openTrip = null;
+      track.stopStart = null;
+      closed++;
+    }
+    const orphans = await this.prisma.trip.findMany({ where: { employeeId, state: 'OPEN' }, orderBy: { startedAt: 'asc' } });
+    for (const t of orphans) {
+      await this.closeOrphanTrip(t.employeeId, t);
+      closed++;
+    }
+    return closed;
+  }
+
+  /**
+   * Scheduled every 60s — a run whose driver stopped reporting is over. Standing still is not
+   * silence: a driver waiting 40 minutes at a customer is still on his journey (and STOP_EXCEEDED
+   * is there to say so), so only a device that went quiet ends the trip here.
+   */
+  @Interval(60_000)
+  async scheduledTripSweep(): Promise<void> {
+    try {
+      await this.closeStaleTrips();
+    } catch (err) {
+      this.logger.warn(`trip sweep failed: ${(err as Error)?.message}`);
+    }
+  }
+
+  async closeStaleTrips(now: number = Date.now()): Promise<number> {
+    let closed = 0;
+    const owned = new Set<string>();
+    for (const [employeeId, track] of this.tracks) {
+      const open = track.openTrip;
+      if (!open) continue;
+      owned.add(open.id);
+      if (track.seenAt > 0 && now - track.seenAt > TRIP_IDLE_MS) {
+        await this.finalizeTrip(employeeId, open, open.lastMoveTs);
+        track.openTrip = null;
+        closed++;
+      }
+    }
+    const orphans = await this.prisma.trip.findMany({
+      where: { state: 'OPEN', startedAt: { lt: new Date(now - TRIP_IDLE_MS) } },
+      orderBy: { startedAt: 'asc' },
+      take: 200,
+    });
+    for (const t of orphans) {
+      if (owned.has(t.id)) continue;
+      await this.closeOrphanTrip(t.employeeId, t);
+      closed++;
+    }
+    return closed;
+  }
+
+  /**
+   * An OPEN row no process holds any more (a deploy wiped the in-memory tracks, the app died
+   * mid-shift): its own positions are the only witness, so it closes at its last fix with the
+   * length and the line re-read from the ground. For a driver who never left the yard that is zero,
+   * which is the truth the trip table had been missing.
+   */
+  private async closeOrphanTrip(employeeId: string, t: { id: string; startedAt: Date; replayed: boolean; maxSpeedKmh: number | null }): Promise<void> {
+    const last = await this.prisma.position.findFirst({
+      where: { employeeId, clientTs: { gte: t.startedAt } },
+      orderBy: { clientTs: 'desc' },
+      select: { clientTs: true },
+    });
+    const startedAt = t.startedAt.getTime();
+    const endedAt = Math.max(startedAt, last?.clientTs.getTime() ?? startedAt);
+    await this.finalizeTrip(
+      employeeId,
+      { id: t.id, workDate: workDateOf(t.startedAt), startedAt, maxSpeed: t.maxSpeedKmh, lastMoveTs: endedAt, replayed: t.replayed },
+      endedAt,
+    );
   }
 
   /**

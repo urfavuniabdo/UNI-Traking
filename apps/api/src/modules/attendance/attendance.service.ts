@@ -15,8 +15,10 @@ import { GeoService, type FenceShape } from '../../common/geo/geo.service';
 import {
   ALERT_DISPATCHER,
   REALTIME_PUBLISHER,
+  TRIP_CLOSER,
   type AlertDispatcher,
   type RealtimePublisher,
+  type TripCloser,
 } from '../../common/contracts';
 import { parseJson, workDateOf } from '../../common/utils';
 import { AR_ALERT_TEXT, ATTENDANCE_STATUS, ROLES, SEVERITY } from '../../shared/constants';
@@ -92,6 +94,7 @@ export class AttendanceService {
     private readonly leave: LeaveService,
     @Inject(ALERT_DISPATCHER) @Optional() private readonly dispatcher?: AlertDispatcher,
     @Inject(REALTIME_PUBLISHER) @Optional() private readonly rt?: RealtimePublisher,
+    @Inject(TRIP_CLOSER) @Optional() private readonly trips?: TripCloser,
   ) {}
 
   // ---------- core ----------
@@ -285,6 +288,8 @@ export class AttendanceService {
     });
 
     if (outOfFence) await this.raiseOutOfFence(emp, userId, evalRes, allowed, dto, 'OUT');
+    // the shift is over, so the vehicle is back at the yard: a run left OPEN shows a driver on the road
+    await this.trips?.closeOpenTrips(emp.id, now.getTime()).catch(() => undefined);
     this.rt?.attendance({ userId, kind: 'OUT', status, ts: now.toISOString() });
 
     return {

@@ -4,6 +4,7 @@ import type { AlertType, MotionState, Role, Severity } from '../shared/constants
 export const ALERT_DISPATCHER = 'ALERT_DISPATCHER';
 export const REALTIME_PUBLISHER = 'REALTIME_PUBLISHER';
 export const GEOLINE_WORKER = 'GEOLINE_WORKER';
+export const TRIP_CLOSER = 'TRIP_CLOSER';
 
 export interface RaiseAlertInput {
   type: AlertType;
@@ -32,6 +33,14 @@ export interface RaisedAlert {
 
 export interface AlertDispatcher {
   raise(input: RaiseAlertInput): Promise<RaisedAlert | undefined>;
+}
+
+/**
+ * What the devices module needs from tracking when a phone reports tracking stopped: the journey
+ * ends with the shift, and only tracking knows how to close it honestly.
+ */
+export interface TripCloser {
+  closeOpenTrips(employeeId: string, at?: number): Promise<number>;
 }
 
 /**

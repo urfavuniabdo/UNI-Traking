@@ -79,6 +79,9 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  // forget yesterday's drivers: a sweep must only see the run the current test opened
+  positions['tracks']?.clear?.();
+  positions['live']?.clear?.();
   await prisma.position.deleteMany();
   await prisma.alert.deleteMany();
   await prisma.stopEvent.deleteMany();
@@ -203,5 +206,141 @@ describe('the coordinates decide the motion state (§5)', () => {
     expect(route.rejectedPoints).toBe(1);
     expect(route.points.find((p) => p.lat === 30.3)?.credible).toBe(false);
     expect(route.distanceKm).toBeLessThan(0.3);
+  });
+});
+
+describe('a journey ends when the ground stops (§5)', () => {
+  const drive = (t0: number, i: number): PositionItemDto => ({
+    clientTs: iso(t0 + i * 15000),
+    lat: 30.0 + i * 0.0009,
+    lng: 31.2,
+    speed: 40,
+    accuracy: 8,
+  });
+
+  it('check-out (tracking off) closes the run with the length it actually covered', async () => {
+    const { employeeId, deviceId } = await mkDriver();
+    const t0 = Date.now();
+    await positions.ingestBatch({
+      deviceId,
+      batchSeq: 1,
+      positions: [drive(t0, 0), drive(t0, 1), drive(t0, 2), drive(t0, 3), drive(t0, 4), drive(t0, 5)],
+    });
+    expect(await prisma.trip.count({ where: { employeeId, state: 'OPEN' } })).toBe(1);
+
+    const closed = await positions.closeOpenTrips(employeeId, t0 + 90_000);
+    expect(closed).toBe(1);
+
+    const trip = await prisma.trip.findFirst({ where: { employeeId } });
+    expect(trip?.state).toBe('CLOSED');
+    expect(trip?.endedAt?.getTime()).toBeGreaterThanOrEqual(t0 + 90_000);
+    expect(trip?.distanceKm).toBeGreaterThan(0.3);
+    expect(trip?.distanceKm).toBeLessThan(0.7); // ~500 m of the five 100 m steps
+    expect(trip?.endPoint).not.toBeNull();
+    expect(trip?.polyline).not.toBeNull();
+    expect(await prisma.trip.count({ where: { employeeId, state: 'OPEN' } })).toBe(0);
+  });
+
+  it('a run nobody ended closes itself once the driver stopped moving', async () => {
+    const { employeeId, deviceId } = await mkDriver();
+    const t0 = Date.now();
+    await positions.ingestBatch({
+      deviceId,
+      batchSeq: 1,
+      positions: [drive(t0, 0), drive(t0, 1), drive(t0, 2), drive(t0, 3)],
+    });
+
+    const closed = await positions.closeStaleTrips(t0 + 700_000);
+    expect(closed).toBeGreaterThanOrEqual(1);
+
+    const trip = await prisma.trip.findFirst({ where: { employeeId } });
+    expect(trip?.state).toBe('CLOSED');
+    // it ends at the last step that had ground under it, not at the sweep time
+    expect(trip?.endedAt?.getTime()).toBe(t0 + 45_000);
+    expect(await prisma.trip.count({ where: { employeeId, state: 'OPEN' } })).toBe(0);
+  });
+
+  it('an OPEN row left by a dead process is rebuilt from its own positions', async () => {
+    const { employeeId } = await mkDriver();
+    const t0 = Date.now();
+    const startedAt = new Date(t0);
+    // a parked driver whose trip row was never closed: the day's fixes are the only witness
+    for (let i = 0; i < 5; i++) {
+      await prisma.position.create({
+        data: {
+          employeeId,
+          clientTs: new Date(t0 + i * 60000),
+          lat: 30.0,
+          lng: 31.2,
+          speedKmh: 0.3,
+          accuracyM: 8,
+          motionState: 'STOPPED',
+          ingestHash: `orphan-${i}`,
+        },
+      });
+    }
+    await prisma.trip.create({
+      data: { employeeId, startedAt, state: 'OPEN', distanceKm: 0, maxSpeedKmh: 150, replayed: false },
+    });
+
+    const closed = await positions.closeStaleTrips(Date.now() + 700_000);
+    expect(closed).toBe(1);
+
+    const trip = await prisma.trip.findFirst({ where: { employeeId }, orderBy: { startedAt: 'asc' } });
+    expect(trip?.state).toBe('CLOSED');
+    expect(trip?.endedAt?.getTime()).toBe(t0 + 240_000); // its last fix
+    expect(trip?.distanceKm).toBe(0); // he never moved — the honest answer
+    expect(trip?.maxSpeedKmh).toBe(150); // what the phone claimed is kept, the ground is not
+  });
+
+  it('waiting an hour at a customer keeps the run open — the phone is still talking', async () => {
+    const { employeeId, deviceId } = await mkDriver();
+    const t0 = Date.now();
+    await positions.ingestBatch({
+      deviceId,
+      batchSeq: 1,
+      positions: [drive(t0, 0), drive(t0, 1), drive(t0, 2), drive(t0, 3)],
+    });
+    // parked at the same spot for 60 minutes, reporting every 5 minutes
+    const waiting = Array.from({ length: 12 }, (_, i) => ({
+      clientTs: iso(t0 + 60_000 + i * 300_000),
+      lat: 30.0027,
+      lng: 31.2,
+      speed: 0,
+      accuracy: 8,
+    }));
+    await positions.ingestBatch({ deviceId, batchSeq: 2, positions: waiting });
+
+    const trip = await prisma.trip.findFirst({ where: { employeeId } });
+    expect(trip?.state).toBe('OPEN'); // he is on the job, just not on the move
+    expect(await stateOf(employeeId)).toBe('STOPPED'); // and the dashboard says واقف
+    expect(await prisma.stopEvent.count({ where: { employeeId } })).toBe(1);
+
+    await positions.closeOpenTrips(employeeId, t0 + 700_000);
+    const done = await prisma.trip.findFirst({ where: { employeeId } });
+    // the length of the run is the driving only — the hour of waiting covered no ground
+    expect(done?.distanceKm).toBeLessThan(0.4);
+    expect(done?.distanceKm).toBeGreaterThan(0.1);
+    expect(done?.endedAt?.getTime()).toBe(t0 + 700_000);
+  });
+
+  it('a re-check-in on the same day cannot leave a second OPEN run behind', async () => {    const { employeeId, deviceId } = await mkDriver();
+    const t0 = Date.now();
+    await positions.ingestBatch({ deviceId, batchSeq: 1, positions: [drive(t0, 0), drive(t0, 1), drive(t0, 2)] });
+    await positions.closeOpenTrips(employeeId, t0 + 60_000);
+
+    const t1 = t0 + 3_600_000;
+    await positions.ingestBatch({
+      deviceId,
+      batchSeq: 2,
+      positions: [drive(t1, 0), drive(t1, 1), drive(t1, 2)],
+    });
+
+    const rows = await prisma.trip.findMany({ where: { employeeId }, orderBy: { startedAt: 'asc' } });
+    expect(rows).toHaveLength(2);
+    expect(rows[0].state).toBe('CLOSED');
+    expect(rows[1].state).toBe('OPEN');
+    expect(await positions.closeOpenTrips(employeeId, t1 + 60_000)).toBe(1);
+    expect(await prisma.trip.count({ where: { employeeId, state: 'OPEN' } })).toBe(0);
   });
 });

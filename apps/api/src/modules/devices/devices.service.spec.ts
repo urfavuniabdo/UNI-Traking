@@ -83,4 +83,23 @@ describe('DevicesService', () => {
     await svc.toggleEvent({ deviceId: 'dev-1', kind: 'BUFFER_FLUSH', count: 42 } as never);
     expect(events[0]).toMatchObject({ kind: 'BUFFER_FLUSH', count: 42, employeeId: 'e1' });
   });
+
+  it('tracking on→off ends the driver’s run; any other beat does not', async () => {
+    const { prisma } = fakePrisma();
+    const closed: Array<[string, number]> = [];
+    const trips = { closeOpenTrips: async (employeeId: string, at?: number) => { closed.push([employeeId, at ?? 0]); return 1; } };
+    const svc = new DevicesService(prisma, undefined, trips as never);
+    await svc.register('u1', { deviceId: 'dev-1', platform: 'android' } as never);
+
+    await svc.heartbeat({ deviceId: 'dev-1', tracking: true, gpsEnabled: true, online: true } as never);
+    expect(closed).toHaveLength(0); // still running
+    await svc.heartbeat({ deviceId: 'dev-1', tracking: true, gpsEnabled: true, online: true } as never);
+    expect(closed).toHaveLength(0);
+
+    await svc.heartbeat({ deviceId: 'dev-1', tracking: false, gpsEnabled: true, online: true } as never);
+    expect(closed).toEqual([['e1', expect.any(Number)]]);
+
+    await svc.heartbeat({ deviceId: 'dev-1', tracking: false, gpsEnabled: true, online: true } as never);
+    expect(closed).toHaveLength(1); // off stays off — one close, not a close per beat
+  });
 });
