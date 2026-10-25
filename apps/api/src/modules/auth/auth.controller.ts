@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Post, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { ChangePasswordDto, LoginDto, RefreshDto } from './dto';
 import { Public, JwtAuthGuard } from '../../common/auth/guards';
@@ -28,15 +28,14 @@ export class AuthController {
 
   // Public because the app signs out locally before the request goes out: its access token may
   // already be gone or expired. The refresh token is the proof of ownership — AuthService
-  // verifies its signature and revokes exactly that session row.
+  // verifies its signature and revokes exactly that session row. The dashboard, which keeps its
+  // bearer, still logs out with an empty body and revokes every one of the user's sessions.
   @Public()
   @HttpCode(200)
-  @UseGuards(JwtAuthGuard)
   @Post('logout')
-  logout(@CurrentUser() user: AuthUser | undefined, @Body() dto: RefreshDto) {
+  logout(@Body() dto: RefreshDto, @Headers('authorization') authorization?: string) {
     if (dto?.refreshToken) return this.auth.logout(dto.refreshToken);
-    if (user?.id) return this.auth.logout(undefined, user.id);
-    throw new UnauthorizedException('INVALID_REFRESH_TOKEN');
+    return this.auth.logoutByBearer(authorization);
   }
 
   @UseGuards(JwtAuthGuard)

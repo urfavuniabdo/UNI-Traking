@@ -123,15 +123,30 @@ describe('AuthService', () => {
   it('a revoked session refuses to refresh', async () => {
     const { svc } = build();
     const { refreshToken } = await svc.login('EMP001', 'pw123456');
-    await svc.logout(refreshToken, 'u1');
+    await svc.logout(refreshToken);
     await expect(svc.refresh(refreshToken)).rejects.toThrow('REFRESH_EXPIRED');
   });
 
   it('logout revokes the presented session', async () => {
     const { svc, sessions } = build();
     const { refreshToken } = await svc.login('EMP001', 'pw123456');
-    await svc.logout(refreshToken, 'u1');
+    await svc.logout(refreshToken);
     expect([...sessions.values()].every((s) => s.revokedAt)).toBe(true);
+  });
+
+  it('logout by bearer revokes every live session of that user', async () => {
+    const { svc, sessions } = build();
+    const a = await svc.login('EMP001', 'pw123456');
+    const b = await svc.login('EMP001', 'pw123456');
+    await svc.logoutByBearer(`Bearer ${a.accessToken}`);
+    expect([...sessions.values()].every((s) => s.revokedAt)).toBe(true);
+    await expect(svc.refresh(b.refreshToken)).rejects.toThrow('REFRESH_EXPIRED');
+  });
+
+  it('logout by bearer refuses a token it cannot verify', async () => {
+    const { svc } = build();
+    await expect(svc.logoutByBearer(undefined)).rejects.toThrow('INVALID_REFRESH_TOKEN');
+    await expect(svc.logoutByBearer('Bearer not.a.jwt')).rejects.toThrow('UNAUTHENTICATED');
   });
 
   it('me() returns profile + effective permissions', async () => {

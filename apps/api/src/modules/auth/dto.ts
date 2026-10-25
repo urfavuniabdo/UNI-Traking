@@ -18,8 +18,8 @@ export class LoginDto {
 
 /**
  * POST /auth/refresh — token required (the service rejects a missing one).
- * POST /auth/logout  — optional: the dashboard logs out with an empty `{}` body,
- * and AuthService.logout() already tolerates `undefined` (revokes by userId instead).
+ * POST /auth/logout  — optional: the app sends the refresh token (it has already dropped its
+ * bearer), the dashboard sends an empty `{}` and is identified by its bearer instead.
  */
 export class RefreshDto {
   @IsOptional()

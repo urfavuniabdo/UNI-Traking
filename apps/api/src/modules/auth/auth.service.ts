@@ -129,23 +129,37 @@ export class AuthService {
     };
   }
 
-  async logout(refreshToken?: string, userId?: string) {
-    if (refreshToken) {
-      const decoded = await this.jwt
-        .verifyAsync<{ sid?: string }>(refreshToken, { secret: JWT_REFRESH_SECRET() })
-        .catch(() => null);
-      if (decoded?.sid) {
-        await this.prisma.session
-          .update({ where: { id: decoded.sid }, data: { revokedAt: new Date() } })
-          .catch(() => undefined);
-      }
-      const hash = hashToken(refreshToken);
-      await this.prisma.session.updateMany({ where: { refreshTokenHash: hash, revokedAt: null }, data: { revokedAt: new Date() } });
-      return { ok: true };
+  async logout(refreshToken: string) {
+    const decoded = await this.jwt
+      .verifyAsync<{ sid?: string }>(refreshToken, { secret: JWT_REFRESH_SECRET() })
+      .catch(() => null);
+    if (decoded?.sid) {
+      await this.prisma.session
+        .update({ where: { id: decoded.sid }, data: { revokedAt: new Date() } })
+        .catch(() => undefined);
     }
-    if (userId) {
-      await this.prisma.session.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
-    }
+    const hash = hashToken(refreshToken);
+    await this.prisma.session.updateMany({ where: { refreshTokenHash: hash, revokedAt: null }, data: { revokedAt: new Date() } });
+    return { ok: true };
+  }
+
+  /**
+   * The dashboard's sign-out: no refresh token in the body, so the bearer identifies the user
+   * and every one of their live sessions is revoked. Verified here rather than by a guard
+   * because this route is public — the mobile app has already dropped its tokens by the time it
+   * calls, and proves ownership with the refresh token instead.
+   */
+  async logoutByBearer(authorization?: string) {
+    const raw = String(authorization ?? '').replace(/^Bearer\s+/i, '').trim();
+    if (!raw) throw new UnauthorizedException('INVALID_REFRESH_TOKEN');
+    const decoded = await this.jwt
+      .verifyAsync<{ sub?: string }>(raw, { secret: JWT_SECRET() })
+      .catch(() => null);
+    if (!decoded?.sub) throw new UnauthorizedException('UNAUTHENTICATED');
+    await this.prisma.session.updateMany({
+      where: { userId: decoded.sub, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
     return { ok: true };
   }
 

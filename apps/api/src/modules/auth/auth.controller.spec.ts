@@ -18,14 +18,30 @@ class AllowGuard implements CanActivate {
   }
 }
 
-function post(path: string, port: number, body: unknown): Promise<number> {
+function post(
+  path: string,
+  port: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<{ status: number; text: string }> {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const req = nodeRequest(
-      { host: '127.0.0.1', port, path, method: 'POST', headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) } },
+      {
+        host: '127.0.0.1',
+        port,
+        path,
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload),
+          ...headers,
+        },
+      },
       (res) => {
-        res.resume();
-        res.on('end', () => resolve(res.statusCode ?? 0));
+        let text = '';
+        res.on('data', (chunk) => (text += chunk));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, text }));
       },
     );
     req.on('error', reject);
@@ -39,13 +55,14 @@ describe('POST /auth/logout', () => {
   let server: Server;
   let port: number;
   const logout = jest.fn().mockResolvedValue({ ok: true });
+  const logoutByBearer = jest.fn().mockResolvedValue({ ok: true });
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [AuthController],
       providers: [
         LoginRateLimitGuard,
-        { provide: AuthService, useValue: { logout } },
+        { provide: AuthService, useValue: { logout, logoutByBearer } },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -68,15 +85,30 @@ describe('POST /auth/logout', () => {
     await app?.close();
   });
 
-  beforeEach(() => logout.mockClear());
+  beforeEach(() => {
+    logout.mockClear();
+    logoutByBearer.mockClear();
+  });
 
-  it('accepts an empty `{}` body (dashboard logout) — returns 2xx, not 400', async () => {
-    const status = await post('/auth/logout', port, {});
-    expect(status).toBeLessThan(300);
-    expect(status).toBe(200);
+  it('revokes the session from the refresh token alone — the app has no bearer left', async () => {
+    const res = await post('/auth/logout', port, { refreshToken: 'rt-1' });
+    expect(res.status).toBe(200);
     expect(logout).toHaveBeenCalledTimes(1);
-    // service was called with (undefined token, caller id)
-    expect(logout).toHaveBeenCalledWith(undefined, 'u1');
+    expect(logout).toHaveBeenCalledWith('rt-1');
+    expect(logoutByBearer).not.toHaveBeenCalled();
+  });
+
+  it('still accepts the dashboard shape: empty `{}` body + bearer', async () => {
+    const res = await post('/auth/logout', port, {}, { authorization: 'Bearer at-1' });
+    expect(res.status).toBe(200);
+    expect(logout).not.toHaveBeenCalled();
+    expect(logoutByBearer).toHaveBeenCalledWith('Bearer at-1');
+  });
+
+  it('routes an empty body with no bearer to the bearer path, which decides', async () => {
+    const res = await post('/auth/logout', port, {});
+    expect(res.status).toBe(200);
+    expect(logout).not.toHaveBeenCalled();
+    expect(logoutByBearer).toHaveBeenCalledWith(undefined);
   });
 });
-
