@@ -24,6 +24,15 @@ let positions: PositionsService;
 
 const iso = (ms: number): string => new Date(ms).toISOString();
 
+/** ~100 m every 15 s: 24 km/h of ground, which is a real drive. */
+const drive = (t0: number, i: number): PositionItemDto => ({
+  clientTs: iso(t0 + i * 15000),
+  lat: 30.0 + i * 0.0009,
+  lng: 31.2,
+  speed: 40,
+  accuracy: 8,
+});
+
 async function mkDriver(): Promise<{ employeeId: string; deviceId: string }> {
   const org = await prisma.orgUnit.create({ data: { code: 'ground-org', name: 'Org' } });
   const zone = await prisma.zone.create({
@@ -210,14 +219,6 @@ describe('the coordinates decide the motion state (§5)', () => {
 });
 
 describe('a journey ends when the ground stops (§5)', () => {
-  const drive = (t0: number, i: number): PositionItemDto => ({
-    clientTs: iso(t0 + i * 15000),
-    lat: 30.0 + i * 0.0009,
-    lng: 31.2,
-    speed: 40,
-    accuracy: 8,
-  });
-
   it('check-out (tracking off) closes the run with the length it actually covered', async () => {
     const { employeeId, deviceId } = await mkDriver();
     const t0 = Date.now();
@@ -324,7 +325,8 @@ describe('a journey ends when the ground stops (§5)', () => {
     expect(done?.endedAt?.getTime()).toBe(t0 + 700_000);
   });
 
-  it('a re-check-in on the same day cannot leave a second OPEN run behind', async () => {    const { employeeId, deviceId } = await mkDriver();
+  it('a re-check-in on the same day cannot leave a second OPEN run behind', async () => {
+    const { employeeId, deviceId } = await mkDriver();
     const t0 = Date.now();
     await positions.ingestBatch({ deviceId, batchSeq: 1, positions: [drive(t0, 0), drive(t0, 1), drive(t0, 2)] });
     await positions.closeOpenTrips(employeeId, t0 + 60_000);
@@ -342,5 +344,64 @@ describe('a journey ends when the ground stops (§5)', () => {
     expect(rows[1].state).toBe('OPEN');
     expect(await positions.closeOpenTrips(employeeId, t1 + 60_000)).toBe(1);
     expect(await prisma.trip.count({ where: { employeeId, state: 'OPEN' } })).toBe(0);
+  });
+});
+
+type Trail = {
+  employeeId: string;
+  name: string;
+  distanceKm: number;
+  points: { ts: string; lat: number; lng: number; motionState: string }[];
+  stops: { id: string; lat: number; lng: number; durationMin: number }[];
+  gaps: unknown[];
+};
+
+describe('GET /positions/trails — every present driver gets his own line (§5)', () => {
+  const trailOf = async (employeeId: string): Promise<Trail | undefined> => {
+    positions['trailsCache'] = null; // each assertion reads the board, not the previous read's cache
+    const res = (await positions.trails(90)) as { trails: Trail[] };
+    return res.trails.find((t) => t.employeeId === employeeId);
+  };
+
+  it('the line is the ground he covered: the drive is in it, the teleport is not', async () => {
+    const { employeeId, deviceId } = await mkDriver();
+    const t0 = Date.now();
+    await positions.ingestBatch({
+      deviceId,
+      batchSeq: 1,
+      positions: [drive(t0, 0), drive(t0, 1), drive(t0, 2), drive(t0, 3), drive(t0, 4), drive(t0, 5)],
+    });
+    // a cached fix from the other side of the city published in the middle of the run
+    await prisma.position.create({
+      data: {
+        employeeId,
+        clientTs: new Date(t0 + 90_000),
+        lat: 30.3,
+        lng: 31.2,
+        speedKmh: 30,
+        accuracyM: 8,
+        motionState: 'RIDING',
+        ingestHash: 'trail-spike',
+      },
+    });
+
+    const trail = await trailOf(employeeId);
+    expect(trail?.name).toBe('سائق واقف');
+    expect(trail?.points.some((p) => p.lat === 30.3)).toBe(false);
+    expect(trail?.points).toHaveLength(6);
+    expect(trail?.distanceKm).toBeGreaterThan(0.3);
+    expect(trail?.distanceKm).toBeLessThan(0.7);
+    // the states on the line come from the coordinates, so the map can colour walk and ride apart
+    expect(trail?.points.filter((p) => p.motionState === 'RIDING').length).toBeGreaterThan(0);
+  });
+
+  it('a driver whose device went quiet is off the trails — the board shows him as absent, not on the road', async () => {
+    const { employeeId, deviceId } = await mkDriver();
+    const t0 = Date.now();
+    await positions.ingestBatch({ deviceId, batchSeq: 1, positions: [drive(t0, 0), drive(t0, 1), drive(t0, 2)] });
+    expect(await trailOf(employeeId)).toBeDefined();
+
+    await prisma.device.update({ where: { deviceId: 'ground-dev' }, data: { online: false, lastSeenAt: new Date(t0 - 4_000_000) } });
+    expect(await trailOf(employeeId)).toBeUndefined();
   });
 });

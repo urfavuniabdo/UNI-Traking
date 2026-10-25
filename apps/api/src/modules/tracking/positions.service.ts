@@ -63,6 +63,9 @@ const NOISE_FLOOR_M = 12;
 /** A run whose device has said nothing for this long is over — check-out, a killed app or a deploy. */
 const TRIP_IDLE_MS = 600_000;
 
+/** How often the whole board's trails are re-read: the line grows live between reads, so this is cold-start only. */
+const TRAILS_TTL_MS = 10_000;
+
 /** Employee identity/geo metadata used to enrich a live item (cached; `at` = epoch ms). */
 interface EmployeeMeta {
   name: string;
@@ -117,6 +120,8 @@ export class PositionsService {
   private live = new Map<string, LivePositionBase>();
   /** cached employee identity/geo metadata (rarely changes; refreshed lazily). */
   private metaCache = new Map<string, { at: number; value: EmployeeMeta }>();
+  /** the whole board's trails, re-read at most every TRAILS_TTL_MS. */
+  private trailsCache: { at: number; windowMin: number; payload: unknown } | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -1079,6 +1084,87 @@ export class PositionsService {
       positions: points.filter((p) => p.credible).map((p) => ({ ts: p.clientTs, lat: p.lat, lng: p.lng, speedKmh: p.speedKmh, motionState: p.motionState, buffered: p.buffered, stale: p.stale })),
       pointCount: rows.length,
     };
+  }
+
+  /**
+   * GET /positions/trails?minutes — the recent line of every driver the board shows present, in one
+   * read. Each trail is replayed from its own coordinates exactly like a day's route, so the line is
+   * ground he covered: no cached-fix teleport, no segment across the city, and his stops marked.
+   * The board draws one coloured line per driver and grows it from the live socket between reads.
+   */
+  async trails(minutes = 90): Promise<unknown> {
+    const windowMin = Math.min(720, Math.max(5, Math.round(minutes) || 90));
+    const now = Date.now();
+    if (this.trailsCache && this.trailsCache.windowMin === windowMin && now - this.trailsCache.at < TRAILS_TTL_MS) {
+      return this.trailsCache.payload;
+    }
+    const bases = [...this.live.values()];
+    const enriched = await this.enrichMany(bases.length ? bases : await this.liveFromDb());
+    const drivers = enriched.filter((p) => p.driver && p.online);
+    const ids = drivers.map((d) => d.employeeId);
+    const from = new Date(now - windowMin * 60_000);
+    const trails: unknown[] = [];
+    if (ids.length) {
+      const [rows, stopRows] = await Promise.all([
+        this.prisma.position.findMany({
+          where: { employeeId: { in: ids }, clientTs: { gte: from } },
+          orderBy: { clientTs: 'asc' },
+          select: { employeeId: true, lat: true, lng: true, clientTs: true, speedKmh: true, accuracyM: true, bearing: true, buffered: true, stale: true },
+        }),
+        this.prisma.stopEvent.findMany({
+          where: { employeeId: { in: ids }, startedAt: { gte: from } },
+          orderBy: { startedAt: 'asc' },
+        }),
+      ]);
+      const byEmp = new Map<string, ReplayRow[]>();
+      for (const r of rows) {
+        const list = byEmp.get(r.employeeId) ?? [];
+        list.push({ lat: r.lat, lng: r.lng, clientTs: r.clientTs, speedKmh: r.speedKmh, accuracyM: r.accuracyM, bearing: r.bearing, buffered: r.buffered, stale: r.stale });
+        byEmp.set(r.employeeId, list);
+      }
+      for (const d of drivers) {
+        const trace = this.replayDay(byEmp.get(d.employeeId) ?? []).filter((p) => p.credible);
+        let distanceM = 0;
+        const gaps: { from: [number, number]; to: [number, number]; minutes: number }[] = [];
+        for (let i = 1; i < trace.length; i++) {
+          const a = { lat: trace[i - 1].lat, lng: trace[i - 1].lng, at: trace[i - 1].clientTs.getTime() };
+          const b = { lat: trace[i].lat, lng: trace[i].lng, at: trace[i].clientTs.getTime() };
+          distanceM += this.geo.credibleDistanceM(a, b);
+          const dtMin = (b.at - a.at) / 60_000;
+          if (dtMin > RULE_DEFAULTS.gapMinMin) gaps.push({ from: [a.lat, a.lng], to: [b.lat, b.lng], minutes: Math.round(dtMin) });
+        }
+        trails.push({
+          userId: d.userId,
+          employeeId: d.employeeId,
+          name: d.name,
+          motionState: d.motionState,
+          lastTs: d.ts,
+          distanceKm: round(distanceM / 1000, 2) ?? 0,
+          points: trace.map((p) => ({
+            ts: p.clientTs.toISOString(),
+            lat: p.lat,
+            lng: p.lng,
+            speedKmh: p.speedKmh,
+            motionState: p.motionState,
+          })),
+          stops: stopRows
+            .filter((s) => s.employeeId === d.employeeId)
+            .map((s) => ({
+              id: s.id,
+              kind: s.kind,
+              lat: s.lat,
+              lng: s.lng,
+              startTs: s.startedAt.toISOString(),
+              endTs: s.endedAt?.toISOString() ?? null,
+              durationMin: Math.round((s.durationS ?? 0) / 60),
+            })),
+          gaps,
+        });
+      }
+    }
+    const payload = { windowMin, serverTs: new Date(now).toISOString(), trails };
+    this.trailsCache = { at: now, windowMin, payload };
+    return payload;
   }
 
   /** GET /trips?userId&from&to */

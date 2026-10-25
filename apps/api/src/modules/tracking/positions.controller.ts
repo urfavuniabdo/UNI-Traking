@@ -31,6 +31,13 @@ export class PositionsController {
     return this.positions.liveSnapshot(since);
   }
 
+  /** The recent line of every present driver, in one read — tracking, so ADMIN+SUPERVISOR only. */
+  @Get('positions/trails')
+  @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
+  trails(@Query('minutes') minutes?: string): Promise<unknown> {
+    return this.positions.trails(Number(minutes) || 90);
+  }
+
   @Get('trips')
   @Roles(ROLES.ADMIN, ROLES.SUPERVISOR)
   trips(@Query('userId') userId: string, @Query('from') from?: string, @Query('to') to?: string): Promise<unknown> {
