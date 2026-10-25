@@ -29,6 +29,8 @@ import { zonedLocalToUtc } from './tz';
 const TZ = () => process.env.DASHBOARD_TIMEZONE || 'Africa/Cairo';
 const SHIFT_GRACE_MIN = Number(process.env.SHIFT_GRACE_MIN ?? 30);
 
+type GlobalRules = { attendanceStrictReject?: boolean; shiftGraceMin?: number };
+
 type EmpWithPlaces = {
   id: string;
   externalId: string;
@@ -86,7 +88,7 @@ type AttRow = {
 @Injectable()
 export class AttendanceService {
   /** Cached `rules.global` Setting row (same ~30s pattern as RulesService.globalOverrides). */
-  private settingsCache: { at: number; value: { attendanceStrictReject?: boolean } } | null = null;
+  private settingsCache: { at: number; value: GlobalRules } | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -132,24 +134,28 @@ export class AttendanceService {
    */
   private async isStrict(emp: EmpWithPlaces): Promise<boolean> {
     if (emp.kind !== 'DRIVER' && emp.site?.strictReject) return true;
-    return this.globalStrictReject();
+    return (await this.globalRules()).attendanceStrictReject === true;
   }
 
   /** Global override stored in Setting(key='rules.global') as a JSON string — cached ~30s. */
-  private async globalStrictReject(): Promise<boolean> {
+  private async globalRules(): Promise<GlobalRules> {
     const now = Date.now();
-    if (this.settingsCache && now - this.settingsCache.at < 30_000) {
-      return !!this.settingsCache.value.attendanceStrictReject;
-    }
-    let value: { attendanceStrictReject?: boolean } = {};
+    if (this.settingsCache && now - this.settingsCache.at < 30_000) return this.settingsCache.value;
+    let value: GlobalRules = {};
     try {
       const row = await this.prisma.setting.findUnique({ where: { key: 'rules.global' } });
-      value = parseJson<{ attendanceStrictReject?: boolean }>(row?.value, {});
+      value = parseJson<GlobalRules>(row?.value, {});
     } catch {
       value = {};
     }
     this.settingsCache = { at: now, value };
-    return !!value.attendanceStrictReject;
+    return value;
+  }
+
+  /** What the Settings page's «سماح نهاية اليوم» box writes. */
+  private async globalShiftGraceMin(): Promise<number> {
+    const n = Number((await this.globalRules()).shiftGraceMin);
+    return Number.isFinite(n) && n >= 0 ? n : SHIFT_GRACE_MIN;
   }
 
   /** Phone of a SUPERVISOR user in the employee's org unit, falling back to any ADMIN. */
@@ -349,6 +355,7 @@ export class AttendanceService {
       include: { employee: { include: { shifts: { include: { schedule: true } }, user: { select: { id: true } } } } },
     });
     let closed = 0;
+    const globalGrace = await this.globalShiftGraceMin();
     for (const rec of open) {
       const emp = rec.employee as unknown as (EmpWithPlaces & { shifts: Array<{ weekday: number | null; schedule: { endMinDay: number; crossMidnight: boolean; graceMin: number } | null }> }) & { user?: { id: string } | null };
       const dow = (() => {
@@ -363,11 +370,11 @@ export class AttendanceService {
       if (sch) {
         const endMinutes = sch.endMinDay + (sch.crossMidnight ? 1440 : 0);
         endMs = zonedLocalToUtc(rec.workDate, endMinutes, TZ()).getTime();
-        graceMin = sch.graceMin ?? SHIFT_GRACE_MIN;
+        graceMin = sch.graceMin ?? globalGrace;
       } else {
         // No schedule: fall back to end of the calendar work-day.
         endMs = zonedLocalToUtc(rec.workDate, 1440, TZ()).getTime();
-        graceMin = SHIFT_GRACE_MIN;
+        graceMin = globalGrace;
       }
 
       if (now.getTime() > endMs + graceMin * 60_000) {

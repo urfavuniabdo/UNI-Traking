@@ -63,6 +63,16 @@ const asNum = (v: unknown): number | undefined => {
 };
 
 /**
+ * A braking threshold is a deceleration, so it has to be negative. The Settings page used to clamp
+ * every numeric key at 0, and 0 would flag every brake on the road as harsh — so a non-negative
+ * stored value falls back to the default instead of being honoured.
+ */
+const brakingThreshold = (v: unknown): number => {
+  const n = asNum(v);
+  return n !== undefined && n < 0 ? n : RULE_DEFAULTS.harshBrakingMs2;
+};
+
+/**
  * Resolves the "single source of truth" numeric rule thresholds used by the tracking
  * rules engine and the notify alert dispatcher. Kept dependency-light (Prisma only)
  * so it can be shared by NotifyModule and TrackingModule without a cycle.
@@ -129,11 +139,12 @@ export class RulesService {
         RULE_DEFAULTS.stopAlertMin,
       geofenceGraceS:
         asNum(override?.geofenceGraceS) ?? asNum(g.geofenceGraceS) ?? RULE_DEFAULTS.geofenceGraceS,
-      speedSamples: asNum(override?.speedSamples) ?? RULE_DEFAULTS.speedSamples,
-      speedingCriticalS: RULE_DEFAULTS.speedingCriticalS,
+      speedSamples:
+        asNum(override?.speedSamples) ?? asNum(g.speedSamples) ?? RULE_DEFAULTS.speedSamples,
+      speedingCriticalS: asNum(g.speedingCriticalS) ?? RULE_DEFAULTS.speedingCriticalS,
       cooldownS: asNum(g.cooldownS) ?? RULE_DEFAULTS.cooldownS,
-      harshBrakingMs2: RULE_DEFAULTS.harshBrakingMs2,
-      harshAccelMs2: RULE_DEFAULTS.harshAccelMs2,
+      harshBrakingMs2: brakingThreshold(g.harshBrakingMs2),
+      harshAccelMs2: asNum(g.harshAccelMs2) ?? RULE_DEFAULTS.harshAccelMs2,
       gapMinMin: asNum(g.gapMinMin) ?? RULE_DEFAULTS.gapMinMin,
       heartbeatIntervalS: asNum(g.heartbeatIntervalS) ?? RULE_DEFAULTS.heartbeatIntervalS,
       heartbeatMissedCycles: RULE_DEFAULTS.heartbeatMissedCycles,

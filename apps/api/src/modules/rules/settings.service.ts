@@ -26,6 +26,10 @@ export const NUMERIC_RULE_KEYS = [
 
 export type NumericRuleKey = (typeof NUMERIC_RULE_KEYS)[number];
 
+/** Harsh braking is a deceleration, so its threshold is negative — clamping it to 0 would make
+ *  every brake read as harsh once the page is saved. */
+const NEGATIVE_ALLOWED: readonly NumericRuleKey[] = ['harshBrakingMs2'];
+
 /** What an HR admin may change in `rules.global` — attendance policy only, never tracking thresholds. */
 export const HR_RULE_KEYS = ['shiftGraceMin', 'attendanceStrictReject'] as const;
 
@@ -147,7 +151,7 @@ export class SettingsService {
       if (!(key in source)) continue;
       const n = asFiniteNumber(source[key]);
       if (n === undefined) throw new BadRequestException('BAD_RULE_VALUE');
-      merged[key] = Math.max(0, n);
+      merged[key] = NEGATIVE_ALLOWED.includes(key) ? n : Math.max(0, n);
     }
     if ('attendanceStrictReject' in source) {
       const v = source.attendanceStrictReject;

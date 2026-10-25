@@ -6,6 +6,7 @@ import { PrismaModule } from '../../common/prisma.module';
 import { PrismaService } from '../../common/prisma.service';
 import { GeoModule } from '../../common/geo/geo.module';
 import { RulesService } from '../rules/rules.service';
+import { SettingsService } from '../rules/settings.service';
 import { AlertDispatchService } from '../notify/alert-dispatch.service';
 import { PushService } from '../notify/push.service';
 import { MotionClassifierService } from './motion-classifier.service';
@@ -22,6 +23,8 @@ jest.setTimeout(120_000);
 
 let prisma: PrismaService;
 let positions: PositionsService;
+let settings: SettingsService;
+let rules: RulesService;
 const mockPublisher: jest.Mocked<RealtimePublisher> = {
   position: jest.fn(),
   alert: jest.fn(),
@@ -32,6 +35,7 @@ const mockPublisher: jest.Mocked<RealtimePublisher> = {
 const iso = (ms: number): string => new Date(ms).toISOString();
 
 async function reset() {
+  await prisma.setting.deleteMany();
   await prisma.notificationLog.deleteMany();
   await prisma.callLog.deleteMany();
   await prisma.alert.deleteMany();
@@ -88,6 +92,7 @@ beforeAll(async () => {
     imports: [PrismaModule, GeoModule, ScheduleModule.forRoot()],
     providers: [
       RulesService,
+      SettingsService,
       MotionClassifierService,
       PushService,
       AlertDispatchService,
@@ -99,10 +104,13 @@ beforeAll(async () => {
   await moduleRef.init();
   prisma = moduleRef.get(PrismaService);
   positions = moduleRef.get(PositionsService);
+  settings = moduleRef.get(SettingsService);
+  rules = moduleRef.get(RulesService);
 });
 
 beforeEach(async () => {
   await reset();
+  rules.invalidate();
   mockPublisher.position.mockClear();
   mockPublisher.alert.mockClear();
 });
@@ -216,6 +224,34 @@ describe('STOP_EXCEEDED (§5/§6)', () => {
     expect(await countByType(employeeId, 'STOP_EXCEEDED')).toBe(1);
     const alert = await prisma.alert.findFirst({ where: { employeeId, type: 'STOP_EXCEEDED' } });
     expect(JSON.parse(alert?.meta ?? '{}').threshold).toBe(5);
+  });
+});
+
+describe('Settings page → engine (global rules.global, inherited by a driver with no zone value or override)', () => {
+  it('the «تنبيه التوقف» box alone moves STOP_EXCEEDED to 5 minutes', async () => {
+    const { employeeId, deviceId } = await mkDriver({ lat: 30.0, lng: 30.0, radiusM: 100000 });
+    // zone has no stopAlertMin and there is no RuleOverride — the Settings box is the only source.
+    await settings.patchRules({ stopAlertMin: 5 }, { id: 'admin', role: 'ADMIN' });
+    const t0 = Date.now();
+    const parked = Array.from({ length: 8 }, (_, i) => ({
+      clientTs: iso(t0 + i * 60000),
+      lat: 30.0,
+      lng: 30.0,
+      speed: 0,
+      accuracy: 6,
+    }));
+    await positions.ingestBatch({ deviceId, batchSeq: 1, positions: parked });
+    const alert = await prisma.alert.findFirst({ where: { employeeId, type: 'STOP_EXCEEDED' } });
+    expect(JSON.parse(alert?.meta ?? '{}').threshold).toBe(5);
+  });
+
+  it('the «حد السرعة» box alone makes 40 km/h speeding when the global limit is set to 30', async () => {
+    const { employeeId, deviceId } = await mkDriver({ lat: 30.0, lng: 30.0, radiusM: 100000 });
+    await settings.patchRules({ maxSpeedKmh: 30 }, { id: 'admin', role: 'ADMIN' });
+    const t0 = Date.now();
+    const mk = (offsetS: number, lat: number) => ({ clientTs: iso(t0 + offsetS * 1000), lat, lng: 30.0, speed: 40, accuracy: 5 });
+    await positions.ingestBatch({ deviceId, batchSeq: 1, positions: [mk(0, 30.0), mk(5, 30.0003), mk(10, 30.0006)] });
+    expect(await countByType(employeeId, 'SPEEDING')).toBe(1);
   });
 });
 
