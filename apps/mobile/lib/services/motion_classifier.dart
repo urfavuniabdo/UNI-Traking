@@ -17,8 +17,10 @@ import '../core/traccer_constants.dart';
 ///    raise it (a walking phone under-reports Doppler by design)
 ///  * once the cap itself falls inside the stationary band, "he has not left his circle in a minute"
 ///    is not an estimate any more: STOPPED commits without waiting for the hysteresis samples
-///  * otherwise a transition commits after `Motion.hysteresisSamples` (3) agreeing samples, on an
-///    EMA (`alpha` 0.35) of the judged speed; bands: STOPPED ≤1.5 · WALKING ≤7 · else RIDING
+///  * otherwise a transition commits after `Motion.hysteresisSamples` (3) samples that *disagree
+///    with the committed state*, on an EMA (`alpha` 0.35) of the judged speed — requiring three
+///    samples of the SAME new band never let a walker leave STOPPED, because his estimate
+///    flip-flops across the 7 km/h line. Bands: STOPPED ≤1.5 · WALKING ≤7 · else RIDING
 class MotionClassifier {
   MotionClassifier({
     this.alpha = Motion.speedEmaAlpha,
@@ -42,8 +44,7 @@ class MotionClassifier {
 
   double? _ema;
   String _committed = MotionStates.unknown;
-  String _candidate = MotionStates.unknown;
-  int _candidateCount = 0;
+  int _disagreeing = 0;
   DateTime? _lastTs;
   _Fix? _lastPoint;
   _Fix? _anchor;
@@ -61,8 +62,7 @@ class MotionClassifier {
   void reset() {
     _ema = null;
     _committed = MotionStates.unknown;
-    _candidate = MotionStates.unknown;
-    _candidateCount = 0;
+    _disagreeing = 0;
     _lastTs = null;
     _lastPoint = null;
     _anchor = null;
@@ -108,31 +108,31 @@ class MotionClassifier {
       _conclusiveStop = false;
       _ema = judged ?? 0;
       _committed = MotionStates.stopped;
-      _candidate = MotionStates.stopped;
-      _candidateCount = 0;
+      _disagreeing = 0;
       return _committed;
     }
 
     if (judged == null) return _committed; // nothing to go on — keep the last committed state
 
-    // 5) EMA + 6) hysteresis commit
+    // 5) EMA + 6) hysteresis commit. The count is "samples that disagree with the committed
+    // state", not "samples that agree with each other": a walking phone's estimate flip-flops
+    // across the 7 km/h line (3.4 → 18 → 8.3 → 4.7 km/h on the same stroll), and requiring the
+    // same band three times in a row meant it never left STOPPED.
     _ema = _ema == null ? judged : (alpha * judged + (1 - alpha) * _ema!);
     final String band = bandFor(_ema!);
+    if (_committed == MotionStates.unknown) {
+      _committed = band;
+      _disagreeing = 0;
+      return _committed;
+    }
     if (band == _committed) {
-      _candidate = band;
-      _candidateCount = 0;
-    } else if (band == _candidate) {
-      _candidateCount++;
-      if (_candidateCount >= hysteresisSamples) {
-        _committed = band;
-        _candidateCount = 0;
-      }
+      _disagreeing = 0;
     } else {
-      _candidate = band;
-      _candidateCount = 1;
-      // From UNKNOWN there is no meaningful "committed" band yet — accept the first sample
-      // so we leave UNKNOWN promptly.
-      if (_committed == MotionStates.unknown) _committed = band;
+      _disagreeing++;
+      if (_disagreeing >= hysteresisSamples) {
+        _committed = band;
+        _disagreeing = 0;
+      }
     }
     return _committed;
   }

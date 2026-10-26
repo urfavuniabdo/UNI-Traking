@@ -165,6 +165,42 @@ void main() {
       expect(c.lastRawSpeedKmh, lessThan(1.5));
     });
 
+    test('his recorded stroll (real coordinates) leaves واقف', () {
+      // D0203, 2026-10-26 08:22→08:32 UTC: two minutes standing, then he walked — the exact
+      // coordinates the phone uploaded. The chip only ever reported a couple of km/h, which is
+      // what a hand-held phone does on foot, so the metres have to carry it.
+      final MotionClassifier c = MotionClassifier();
+      final List<List<Object>> trace = <List<Object>>[
+        <Object>[0, 30.0969929, 31.3816802, 11.7],
+        <Object>[25, 30.0970702, 31.3816164, 8.3],
+        <Object>[59, 30.0970292, 31.3817134, 8.1],
+        <Object>[78, 30.0969442, 31.3816749, 8.6],
+        <Object>[98, 30.0969868, 31.3815794, 6.1],
+        <Object>[490, 30.0970333, 31.3816817, 3.0],
+        <Object>[504, 30.0969900, 31.3815550, 5.5],
+        <Object>[507, 30.0969233, 31.3814200, 5.3],
+        <Object>[516, 30.0970432, 31.3815958, 13.3],
+        <Object>[547, 30.0969083, 31.3812100, 9.3],
+        <Object>[553, 30.0969033, 31.3813683, 7.8],
+        <Object>[565, 30.0970452, 31.3815992, 11.7],
+      ];
+      String s = MotionStates.unknown;
+      final List<String> seen = <String>[];
+      for (final List<Object> p in trace) {
+        s = c.addSample(
+          speedKmh: (p[0] as int) > 480 ? 1.2 : 0.3, // the Doppler of a phone carried on foot
+          accuracyM: p[3] as double,
+          ts: DateTime.utc(2026, 10, 26, 8, 22, 38).add(Duration(seconds: p[0] as int)),
+          lat: p[1] as double,
+          lng: p[2] as double,
+        );
+        seen.add(s);
+      }
+      expect(seen[5], MotionStates.stopped, reason: 'the two standing minutes must not read as motion');
+      expect(s, isNot(MotionStates.stopped),
+          reason: 'he covered 0.3 km on foot inside the window — the phone has to say so');
+    });
+
     test('bandFor uses the exact contract thresholds', () {
       final MotionClassifier c = MotionClassifier();
       expect(c.bandFor(1.5), MotionStates.stopped); // <= 1.5
