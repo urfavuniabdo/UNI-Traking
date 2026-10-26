@@ -13,7 +13,7 @@ import {
   type TripCloser,
 } from '../../common/contracts';
 import { RULE_DEFAULTS, SEVERITY, AR_ALERT_TEXT, type AlertType } from '../../shared/constants';
-import { json } from '../../common/utils';
+import { json, workDateOf } from '../../common/utils';
 import type { RegisterDeviceDto, HeartbeatDto, ToggleEventDto } from './dto';
 
 const HEARTBEAT_INTERVAL_S = Number(process.env.HEARTBEAT_INTERVAL_S ?? 300);
@@ -67,12 +67,10 @@ export class DevicesService {
     const device = await this.prisma.device.findUnique({ where: { deviceId: dto.deviceId } });
     if (!device) throw new NotFoundException('DEVICE_NOT_REGISTERED');
 
-    // Detect transitions / offline gaps before overwriting the row.
+    // Detect transitions before overwriting the row.
     const wasOnline = device.online;
     const wasGps = device.gpsEnabled;
     const wasTracking = device.tracking;
-    const prevSeen = device.lastSeenAt ? new Date(device.lastSeenAt).getTime() : null;
-    const gapS = prevSeen ? (now.getTime() - prevSeen) / 1000 : null;
 
     await this.prisma.device.update({
       where: { id: device.id },
@@ -85,9 +83,12 @@ export class DevicesService {
       },
     });
 
-    if (wasGps && !dto.gpsEnabled) this.maybeAlert(device, 'GPS_OFF');
-    if (wasOnline && !dto.online) this.maybeAlert(device, 'DATA_OFF');
-    if (gapS !== null && gapS > PRESENCE_WINDOW_S) this.maybeAlert(device, 'APP_OFFLINE');
+    // No "offline" is raised here: a beat arriving is the proof the app is NOT offline, and its gap
+    // is measured against the last beat of a previous day or session — so the driver's first beat
+    // after "بدء اليوم" used to announce him as disconnected. Silence while the day is open belongs
+    // to the heartbeat sweep (TrackingService.heartbeatSweep), which is day-gated.
+    if (wasGps && !dto.gpsEnabled) await this.maybeAlert(device, 'GPS_OFF');
+    if (wasOnline && !dto.online) await this.maybeAlert(device, 'DATA_OFF');
     // Tracking off is the end of the run — whoever forgot to say so.
     if (wasTracking && !dto.tracking && device.employeeId) {
       await this.trips?.closeOpenTrips(device.employeeId, now.getTime()).catch(() => undefined);
@@ -112,9 +113,9 @@ export class DevicesService {
       },
     });
 
-    if (dto.kind === 'GPS_OFF') this.maybeAlert(device, 'GPS_OFF');
-    if (dto.kind === 'DATA_OFF') this.maybeAlert(device, 'DATA_OFF');
-    if (dto.kind === 'APP_KILLED') this.maybeAlert(device, 'APP_OFFLINE');
+    if (dto.kind === 'GPS_OFF') await this.maybeAlert(device, 'GPS_OFF');
+    if (dto.kind === 'DATA_OFF') await this.maybeAlert(device, 'DATA_OFF');
+    if (dto.kind === 'APP_KILLED') await this.maybeAlert(device, 'APP_OFFLINE');
 
     return { ok: true };
   }
@@ -151,11 +152,25 @@ export class DevicesService {
     });
   }
 
-  private maybeAlert(
+  /**
+   * An alert means "a driver who is on shift is in trouble". A device whose driver never started a
+   * day — or already finished it — is off the clock, not in trouble: it stays quiet until the next
+   * beat or the day-gated heartbeat sweep says otherwise.
+   */
+  private async onShift(employeeId: string): Promise<boolean> {
+    const open = await this.prisma.attendanceRecord.findFirst({
+      where: { employeeId, workDate: workDateOf(new Date()), checkOutAt: null },
+      select: { id: true },
+    });
+    return !!open;
+  }
+
+  private async maybeAlert(
     device: { id: string; employeeId: string | null; userId: string | null; deviceId: string; platform: string },
     type: Extract<AlertType, 'GPS_OFF' | 'DATA_OFF' | 'APP_OFFLINE'>,
   ) {
     if (!this.dispatcher || !device.employeeId) return;
+    if (!(await this.onShift(device.employeeId))) return;
     const key = `${device.deviceId}:${type}`;
     const last = this.cooldown.get(key) ?? 0;
     const now = Date.now();

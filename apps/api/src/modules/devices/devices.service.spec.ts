@@ -1,11 +1,13 @@
 import { DevicesService, presenceOf } from './devices.service';
 
-function fakePrisma() {
+function fakePrisma(openShift = true) {
   const devices: any[] = [];
   const events: any[] = [];
   let seq = 1;
+  const state = { openShift };
   const prisma = {
     user: { findUnique: async () => ({ employeeId: 'e1' }) },
+    attendanceRecord: { findFirst: async () => (state.openShift ? { id: 'ar-1' } : null) },
     device: {
       findUnique: async ({ where }: any) =>
         devices.find((d) => (where.deviceId ? d.deviceId === where.deviceId : d.id === where.id)) ?? null,
@@ -25,7 +27,7 @@ function fakePrisma() {
     geoEvent: { create: async ({ data }: any) => { events.push(data); return data; } },
     $transaction: async (ops: Array<Promise<unknown>>) => Promise.all(ops),
   };
-  return { prisma: prisma as never, devices, events };
+  return { prisma: prisma as never, devices, events, state };
 }
 
 function fakeDispatcher() {
@@ -101,5 +103,47 @@ describe('DevicesService', () => {
 
     await svc.heartbeat({ deviceId: 'dev-1', tracking: false, gpsEnabled: true, online: true } as never);
     expect(closed).toHaveLength(1); // off stays off — one close, not a close per beat
+  });
+
+  // The bug he reported: pressing "بدء اليوم" raised «التطبيق غير متصل» 1.5 seconds later, because the
+  // phone's first beat was compared with lastSeenAt left from yesterday's session.
+  it('a beat returning after hours of silence announces the app as ALIVE, not offline', async () => {
+    const { prisma, devices } = fakePrisma();
+    const dispatcher = fakeDispatcher();
+    const svc = new DevicesService(prisma, dispatcher as never);
+    await svc.register('u1', { deviceId: 'dev-1', platform: 'android' } as never);
+    devices[0].lastSeenAt = new Date(Date.now() - 6 * 60 * 60_000); // six hours ago, previous day
+
+    await svc.heartbeat({ deviceId: 'dev-1', tracking: true, gpsEnabled: true, online: true } as never);
+
+    expect(dispatcher.calls).toHaveLength(0);
+    expect(new Date(devices[0].lastSeenAt).getTime()).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it('a device whose driver never started the day raises nothing at all', async () => {
+    const { prisma, events } = fakePrisma(false);
+    const dispatcher = fakeDispatcher();
+    const svc = new DevicesService(prisma, dispatcher as never);
+    await svc.register('u1', { deviceId: 'dev-1', platform: 'android' } as never);
+
+    await svc.heartbeat({ deviceId: 'dev-1', tracking: true, gpsEnabled: false, online: false } as never);
+    await svc.toggleEvent({ deviceId: 'dev-1', kind: 'APP_KILLED' } as never);
+
+    expect(dispatcher.calls).toHaveLength(0);
+    // the event itself is still recorded — only the alert is silenced
+    expect(events.map((e: any) => e.kind)).toEqual(['APP_KILLED']);
+  });
+
+  it('the same toggles mid-shift still reach the supervisor', async () => {
+    const { prisma } = fakePrisma(true);
+    const dispatcher = fakeDispatcher();
+    const svc = new DevicesService(prisma, dispatcher as never);
+    await svc.register('u1', { deviceId: 'dev-1', platform: 'android' } as never);
+    await svc.heartbeat({ deviceId: 'dev-1', tracking: true, gpsEnabled: true, online: true } as never);
+
+    await svc.heartbeat({ deviceId: 'dev-1', tracking: true, gpsEnabled: false, online: false } as never);
+    await svc.toggleEvent({ deviceId: 'dev-1', kind: 'APP_KILLED' } as never);
+
+    expect(dispatcher.calls.map((c) => c.type).sort()).toEqual(['APP_OFFLINE', 'DATA_OFF', 'GPS_OFF']);
   });
 });
