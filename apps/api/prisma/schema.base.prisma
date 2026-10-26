@@ -230,6 +230,8 @@ model Position {
   altitudeM   Float?
   batteryPct  Int?
   provider    String?  // gps | network | fused
+  stepsPerMin Float?   // شهادة المستشعر: خطواته في الدقيقة، أو null لو الموبايل ما قاسش
+  motionEnergy Float?  // تذبذب |a| (m/s²) — تحته مفيش حاجة حرّكت الجهاز أصلًا
   motionState String   // STOPPED | WALKING | RIDING | UNKNOWN
   insideZone  Boolean?
   buffered    Boolean  @default(false) // وصلت في إعادة بث بعد أوف لاين

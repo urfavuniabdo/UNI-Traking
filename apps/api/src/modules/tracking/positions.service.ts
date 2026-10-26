@@ -116,6 +116,8 @@ interface ReplayRow {
   speedKmh: number | null;
   accuracyM: number | null;
   bearing: number | null;
+  stepsPerMin: number | null;
+  motionEnergy: number | null;
   buffered: boolean;
   stale: boolean;
 }
@@ -296,6 +298,8 @@ export class PositionsService {
             altitudeM: Number.isFinite(item.altitude as number) ? item.altitude ?? null : null,
             batteryPct: Number.isFinite(item.battery as number) ? Math.round(item.battery as number) : null,
             provider: item.provider ?? null,
+            stepsPerMin: Number.isFinite(item.stepsPerMin as number) ? (item.stepsPerMin as number) : null,
+            motionEnergy: Number.isFinite(item.motionEnergy as number) ? (item.motionEnergy as number) : null,
             motionState: 'UNKNOWN',
             buffered,
             stale,
@@ -685,7 +689,7 @@ export class PositionsService {
     const dayRows = await this.prisma.position.findMany({
       where: { employeeId, clientTs: { gte: new Date(from - TRIP_ANCHOR_LOOKBACK_MS), lte: new Date(to) } },
       orderBy: { clientTs: 'asc' },
-      select: { lat: true, lng: true, clientTs: true, speedKmh: true, accuracyM: true, bearing: true, buffered: true, stale: true },
+      select: { lat: true, lng: true, clientTs: true, speedKmh: true, accuracyM: true, bearing: true, stepsPerMin: true, motionEnergy: true, buffered: true, stale: true },
     });
     // The exact credibility the day's line is drawn with, not a second reading of it: a trip that
     // stands behind a fix the route refused reports metres and a top speed that contradict the chips
@@ -875,6 +879,8 @@ export class PositionsService {
         deviceKmh,
         stepM,
         stepDtS: dtS,
+        stepsPerMin: r.stepsPerMin,
+        motionEnergyMs2: r.motionEnergy,
         prevKmh: last?.speedKmh ?? null,
         ...net,
       });
@@ -1104,7 +1110,7 @@ export class PositionsService {
     const rows = await this.prisma.position.findMany({
       where: { employeeId, clientTs: { gte: dayStart, lte: dayEnd } },
       orderBy: { clientTs: 'asc' },
-      select: { lat: true, lng: true, clientTs: true, speedKmh: true, accuracyM: true, bearing: true, buffered: true, stale: true },
+      select: { lat: true, lng: true, clientTs: true, speedKmh: true, accuracyM: true, bearing: true, stepsPerMin: true, motionEnergy: true, buffered: true, stale: true },
     });
     const replayed = this.replayDay(rows);
     const fixes = replayed.filter((p) => p.credible);
@@ -1199,7 +1205,7 @@ export class PositionsService {
         this.prisma.position.findMany({
           where: { employeeId: { in: ids }, clientTs: { gte: from } },
           orderBy: { clientTs: 'asc' },
-          select: { employeeId: true, lat: true, lng: true, clientTs: true, speedKmh: true, accuracyM: true, bearing: true, buffered: true, stale: true },
+          select: { employeeId: true, lat: true, lng: true, clientTs: true, speedKmh: true, accuracyM: true, bearing: true, stepsPerMin: true, motionEnergy: true, buffered: true, stale: true },
         }),
         this.prisma.stopEvent.findMany({
           where: { employeeId: { in: ids }, startedAt: { gte: from } },
@@ -1209,7 +1215,7 @@ export class PositionsService {
       const byEmp = new Map<string, ReplayRow[]>();
       for (const r of rows) {
         const list = byEmp.get(r.employeeId) ?? [];
-        list.push({ lat: r.lat, lng: r.lng, clientTs: r.clientTs, speedKmh: r.speedKmh, accuracyM: r.accuracyM, bearing: r.bearing, buffered: r.buffered, stale: r.stale });
+        list.push({ lat: r.lat, lng: r.lng, clientTs: r.clientTs, speedKmh: r.speedKmh, accuracyM: r.accuracyM, bearing: r.bearing, stepsPerMin: r.stepsPerMin, motionEnergy: r.motionEnergy, buffered: r.buffered, stale: r.stale });
         byEmp.set(r.employeeId, list);
       }
       for (const d of drivers) {
