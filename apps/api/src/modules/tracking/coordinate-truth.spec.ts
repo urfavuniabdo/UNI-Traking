@@ -241,6 +241,81 @@ describe('the coordinates decide the motion state (§5)', () => {
   });
 });
 
+describe('the line answers to the state (§5)', () => {
+  it('fixes that left and came back through a silence are not a route for a driver who never moved', async () => {
+    const { employeeId } = await mkDriver();
+    const t0 = Date.parse(`${new Date().toISOString().slice(0, 10)}T08:00:00.000Z`);
+    const store = (sec: number, lat: number, accuracyM = 8, speedKmh = 0.2) =>
+      prisma.position.create({
+        data: {
+          employeeId,
+          clientTs: new Date(t0 + sec * 1000),
+          lat,
+          lng: 31.2,
+          speedKmh,
+          accuracyM,
+          motionState: 'STOPPED',
+          ingestHash: `ghost-${sec}-${lat}`,
+        },
+      });
+    // a day off his phone, to the metre: parked in the yard with the fix wandering 20 m around him,
+    // and three positions from across the city the device published when it woke from a doze.
+    await store(0, 30.0);
+    await store(30, 30.00005);
+    await store(60, 30.0001);
+    await store(120, 30.0);
+    await store(210, 30.00015);
+    await store(420, 30.011, 10, 12.3); // 1.22 km out, 3.5 min after anyone last saw him
+    await store(423, 30.01102, 13); // its companion, same place
+    await store(900, 30.00002); // back in the yard across an 8-minute silence
+    await store(1400, 30.0222, 11, 9.7); // 2.47 km
+    await store(1900, 30.0095, 5, 16);
+    await store(1904, 30.00956, 9);
+    await store(1930, 30.00005, 10, 150.9); // and back, 25 s later — 145 km/h on paper
+    await store(2000, 30.0001);
+    await store(2400, 30.0);
+
+    const route = (await positions.route(employeeId, new Date(t0).toISOString().slice(0, 10))) as {
+      distanceKm: number;
+      rejectedPoints: number;
+      points: { credible: boolean; motionState: string }[];
+      geojson: { coordinates: [number, number][] };
+    };
+    expect(route.rejectedPoints).toBe(5);
+    expect(route.points.filter((p) => p.credible).every((p) => p.motionState === 'STOPPED')).toBe(true);
+    // 7.7 km of ghosts became the ground he stood on: nothing moved, so nothing is drawn.
+    expect(route.distanceKm).toBeLessThan(0.1);
+    expect(route.geojson.coordinates.every(([, lat]) => Math.abs(lat - 30.0) < 0.002)).toBe(true);
+  });
+
+  it('a round trip the device reported all the way keeps its road', async () => {
+    const { employeeId } = await mkDriver();
+    const t0 = Date.parse(`${new Date().toISOString().slice(0, 10)}T08:00:00.000Z`);
+    const step = (sec: number, i: number) =>
+      prisma.position.create({
+        data: {
+          employeeId,
+          clientTs: new Date(t0 + sec * 1000),
+          lat: 30.0 + i * 0.0009, // 100 m every 15 s: a witnessed 24 km/h
+          lng: 31.2,
+          speedKmh: 24,
+          accuracyM: 8,
+          motionState: 'RIDING',
+          ingestHash: `roundtrip-${sec}-${i}`,
+        },
+      });
+    for (let i = 0; i <= 20; i++) await step(i * 15, i);
+    for (let i = 19; i >= 0; i--) await step((40 - i) * 15, i);
+
+    const route = (await positions.route(employeeId, new Date(t0).toISOString().slice(0, 10))) as {
+      distanceKm: number;
+      rejectedPoints: number;
+    };
+    expect(route.rejectedPoints).toBe(0);
+    expect(route.distanceKm).toBeGreaterThan(3.5);
+  });
+});
+
 describe('a journey ends when the ground stops (§5)', () => {
   it('check-out (tracking off) closes the run with the length it actually covered', async () => {
     const { employeeId, deviceId } = await mkDriver();
