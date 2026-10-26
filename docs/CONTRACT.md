@@ -48,6 +48,8 @@ Base URL: `/api/v1` — كل الطلبات محمية بـ `Authorization: Bear
 **صيغة المضلع:** canonical هي `[[lat,lng],…]`، والسيرفر بيتعامل مع `[[lng,lat],…]` (شكل GeoJSON اللي بيرسمه الداش بورد) تلقائيًا — الاتجاه يُحدّد بمطابقة مركز الحلقة مع `lat/lng` المُعلَن للنطاق (`GeoService.ringOf`)، وأي حلقة أقل من 3 نقاط أو بإحداثيات غير صحيحة تُرفض بـ `POLYGON_INVALID`. مخرج `GET /places/fences` هو GeoJSON بصيغة `[lng,lat]` كما هو متعارف.
 **نجاح `check-in`/`check-out`** يُخرج: `{ status, fenceName, distanceToCenterM, allowedFences[], record }` حيث `status` = `VALID` أو `OUT_OF_FENCE`، و`allowedFences[]` عناصر `{ id, name, kind: "SITE"|"ZONE" }`.
 
+**حارس الإنهاء في التطبيق:** «إنهاء اليوم» لا يعمل بضغطة واحدة — الزر يطلب ضغطًا متصلًا **٣ ثوانٍ** (شريط تقدّم يمتلئ، والرفع قبل اكتماله يُظهر تنبيهًا ولا يُنهي شيئًا)، بينما «بدء اليوم» يبقى ضغطة عادية. الحارس على العميل وحده: `POST /attendance/check-out` يقبل الطلب متى وصل بلا أي دليل على المدة، فهو يمنع اللمسة الخاطئة ولا يمنع قرارًا متعمّدًا.
+
 سياسة الرفض الصارم (Strict-reject) تُقرأ من **`Setting(key='rules.global')` بحقل `attendanceStrictReject`** (عالمي، يسري على كل النطاقات بما فيها المناطق لأن جدول `Zone` لا يعمود `strictReject` له)، أو من **`Site.strictReject`** لموظفي المواقع (غير السواقين). `AttendanceService` يخبّئ هذا الإعداد ~30 ثانية مثل `RulesService`.
 
 `OUT_OF_FENCE` **لا يُرفض الطلب افتراضيًا**؛ يُسجَّل السجل مع راية `exception: true`، وراية `replayed: true` مشتقّة (لا يوجد عمود `replayed` في `AttendanceRecord` — تُحسب من وجود نقاط `buffered/stale` لنفس الموظف+يوم العمل)، ويُطلق تنبيه `CHECK_IN_OUT_OF_FENCE`. **أما إذا فعّلت Strict-reject** فالخارج عن النطاق يُرفض بـ **HTTP `422`** بالكود `FENCE_VIOLATION` وجسم غنيّ:
