@@ -52,11 +52,6 @@ export class TraceService {
     return this.collapseStays(this.dropAndClean(rows));
   }
 
-  /** Pass 1 + pass 2 without the collapse — the fixes the trace still stands behind, one per report. */
-  groundFixes<T extends TraceRow>(rows: T[]): T[] {
-    return this.dropAndClean(rows);
-  }
-
   private dropAndClean<T extends TraceRow>(rows: T[]): T[] {
     const day = this.dropSpikes(rows);
     this.dropOutAndBack(day);
@@ -128,10 +123,12 @@ export class TraceService {
       }
       // A long excursion that returns to the very place it left is refused by its own numbers: a
       // receiver waking from idle reports speed and position out of the same fictional solution, and
-      // they contradict each other (see `profilePossible`).
+      // they contradict each other (see `profilePossible`). Judged on the excursion's own fixes only
+      // — the leg from the anchor is the cadence rule's business, and a day of ground must not be
+      // erased by one claim the phone made while it was still sitting at home.
       let e = j;
       while (e < kept.length && this.geo.distanceM(anchor, kept[e].row) > band) e++;
-      if (e < kept.length && !this.profilePossible(kept.slice(i, e + 1).map((x) => x.row))) {
+      if (e < kept.length && !this.profilePossible(kept.slice(j, e + 1).map((x) => x.row))) {
         for (let m = j; m < e; m++) kept[m].credible = false;
         i = e;
         continue;
@@ -157,7 +154,10 @@ export class TraceService {
       const a = run[m - 1];
       const b = run[m];
       const dtS = (b.clientTs.getTime() - a.clientTs.getTime()) / 1000;
-      if (!(dtS > 0) || a.speedKmh == null || b.speedKmh == null) continue;
+      // Past the net window the phone was not seen moving at all, so its speed at the start of the
+      // silence says nothing about the metres between: a driver who pulled over and switched off is
+      // exactly a fast reading followed by a long gap. That case belongs to the cadence rule.
+      if (!(dtS > 0) || dtS > MOTION.MAX_NET_WINDOW_S || a.speedKmh == null || b.speedKmh == null) continue;
       if (Math.abs(b.speedKmh - a.speedKmh) / 3.6 / dtS > MOTION.MAX_ACCEL_MS2) return false;
       const claimedM = ((a.speedKmh + b.speedKmh) / 2 / 3.6) * dtS;
       const groundM = this.geo.distanceM(a, b);
