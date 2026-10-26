@@ -220,6 +220,18 @@ void main() {
     expect(spy.helpCalls, 1);
   });
 
+  // What the phone showed and the widget test did not: an unchilded DecoratedBox collapses to
+  // zero and a CircularProgressIndicator at value 0 paints nothing, so the "circle" was only
+  // ever its label. The disc has to be wider than the word inside it.
+  testWidgets('the help circle is a disc the size of the band, not the size of its label',
+      (WidgetTester tester) async {
+    await pumpHome(tester, user: driver, checkedIn: true);
+    final Size disc = tester.getSize(find.byType(CircularProgressIndicator));
+    final Size label = tester.getSize(find.text(S.t('helpRequest')));
+    expect(disc.width, disc.height, reason: 'a circle, not an ellipse');
+    expect(disc.width, greaterThan(label.width * 1.4));
+  });
+
   testWidgets('an employee sees no help circle', (WidgetTester tester) async {
     await pumpHome(tester, user: employee, checkedIn: false);
     expect(find.text(S.t('helpRequest')), findsNothing);

@@ -886,24 +886,27 @@ class _HelpCircleState extends State<_HelpCircle> {
                   onTap: _onTap,
                   child: Stack(
                     alignment: Alignment.center,
+                    // StackFit.expand is what makes the disc exist: an unchilded DecoratedBox
+                    // collapses to zero, and a CircularProgressIndicator at value 0 paints
+                    // nothing at all, so without tight constraints the "circle" is invisible.
+                    fit: StackFit.expand,
                     children: <Widget>[
                       DecoratedBox(
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: TraccerTheme.red.withValues(alpha: widget.isDark ? 0.16 : 0.08),
+                          color: TraccerTheme.red.withValues(alpha: widget.isDark ? 0.20 : 0.10),
                           border: Border.all(
-                            color: TraccerTheme.red.withValues(alpha: widget.isDark ? 0.45 : 0.32),
-                            width: 2,
+                            color: TraccerTheme.red.withValues(alpha: widget.isDark ? 0.55 : 0.45),
+                            width: 3,
                           ),
                         ),
                       ),
                       Padding(
-                        padding: const EdgeInsets.all(5),
+                        padding: const EdgeInsets.all(6),
                         child: CircularProgressIndicator(
                           value: _progress,
                           strokeWidth: 5,
                           color: ink,
-                          backgroundColor: TraccerTheme.red.withValues(alpha: 0.10),
                         ),
                       ),
                       _label(ink, side),
