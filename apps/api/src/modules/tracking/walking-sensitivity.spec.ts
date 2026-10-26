@@ -127,13 +127,19 @@ describe('a driver on foot must not read as STOPPED (§5)', () => {
     });
     const step = (n: number): PositionItemDto => walk(10 + n * 5, n);
 
-    // 20 s of walking is 27 m of net travel against a 12 m-per-fix wander: the coordinates cannot
-    // separate it from standing yet, and the board must say واقف rather than guess.
-    await positions.ingestBatch({ deviceId, batchSeq: 2, positions: [step(1), step(2), step(3), step(4)] });
+    // The first three steps are still mostly his stand-by: the window's two means are 3, 10 and
+    // 13 m apart against a 14-17 m bubble, so the coordinates have not separated the walk from
+    // standing yet and the board says واقف rather than guesses.
+    await positions.ingestBatch({ deviceId, batchSeq: 2, positions: [step(1), step(2), step(3)] });
     expect(await stateOf(employeeId)).toBe('STOPPED');
 
-    // By ~50 s the window has MIN_NET_SAMPLES fixes of one-direction travel, and he leaves STOPPED.
-    await positions.ingestBatch({ deviceId, batchSeq: 3, positions: [step(5), step(6), step(7), step(8), step(9), step(10)] });
+    // The fourth is 18 m between the means of a seven-fix window — 14.3 m of bubble will not
+    // account for it — and §5 believes the walk the averaging proved, not a guess from one fix.
+    await positions.ingestBatch({ deviceId, batchSeq: 3, positions: [step(4)] });
+    expect(await stateOf(employeeId)).toBe('WALKING');
+
+    // and he stays there for the rest of the walk.
+    await positions.ingestBatch({ deviceId, batchSeq: 4, positions: [step(5), step(6), step(7), step(8), step(9), step(10)] });
     expect(await stateOf(employeeId)).toBe('WALKING');
   });
 

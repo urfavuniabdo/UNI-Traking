@@ -12,6 +12,13 @@ export interface PositionItemDto {
   provider?: string;
   motionState?: string;
   buffered?: boolean;
+  /**
+   * The phone's own motion evidence (§5): steps/minute and the accelerometer's acceleration
+   * variance over the last seconds, in m/s². Both optional — a device that cannot measure them
+   * sends nothing and is judged on the ground alone.
+   */
+  stepsPerMin?: number;
+  motionEnergy?: number;
 }
 
 export interface PositionBatchDto {

@@ -37,6 +37,8 @@ interface Track {
   geofenceState: 'IN' | 'OUT' | 'UNKNOWN';
   exitRaised: boolean;
   stopStart: { ts: number; lat: number; lng: number; stopId: string; alerted: boolean } | null;
+  /** clientTs of the first fix of the current unbroken run of ground-proven movement, else null. */
+  moveRunSinceTs: number | null;
   openTrip:
     | {
         id: string;
@@ -148,11 +150,13 @@ export class PositionsService {
   /**
    * Adds a fix to the net window and slides it: older than MAX_NET_WINDOW_S (or more than
    * NET_WINDOW_MAX_FIXES of them) falls off the front, so a long walk is judged on the last two
-   * minutes and not on where the day started.
+   * minutes and not on where the day started — but never below MIN_WINDOW_FIXES, because a window of
+   * one fix has no opinion, and a driver who stops reporting every 90 s would then never be able to
+   * prove he stopped.
    */
   private pushWindow(window: NetFix[], fix: NetFix): void {
     window.push(fix);
-    while (window.length > 1 && fix.ts - window[0].ts > MOTION.MAX_NET_WINDOW_S * 1000) window.shift();
+    while (window.length > MOTION.MIN_WINDOW_FIXES && fix.ts - window[0].ts > MOTION.MAX_NET_WINDOW_S * 1000) window.shift();
     while (window.length > NET_WINDOW_MAX_FIXES) window.shift();
   }
 
@@ -194,6 +198,7 @@ export class PositionsService {
       geofenceState: 'UNKNOWN',
       exitRaised: false,
       stopStart: null,
+      moveRunSinceTs: null,
       openTrip: null,
       lastRealtimeTs: null,
       seenAt: 0,
@@ -251,6 +256,8 @@ export class PositionsService {
       lng: number;
       speedKmh: number | null;
       accuracyM: number | null;
+      stepsPerMin: number | null;
+      motionEnergyMs2: number | null;
       buffered: boolean; // device-buffered
       stale: boolean;
     }[] = [];
@@ -301,6 +308,8 @@ export class PositionsService {
           lng: item.lng,
           speedKmh: Number.isFinite(item.speed as number) ? (item.speed as number) : null,
           accuracyM: Number.isFinite(item.accuracy as number) ? (item.accuracy as number) : null,
+          stepsPerMin: Number.isFinite(item.stepsPerMin as number) ? (item.stepsPerMin as number) : null,
+          motionEnergyMs2: Number.isFinite(item.motionEnergy as number) ? (item.motionEnergy as number) : null,
           buffered: deviceBuffered,
           stale,
         });
@@ -355,7 +364,7 @@ export class PositionsService {
   private async processPoint(
     ctx: EmployeeContext | null,
     employeeId: string,
-    p: { id: string; ts: number; lat: number; lng: number; speedKmh: number | null; accuracyM: number | null; buffered: boolean; stale: boolean },
+    p: { id: string; ts: number; lat: number; lng: number; speedKmh: number | null; accuracyM: number | null; stepsPerMin: number | null; motionEnergyMs2: number | null; buffered: boolean; stale: boolean },
     track: Track,
   ): Promise<number> {
     let alertsRaised = 0;
@@ -382,6 +391,9 @@ export class PositionsService {
       deviceKmh: p.speedKmh,
       stepM: distanceFromLast,
       stepDtS: dtS,
+      stepsPerMin: p.stepsPerMin,
+      motionEnergyMs2: p.motionEnergyMs2,
+      prevKmh: track.last?.speedKmh ?? null,
       ...net,
     });
     const speed = ground.speedKmh;
@@ -396,9 +408,23 @@ export class PositionsService {
     }
 
     // Two fixes and a span is all the rule needs; the window only keeps growing more confident
-    // from here. The first minute of a day therefore judges on a small bubble, not on nothing.
-    const res = ground.stationary ? this.classifier.confirmStationary(track.motion, speed) : this.classifier.classify(track.motion, speed);
+    // from here. The first minute of a day therefore judges on a small bubble, not on nothing. And a
+    // standing driver is not stated as moving on a *young* window's word alone: the move has to hold
+    // (MOVE_CONFIRM_S). The 2026-10-26 wake-up ghost claimed 137 km/h for eleven minutes from a phone
+    // nobody touched, and its fix gaps starved the window so it never grew up.
+    const res = ground.stationary
+      ? this.classifier.confirmStationary(track.motion, speed)
+      : this.classifier.confirmMove(track.motion, p.ts, speed, {
+          moved: ground.moved,
+          mature: net.netSamples >= MOTION.MIN_NET_SAMPLES,
+        }) ?? this.classifier.classify(track.motion, speed);
     const state: MotionState = res.state;
+
+    // The clock a journey is measured from: the first fix whose coordinates put him outside his
+    // bubble. A sample that proves nothing does not end a run — only the ground putting him back
+    // inside his bubble does, which is what «he left and came back» means.
+    if (ground.stationary) track.moveRunSinceTs = null;
+    else if (ground.moved) track.moveRunSinceTs = track.moveRunSinceTs ?? p.ts;
 
     const workDate = workDateOf(new Date(p.ts));
     track.touchedDates.add(workDate);
@@ -448,15 +474,24 @@ export class PositionsService {
     // --- trips (open on confirmed travel, close on 10-min stop / day change) ---
     // `ground.moved` is required: a trip is a journey from somewhere to somewhere, and the first
     // fix of a track has no "from" yet — believing its speed alone invented trips for parked phones.
+    // The state gate is what keeps the fake runs out (a driver whose move never held stays STOPPED,
+    // so he opens nothing); adding a length threshold on top only hid real short trips, the
+    // 2026-10-26 ghost being a sustained 11-minute burst that no duration rule would have caught.
     const isTravel = (state === 'RIDING' || state === 'WALKING') && ground.moved;
     if (isTravel) {
       if (!track.openTrip || track.openTrip.workDate !== workDate) {
         if (track.openTrip) await this.finalizeTrip(employeeId, track.openTrip, track.last?.ts ?? p.ts);
         const trip = await this.prisma.trip.create({
-          data: { employeeId, zoneId: ctx?.zoneId ?? null, startedAt: new Date(p.ts), state: 'OPEN', replayed: p.buffered },
+          data: {
+            employeeId,
+            zoneId: ctx?.zoneId ?? null,
+            startedAt: new Date(track.moveRunSinceTs ?? p.ts),
+            state: 'OPEN',
+            replayed: p.buffered,
+          },
           select: { id: true, startedAt: true },
         });
-        track.openTrip = { id: trip.id, workDate, startedAt: p.ts, maxSpeed: null, lastMoveTs: p.ts, replayed: p.buffered };
+        track.openTrip = { id: trip.id, workDate, startedAt: track.moveRunSinceTs ?? p.ts, maxSpeed: null, lastMoveTs: p.ts, replayed: p.buffered };
       }
       if (track.openTrip) {
         if (speed !== null) track.openTrip.maxSpeed = track.openTrip.maxSpeed === null ? speed : Math.max(track.openTrip.maxSpeed, speed);
@@ -516,7 +551,10 @@ export class PositionsService {
     }
 
     // --- overspeed ---
-    if (th && speed !== null) {
+    // A condition is a speed held **for a duration**, and it is only about a driver who is
+    // travelling: while the move is still unconfirmed (MOVE_HELD) or the step failed the accel
+    // ceiling, an overspeed alert would page the supervisor about a phone nobody touched.
+    if (th && speed !== null && !ground.implausible && (state === 'RIDING' || state === 'WALKING')) {
       if (speed > th.maxSpeedKmh) {
         if (!track.overRunActive) {
           track.overRunActive = true;
@@ -524,7 +562,8 @@ export class PositionsService {
           track.overCriticalRaised = false;
         }
         track.speedOverStreak += 1;
-        if (track.speedOverStreak >= th.speedSamples && this.dispatcher) {
+        const heldS = track.overSinceTs === null ? 0 : (p.ts - track.overSinceTs) / 1000;
+        if (track.speedOverStreak >= th.speedSamples && heldS >= th.speedingHoldS && this.dispatcher) {
           const durationS = track.overSinceTs ? Math.round((p.ts - track.overSinceTs) / 1000) : 0;
           const r = await this.dispatcher.raise({
             type: 'SPEEDING' as AlertType,
@@ -560,7 +599,11 @@ export class PositionsService {
     }
 
     // --- harsh braking / acceleration ---
-    if (th && track.last && track.last.speedKmh !== null && speed !== null && dtS !== null && dtS > 0 && dtS <= 30) {
+    // One credible interval, never an interval the body could not have performed: a sample demanding
+    // more grip than a tyre has is a receiver waking up, not a driver standing on the brake — and the
+    // alerts it raised taught the supervisor to ignore the real ones. (A harsh event is by nature a
+    // single interval: braking and releasing, so no "hold" rule may be asked of it.)
+    if (th && track.last && track.last.speedKmh !== null && speed !== null && dtS !== null && dtS > 0 && dtS <= 30 && !ground.implausible) {
       const accel = this.geo.accelerationMs2(track.last.speedKmh, speed, dtS);
       const h = this.classifier.harsh(accel, th.harshBrakingMs2, th.harshAccelMs2);
       if (h && this.dispatcher) {
@@ -773,7 +816,7 @@ export class PositionsService {
     const motion = this.classifier.newTrack();
     const drift = RULE_DEFAULTS.accuracyDriftM;
     const out: ReplayPoint[] = [];
-    let last: { lat: number; lng: number; ts: number } | null = null;
+    let last: { lat: number; lng: number; ts: number; speedKmh: number | null } | null = null;
     const window: NetFix[] = [];
     const day = this.trace.dropSpikes(rows);
     this.trace.dropOutAndBack(day);
@@ -800,20 +843,26 @@ export class PositionsService {
         deviceKmh,
         stepM,
         stepDtS: dtS,
+        prevKmh: last?.speedKmh ?? null,
         ...net,
       });
       const speed = ground.speedKmh;
       if (this.classifier.isAbsurd(speed, stepM, dtS, drift)) {
         window.length = 0;
         this.pushWindow(window, { lat: r.lat, lng: r.lng, ts, noiseM: noiseRadiusM });
-        last = { lat: r.lat, lng: r.lng, ts };
+        last = { lat: r.lat, lng: r.lng, ts, speedKmh: null };
         out.push({ ...r, motionState: 'UNKNOWN' as MotionState, speedKmh: round(speed, 1), credible: false });
         return;
       }
+      // The same two rules the live pipeline applies: the coordinates put him back in his bubble, or
+      // the move has to hold for MOVE_CONFIRM_S before it may re-state him.
       const res = ground.stationary
         ? this.classifier.confirmStationary(motion, speed)
-        : this.classifier.classify(motion, speed);
-      last = { lat: r.lat, lng: r.lng, ts };
+        : this.classifier.confirmMove(motion, ts, speed, {
+          moved: ground.moved,
+          mature: net.netSamples >= MOTION.MIN_NET_SAMPLES,
+        }) ?? this.classifier.classify(motion, speed);
+      last = { lat: r.lat, lng: r.lng, ts, speedKmh: speed };
       out.push({ ...r, motionState: res.state, speedKmh: round(speed, 1), credible: true });
     });
     return out;
@@ -838,7 +887,7 @@ export class PositionsService {
     const positions = await this.prisma.position.findMany({
       where: { employeeId, clientTs: { gte: dayStart, lte: dayEnd } },
       orderBy: { clientTs: 'asc' },
-      select: { lat: true, lng: true, clientTs: true, accuracyM: true },
+      select: { lat: true, lng: true, clientTs: true, speedKmh: true, accuracyM: true },
     });
     if (!positions.length) return;
     // The same trace GET /positions/route draws, so the stored line can never disagree with it.

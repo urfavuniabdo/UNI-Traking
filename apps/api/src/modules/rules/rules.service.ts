@@ -20,6 +20,8 @@ export interface EffectiveThresholds {
   heartbeatMissedCycles: number;
   replayMaxAgeHours: number;
   accuracyDriftM: number;
+  /** An alert condition is a value held for a duration, not a single sample (§6). */
+  speedingHoldS: number;
   disabledTypes: AlertType[];
 }
 
@@ -150,6 +152,7 @@ export class RulesService {
       heartbeatMissedCycles: RULE_DEFAULTS.heartbeatMissedCycles,
       replayMaxAgeHours: asNum(g.replayMaxAgeHours) ?? RULE_DEFAULTS.replayMaxAgeHours,
       accuracyDriftM: RULE_DEFAULTS.accuracyDriftM,
+      speedingHoldS: asNum(g.speedingHoldS) ?? RULE_DEFAULTS.speedingHoldS,
       disabledTypes,
     };
   }
