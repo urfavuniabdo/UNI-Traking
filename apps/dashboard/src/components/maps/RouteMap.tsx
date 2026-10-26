@@ -36,14 +36,18 @@ function L_latLngBounds(positions: [number, number][]): [number, number][] {
 }
 
 export default function RouteMap({ route, index, events = [], onSelectPoint, className = '' }: Props) {
-  const coords = useMemo(() => route.points.map((p) => [p.lat, p.lng] as [number, number]), [route]);
+  // The server already refuses a fix whose ground it cannot stand behind; drawing it anyway would
+  // connect the day's real position to a cached fix across the city — a route for a driver who
+  // never moved. What is not on the ground is not on the line.
+  const trace = useMemo(() => route.points.filter((p) => p.credible !== false), [route]);
+  const coords = useMemo(() => trace.map((p) => [p.lat, p.lng] as [number, number]), [trace]);
   const current = route.points[Math.min(index, route.points.length - 1)];
 
   // color segments by motion state for visual richness
   const segments = useMemo(() => {
     const out: { positions: [number, number][]; color: string }[] = [];
     let cur: { positions: [number, number][]; color: string } | null = null;
-    for (const p of route.points) {
+    for (const p of trace) {
       const c = MOTION_COLORS[p.motionState];
       if (!cur || cur.color !== c) {
         if (cur) cur.positions.push([p.lat, p.lng]);
@@ -54,7 +58,7 @@ export default function RouteMap({ route, index, events = [], onSelectPoint, cla
       }
     }
     return out;
-  }, [route]);
+  }, [trace]);
 
   return (
     <MapContainer center={coords[0] ?? [30.0444, 31.2357]} zoom={13} className={`h-full w-full ${className}`}>

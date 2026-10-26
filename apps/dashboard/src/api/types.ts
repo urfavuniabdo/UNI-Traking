@@ -96,6 +96,8 @@ export interface RoutePoint {
   accuracy?: number;
   motionState: MotionState;
   buffered: boolean;
+  /** false = the server refused this fix as ground: kept in the list, never on the line. */
+  credible?: boolean;
 }
 
 export interface RouteStop {
