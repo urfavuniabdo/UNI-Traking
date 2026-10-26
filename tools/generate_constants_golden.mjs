@@ -46,8 +46,14 @@ function quotedValues(body) {
   return [...body.matchAll(/'([^']+)'/g)].map((m) => m[1]);
 }
 
+/** Comments are prose, not config: "net displacement: 1.4 m" must never reach the golden. */
+function stripComments(body) {
+  return body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+}
+
 /** MOTION: every `KEY: number` */
-function numericMap(body) {
+function numericMap(rawBody) {
+  const body = stripComments(rawBody);
   const out = {};
   for (const m of body.matchAll(/([A-Za-z0-9_]+):\s*(-?\d+(?:\.\d+)?)/g)) {
     out[m[1]] = Number(m[2]);
@@ -56,7 +62,8 @@ function numericMap(body) {
 }
 
 /** RULE_DEFAULTS: `Number(process.env.X ?? N)` or plain literal */
-function ruleDefaults(body) {
+function ruleDefaults(rawBody) {
+  const body = stripComments(rawBody);
   const out = {};
   const lines = body.split('\n');
   for (const line of lines) {
