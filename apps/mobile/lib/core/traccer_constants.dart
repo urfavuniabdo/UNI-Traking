@@ -27,6 +27,13 @@ class Motion {
   static const int maxNetWindowS = 90; // the window of fixes the net displacement is measured over (a 120 s window keeps replaying old walk evidence after he stops)
   static const double movedCircleFactor = 2; // accuracy circles the net must clear to count as a move
   static const int minNetSamples = 6; // below this a window can only prove a vehicle, never a walk
+  static const int minWindowFixes = 2; // under this the coordinates have no opinion at all
+  static const int moveConfirmS = 15; // a standing driver leaves «واقف» only once the move has held this long
+  static const double maxAccelMs2 = 6; // grip ceiling: a jump past this is a relocated fix, not a driver
+
+  /// §5 the phone's own motion evidence (mirrors MOTION.STEPS_PER_MIN_ON_FOOT / STILL_ENERGY_MS2).
+  static const int stepsPerMinOnFoot = 12; // at this cadence his feet are on the ground — never RIDING
+  static const double stillEnergyMs2 = 0.12; // acceleration variance under which nothing moved the device
 
   /// Golden-keyed view for the consistency test.
   static Map<String, Object> toGoldenMap() => <String, Object>{
@@ -40,6 +47,11 @@ class Motion {
         'MAX_NET_WINDOW_S': maxNetWindowS,
         'MOVED_CIRCLE_FACTOR': movedCircleFactor,
         'MIN_NET_SAMPLES': minNetSamples,
+        'MIN_WINDOW_FIXES': minWindowFixes,
+        'MOVE_CONFIRM_S': moveConfirmS,
+        'MAX_ACCEL_MS2': maxAccelMs2,
+        'STEPS_PER_MIN_ON_FOOT': stepsPerMinOnFoot,
+        'STILL_ENERGY_MS2': stillEnergyMs2,
       };
 }
 
@@ -62,6 +74,7 @@ class RuleDefaults {
   static const int shiftGraceMin = 30;
   static const double accuracyDriftM = 120;
   static const int dedupeWindowS = 20;
+  static const int speedingHoldS = 5; // §6: speeding is raised only once it held this long
 
   static Map<String, Object> toGoldenMap() => <String, Object>{
         'maxSpeedKmh': maxSpeedKmh,
@@ -79,6 +92,7 @@ class RuleDefaults {
         'shiftGraceMin': shiftGraceMin,
         'accuracyDriftM': accuracyDriftM,
         'dedupeWindowS': dedupeWindowS,
+        'speedingHoldS': speedingHoldS,
       };
 }
 

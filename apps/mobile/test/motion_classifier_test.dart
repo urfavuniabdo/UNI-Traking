@@ -235,5 +235,92 @@ void main() {
       expect(c.bandFor(7.0), MotionStates.walking); // <= 7
       expect(c.bandFor(7.1), MotionStates.riding);
     });
+
+    // ---------------------------------------------------------------- IMU (§5)
+
+    test('a run the coordinates prove is a ride — until his feet say otherwise', () {
+      // 33 m every 5 s = 24 km/h of one-way travel: the ground vouches for the fact, the device for
+      // the number. STEPS_PER_MIN_ON_FOOT is the only thing that tells a striding man from a crawling
+      // car, because both sit in the same GPS band.
+      List<String> run(MotionClassifier c, {double? steps}) {
+        final List<String> seen = <String>[];
+        for (int i = 0; i < 10; i++) {
+          seen.add(c.addSample(
+            speedKmh: 24,
+            accuracyM: 6,
+            ts: sec(i * 5),
+            lat: 30.0 + 0.0003 * i,
+            lng: 31.2,
+            stepsPerMin: steps,
+          ));
+        }
+        return seen;
+      }
+
+      final MotionClassifier wheels = MotionClassifier();
+      expect(run(wheels).last, MotionStates.riding);
+
+      final MotionClassifier feet = MotionClassifier();
+      final List<String> seen = run(feet, steps: 96); // a measured stride, not a guess
+      expect(seen.last, MotionStates.walking, reason: 'steps on the ground cap him at the walking band');
+      expect(feet.lastRawSpeedKmh, lessThanOrEqualTo(Motion.walkMaxKmh));
+    });
+
+    test('a phone nobody touched is واقف whatever the receiver claims', () {
+      // The 2026-10-26 wake-up burst: the chip reported 137 km/h for eleven minutes while the
+      // accelerometer never varied by more than its own noise. STILL_ENERGY_MS2 is that witness.
+      final MotionClassifier c = MotionClassifier();
+      for (int i = 0; i < 8; i++) {
+        c.addSample(speedKmh: 0.5, accuracyM: 8, ts: sec(i * 10), lat: 30.0, lng: 31.2, motionEnergyMs2: 0.02);
+      }
+      expect(c.state, MotionStates.stopped);
+
+      final String burst = c.addSample(
+        speedKmh: 137,
+        accuracyM: 8,
+        ts: sec(80),
+        lat: 30.0,
+        lng: 31.2047, // ~450 m away: a whole neighbourhood in one 10 s step
+        motionEnergyMs2: 0.02,
+      );
+      expect(burst, MotionStates.stopped, reason: 'a flat device has not been carried anywhere');
+      expect(c.lastRawSpeedKmh, lessThanOrEqualTo(Motion.stationarySpeedKmh));
+    });
+
+    test('a move has to hold before it re-states a standing driver', () {
+      // A two-minute silence starves the window, so the first fixes after it are the immature claim
+      // MOVE_CONFIRM_S exists for: he stays واقف until the travel persists.
+      final MotionClassifier c = MotionClassifier();
+      for (int i = 0; i < 6; i++) {
+        c.addSample(speedKmh: 0.2, accuracyM: 6, ts: sec(i * 5), lat: 30.0, lng: 31.2);
+      }
+      expect(c.state, MotionStates.stopped);
+
+      String s = c.state;
+      for (int i = 0; i < 3; i++) {
+        // 60 m every 3 s: 72 km/h of net travel, proved by a window of three fixes
+        s = c.addSample(speedKmh: 72, accuracyM: 6, ts: sec(200 + i * 3), lat: 30.0, lng: 31.2 + 0.00062 * (i + 1));
+      }
+      expect(s, MotionStates.stopped, reason: 'an immature window cannot pull him out of واقف yet');
+
+      for (int i = 3; i < 12; i++) {
+        s = c.addSample(speedKmh: 72, accuracyM: 6, ts: sec(200 + i * 3), lat: 30.0, lng: 31.2 + 0.00062 * (i + 1));
+      }
+      expect(s, isNot(MotionStates.stopped), reason: 'the claim held past MOVE_CONFIRM_S, so it stands');
+    });
+
+    test('a jump no body could make is not a journey', () {
+      // 0 → 200 km/h in 5 s is 11 m/s² — more than a tyre or a shoe has. MAX_ACCEL_MS2 refuses it the
+      // same way the server does, so the phone never uploads a speed the dashboard would then reject.
+      final MotionClassifier c = MotionClassifier();
+      for (int i = 0; i < 6; i++) {
+        c.addSample(speedKmh: 0.0, accuracyM: 6, ts: sec(i * 5), lat: 30.0, lng: 31.2);
+      }
+      expect(c.state, MotionStates.stopped);
+
+      final String out = c.addSample(speedKmh: 200, accuracyM: 6, ts: sec(30), lat: 30.0025, lng: 31.2);
+      expect(out, MotionStates.stopped, reason: 'the step demanded grip nobody has');
+      expect(c.lastRawSpeedKmh, lessThan(1.5));
+    });
   });
 }
