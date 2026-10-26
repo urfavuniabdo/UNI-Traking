@@ -60,6 +60,26 @@ export const MOTION = {
    * instead of travelled ground (one teleport used to be able to add tens of km to a day).
    */
   MAX_CREDIBLE_SPEED_KMH: 250,
+  /**
+   * A phone does not walk — it drifts. Standing still in a city, the fix wandered 40 m out and back
+   * inside 7 minutes (net displacement: 1.4 m) while the point-to-point steps read 5-15 km/h, and the
+   * driver was shown as ماشي without moving his feet. So movement is judged on the NET displacement
+   * of a window of recent fixes — the mean of its older half to the mean of its newer half:
+   *  - MAX_NET_WINDOW_S: the window slides so a long silence cannot dilute a real walk away. 90 s is
+   *    the measured sweet spot: a 4.8 km/h walk still confirms 25 s after he starts, while a driver
+   *    who stops carries no walk evidence for even one fix longer.
+   *  - MOVED_CIRCLE_FACTOR: the net must clear this many accuracy circles (of the mean pair, which
+   *    shrinks with the square root of the fixes averaged), because 12 m of "accuracy" on a parked
+   *    phone is really 20-40 m of wander. Anything inside that bubble is subtracted out of his
+   *    speed, so a driver who never leaves it reads 0 km/h and STOPPED.
+   *  - MIN_NET_SAMPLES: below this many fixes the wander is not averaged enough to tell a 3 km/h
+   *    drift burst from a 3 km/h walk, so an immature window may only prove a VEHICLE (net above
+   *    WALK_MAX_KMH) — never a walk. Measured on his own two uploads: 0 of his standing and pacing
+   *    bursts read as a move, and a real walk is on the board 25 s after his first step.
+   */
+  MAX_NET_WINDOW_S: 90,
+  MOVED_CIRCLE_FACTOR: 2,
+  MIN_NET_SAMPLES: 6,
 } as const;
 
 export const RULE_DEFAULTS = {

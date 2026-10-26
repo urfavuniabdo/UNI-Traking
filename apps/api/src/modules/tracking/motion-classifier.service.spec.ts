@@ -38,23 +38,56 @@ describe('MotionClassifierService (pure)', () => {
     expect(r.changed).toBe(true);
   });
 
-  it('a fix that never left the anchor cannot outrun the radius over its window', () => {
-    // parked, phone screaming a stale 150 km/h: 12 m of noise over a minute is 0.72 km/h at best
-    const frozen = c.groundSpeed({ deviceKmh: 150, stepM: 0, stepDtS: 60, anchorM: 0, anchorDtS: 60, noiseRadiusM: 12 });
-    expect(frozen.speedKmh).toBeCloseTo(0.72, 2);
+  it('a fix that never left its bubble cannot outrun it', () => {
+    // parked, phone screaming a stale 150 km/h: nothing past the bubble is nothing travelled
+    const frozen = c.groundSpeed({ deviceKmh: 150, stepM: 0, stepDtS: 60, anchorM: 0, anchorDtS: 60, netSamples: 12, noiseRadiusM: 12 });
+    expect(frozen.speedKmh).toBe(0);
     expect(frozen.moved).toBe(false);
     expect(frozen.stationary).toBe(true);
-    // the same reading a heartbeat apart: still no trip's worth of ground, but not conclusive yet
-    const justLanded = c.groundSpeed({ deviceKmh: 150, stepM: 0, stepDtS: 5, anchorM: 0, anchorDtS: 5, noiseRadiusM: 12 });
-    expect(justLanded.speedKmh).toBeLessThanOrEqual(8.64);
-    expect(justLanded.stationary).toBe(false);
+    // the same reading a heartbeat apart — a position that has not moved is conclusive at any span
+    const justLanded = c.groundSpeed({ deviceKmh: 150, stepM: 0, stepDtS: 5, anchorM: 0, anchorDtS: 5, netSamples: 2, noiseRadiusM: 12 });
+    expect(justLanded.speedKmh).toBe(0);
+    expect(justLanded.stationary).toBe(true);
+  });
+
+  it('the drift burst he actually produced while standing reads واقف', () => {
+    // D0203, 2026-10-26 10:16:52→10:17:49: 104 m of wandering path, 1.4 m of net progress, the
+    // window means 21 m apart over 57 s — every one of those numbers used to say "ماشي".
+    const drift = c.groundSpeed({ deviceKmh: 6.2, stepM: 23, stepDtS: 14, anchorM: 21, anchorDtS: 57, netSamples: 10, noiseRadiusM: 12 });
+    expect(drift.moved).toBe(false);
+    // what survives the bubble is inside the stationary band, so the state machine reads واقف
+    expect(drift.speedKmh).toBeLessThan(MOTION.STATIONARY_SPEED_KMH);
+    expect(c.instantState(drift.speedKmh)).toBe('STOPPED');
+    expect(drift.stationary).toBe(true);
+  });
+
+  it('a window full of fixes needs less travel than a window of two', () => {
+    // 12 m of mean-to-mean displacement over 24 s is one phone's wander or another's slow crawl;
+    // the more samples back the mean, the smaller a move the coordinates are allowed to call.
+    const sparse = c.groundSpeed({ deviceKmh: 1.8, stepM: 6, stepDtS: 12, anchorM: 12, anchorDtS: 24, netSamples: 2, noiseRadiusM: 12 });
+    const dense = c.groundSpeed({ deviceKmh: 1.8, stepM: 6, stepDtS: 12, anchorM: 12, anchorDtS: 24, netSamples: 16, noiseRadiusM: 12 });
+    expect(sparse.moved).toBe(false);
+    expect(dense.moved).toBe(true);
+  });
+
+  it('a window younger than MIN_NET_SAMPLES may prove a vehicle, never a walk', () => {
+    // 40 m of mean-to-mean over 15 s = 9.6 km/h: above the walking band, so three fixes are enough
+    // to say he is in a moving car — and the trip opens on the second fix of his day.
+    const car = c.groundSpeed({ deviceKmh: 40, stepM: 100, stepDtS: 15, anchorM: 100, anchorDtS: 15, netSamples: 4, noiseRadiusM: 12 });
+    expect(car.moved).toBe(true);
+    // the same three fixes at 4.8 km/h sit exactly in the band GPS cannot resolve yet: no move, and
+    // so no phantom trip for a phone that has only averaged four wanderings.
+    const walkTooYoung = c.groundSpeed({ deviceKmh: 4.8, stepM: 20, stepDtS: 15, anchorM: 20, anchorDtS: 15, netSamples: 4, noiseRadiusM: 12 });
+    expect(walkTooYoung.moved).toBe(false);
   });
 
   it('confirms a move the coordinates show — walking included', () => {
-    const moved = c.groundSpeed({ deviceKmh: 40, stepM: 100, stepDtS: 15, anchorM: 100, anchorDtS: 15, noiseRadiusM: 12 });
+    const moved = c.groundSpeed({ deviceKmh: 40, stepM: 100, stepDtS: 15, anchorM: 100, anchorDtS: 15, netSamples: 8, noiseRadiusM: 12 });
     expect(moved).toEqual({ speedKmh: 40, moved: true, stationary: false });
-    // Doppler ~0 at walking pace: the metres covered carry the driver out of STOPPED
-    const walking = c.groundSpeed({ deviceKmh: 0.4, stepM: 6.7, stepDtS: 5, anchorM: 6.7, anchorDtS: 5, noiseRadiusM: 12 });
+    expect(moved).toEqual({ speedKmh: 40, moved: true, stationary: false });
+    // Doppler ~0 at walking pace: the 60 m his window travelled carry him out of STOPPED
+    const walking = c.groundSpeed({ deviceKmh: 0.4, stepM: 6.7, stepDtS: 5, anchorM: 60, anchorDtS: 45, netSamples: 10, noiseRadiusM: 12 });
+    expect(walking.moved).toBe(true);
     expect(walking.speedKmh).toBeCloseTo(4.8, 1);
   });
 

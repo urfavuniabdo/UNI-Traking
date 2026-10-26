@@ -13,7 +13,7 @@ import { PositionsService } from './positions.service';
 import type { PositionItemDto } from './dto';
 import { ALERT_DISPATCHER, REALTIME_PUBLISHER, type RealtimePublisher } from '../../common/contracts';
 
-// Isolated temp DB for the recorded field trace (§5 — a driver who walked must read ماشي).
+// Isolated temp DB for the recorded field trace (§5 — net travel decides, wander never does).
 const DB = 'file:../tmp-field-trace.db';
 process.env.DATABASE_URL = DB;
 
@@ -23,9 +23,10 @@ let prisma: PrismaService;
 let positions: PositionsService;
 
 /**
- * D0203, 2026-10-26 08:22→08:32 UTC, exactly as uploaded: he stood for two minutes and then
- * walked — 13/15/21/40/15/27 m steps, the phone judging 3.4→18→8.3→4.7→9.1→8.2 km/h.
- * Every one of those rows came back motionState=STOPPED on the phone and on the board.
+ * D0203, 2026-10-26 08:22→08:32 UTC, exactly as uploaded: he stood for two minutes and then paced
+ * the courtyard — 13/15/21/40/15/27 m steps, the phone judging 3.4→18→8.3→4.7→9.1→8.2 km/h.
+ * 119 m of path, 7.5 m of net travel: what he walked out he walked back. Measured end to end, no
+ * coordinate rule can call that ماشي and still call standing still واقف — §5 says so out loud.
  */
 const TRACE: Array<[string, number, number, number, number]> = [
   ['2026-10-26T08:22:38.966Z', 30.0969929, 31.3816802, 0, 11.7],
@@ -124,19 +125,71 @@ afterAll(async () => {
   }
 });
 
-describe('the recorded field trace of a driver who walked (§5)', () => {
-  it('leaves STOPPED while he is on foot', async () => {
+describe('the recorded field trace of a driver who stood and then paced (§5)', () => {
+  it('reads واقف for 119 m of pacing that came back to where it started', async () => {
     const { deviceId, employeeId } = await mkDriver();
     await positions.ingestBatch({ deviceId, batchSeq: 1, positions: toItems() });
 
-    const state = await stateOf(employeeId);
-    expect(state).not.toBe('STOPPED');
-    expect(['WALKING', 'RIDING']).toContain(state);
+    // His feet did move — but the coordinates say he went 7.5 m in eleven minutes, and a board that
+    // calls that ماشي is the board that called standing still ماشي last week. §5 prices the two
+    // apart on net travel only; proving steps needs the accelerometer (CONTRACT §5).
+    expect(await stateOf(employeeId)).toBe('STOPPED');
   });
 
   it('does not invent movement out of the two standing minutes before it', async () => {
     const { deviceId, employeeId } = await mkDriver();
     await positions.ingestBatch({ deviceId, batchSeq: 1, positions: toItems().slice(0, 6) });
     expect(await stateOf(employeeId)).toBe('STOPPED');
+  });
+
+  // The walk this trace never contained: the same uploads with the metres actually going somewhere
+  // (10 m of one-way travel per fix, on top of his own scatter), which is what §5 needs to see.
+  const M_PER_DEG_LNG = 96_315;
+  const walked = (): PositionItemDto[] =>
+    toItems().slice(6).map((p, i) => ({ ...p, lng: p.lng - (10 * (i + 1)) / M_PER_DEG_LNG }));
+
+  it('leaves STOPPED when the same cadence does go somewhere', async () => {
+    const { deviceId, employeeId } = await mkDriver();
+    await positions.ingestBatch({ deviceId, batchSeq: 1, positions: toItems().slice(0, 6) });
+    expect(await stateOf(employeeId)).toBe('STOPPED');
+
+    await positions.ingestBatch({ deviceId, batchSeq: 2, positions: walked() });
+    // out of STOPPED, and how far is the phone's say: those rows report up to 18 km/h, so §5 gives
+    // him RIDING — the coordinates prove the travel, the device only picks the band.
+    expect(['WALKING', 'RIDING']).toContain(await stateOf(employeeId));
+  });
+});
+
+/**
+ * Wael Gamal (D0203), 2026-10-26 10:11→10:17 UTC — pulled out of the live database with
+ * GET /positions/route, byte for byte, the rows his own phone uploaded while he stood in place.
+ * The deployed engine stored WALKING for the last three of them: 104 m of wandering path, 1.4 m of
+ * travel, a 15.3 km/h Doppler reading at 16 m of accuracy. This is the bug he reported.
+ */
+const STOOD_STILL: PositionItemDto[] = [
+  { clientTs: '2026-10-26T10:11:07.080Z', lat: 30.0970296, lng: 31.3815935, speed: 0.2, accuracy: 5.034999847412109 },
+  { clientTs: '2026-10-26T10:16:52.492Z', lat: 30.097156, lng: 31.3817221, speed: 0.9, accuracy: 13.86699962615967 },
+  { clientTs: '2026-10-26T10:16:55.497Z', lat: 30.0972175, lng: 31.3818346, speed: 15.3, accuracy: 16.78499984741211 },
+  { clientTs: '2026-10-26T10:17:09.496Z', lat: 30.0972779, lng: 31.3819183, speed: 4.9, accuracy: 4.586999893188477 },
+  { clientTs: '2026-10-26T10:17:21.493Z', lat: 30.0973315, lng: 31.3820028, speed: 3.6, accuracy: 5.827000141143799 },
+  { clientTs: '2026-10-26T10:17:34.950Z', lat: 30.0971705, lng: 31.3817991, speed: 4.3, accuracy: 30.29500007629395 },
+  { clientTs: '2026-10-26T10:17:49.593Z', lat: 30.0970196, lng: 31.3816018, speed: 6.2, accuracy: 11.09200000762939 },
+];
+
+describe('the standing burst he reported, replayed from the live rows (§5)', () => {
+  it('reads واقف at every fix, not ماشي at the last three', async () => {
+    const { deviceId, employeeId } = await mkDriver();
+    for (const item of STOOD_STILL) {
+      await positions.ingestBatch({ deviceId, batchSeq: 1, positions: [item] });
+      expect(await stateOf(employeeId)).toBe('STOPPED');
+    }
+  });
+
+  it('opens no journey for a driver who never left the courtyard', async () => {
+    const { deviceId, employeeId } = await mkDriver();
+    await positions.ingestBatch({ deviceId, batchSeq: 1, positions: STOOD_STILL });
+    expect(await prisma.trip.count({ where: { employeeId } })).toBe(0);
+    const rows = await prisma.position.findMany({ where: { employeeId }, orderBy: { clientTs: 'asc' } });
+    expect(rows.map((r) => r.motionState)).toEqual(rows.map(() => 'STOPPED'));
   });
 });

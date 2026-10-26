@@ -23,10 +23,11 @@ interface Track {
   motion: MotionTrack;
   last: { lat: number; lng: number; ts: number; speedKmh: number | null } | null;
   /**
-   * Last position whose *movement* was confirmed by the coordinates. Held still while the phone
-   * stays inside its own noise circle, so drift can never be read as a trip.
+   * The fixes the net-displacement window is measured over, oldest first. A *point-to-point* step
+   * cannot tell a walk from GPS wander — standing still in a courtyard wandered 40 m out and back in
+   * 7 minutes and read as 6.2 km/h — so movement is judged between the means of the window's halves.
    */
-  anchor: { lat: number; lng: number; ts: number } | null;
+  window: NetFix[];
   speedOverStreak: number;
   overRunActive: boolean;
   overSinceTs: number | null;
@@ -59,6 +60,17 @@ const MAX_BATCH = 500;
  * metres when parked, so the accuracy circle alone is not a floor.
  */
 const NOISE_FLOOR_M = 12;
+
+/** One fix inside the net-displacement window: where it was, when, and how far it could have lied. */
+interface NetFix {
+  lat: number;
+  lng: number;
+  ts: number;
+  noiseM: number;
+}
+
+/** How many fixes the window keeps — enough means to average drift out, few enough to stay cheap. */
+const NET_WINDOW_MAX_FIXES = 24;
 
 /** A run whose device has said nothing for this long is over — check-out, a killed app or a deploy. */
 const TRIP_IDLE_MS = 600_000;
@@ -137,11 +149,47 @@ export class PositionsService {
     return createHash('sha1').update(canonical).digest('hex');
   }
 
+  /**
+   * Adds a fix to the net window and slides it: older than MAX_NET_WINDOW_S (or more than
+   * NET_WINDOW_MAX_FIXES of them) falls off the front, so a long walk is judged on the last two
+   * minutes and not on where the day started.
+   */
+  private pushWindow(window: NetFix[], fix: NetFix): void {
+    window.push(fix);
+    while (window.length > 1 && fix.ts - window[0].ts > MOTION.MAX_NET_WINDOW_S * 1000) window.shift();
+    while (window.length > NET_WINDOW_MAX_FIXES) window.shift();
+  }
+
+  /**
+   * The net-displacement evidence of a window: the mean of its older half to the mean of its newer
+   * half, over the whole window. GPS wander is zero-mean noise, so it cancels out of a mean — a
+   * driver standing still in a courtyard measured 21 m between the two means over 40 s while his
+   * fixes scattered 40 m around him, and every point-to-point rule in the pipeline called that
+   * "ماشي". Shorter sub-windows were tried and are worse: they throw away the averaging that makes
+   * the mean trustworthy, and his own standing burst then read as a move.
+   */
+  private netEvidence(window: NetFix[]): { anchorM: number; anchorDtS: number | null; netSamples: number; noiseRadiusM: number } {
+    const mean = (rows: NetFix[]): NetFix => ({
+      lat: rows.reduce((a, r) => a + r.lat, 0) / rows.length,
+      lng: rows.reduce((a, r) => a + r.lng, 0) / rows.length,
+      ts: Math.round(rows.reduce((a, r) => a + r.ts, 0) / rows.length),
+      noiseM: Math.round(rows.reduce((a, r) => a + r.noiseM, 0) / rows.length),
+    });
+    const noiseRadiusM = mean(window).noiseM;
+    if (window.length < 2) return { anchorM: 0, anchorDtS: null, netSamples: window.length, noiseRadiusM };
+    const half = Math.ceil(window.length / 2);
+    const older = mean(window.slice(0, half));
+    const newer = mean(window.slice(half));
+    const anchorDtS = (newer.ts - older.ts) / 1000;
+    if (anchorDtS <= 0) return { anchorM: 0, anchorDtS: null, netSamples: window.length, noiseRadiusM };
+    return { anchorM: this.geo.distanceM(older, newer), anchorDtS, netSamples: window.length, noiseRadiusM };
+  }
+
   private newTrack(): Track {
     return {
       motion: this.classifier.newTrack(),
       last: null,
-      anchor: null,
+      window: [],
       speedOverStreak: 0,
       overRunActive: false,
       overSinceTs: null,
@@ -327,34 +375,32 @@ export class PositionsService {
     const distanceFromLast = track.last ? this.geo.distanceM(track.last, { lat: p.lat, lng: p.lng }) : 0;
 
     // Speed comes from the coordinates first. The phone's own reading only stands when the ground
-    // agrees he went somewhere: a fix that never left the anchor's noise circle is a parked phone,
-    // whatever its Doppler claims (a cached last-known position used to read as 150 km/h and open
-    // a trip for a driver sitting still at the site).
-    if (!track.anchor) track.anchor = { lat: p.lat, lng: p.lng, ts: p.ts };
-    const anchor = track.anchor;
-    const anchorM = this.geo.distanceM(anchor, { lat: p.lat, lng: p.lng });
-    const anchorDtS = (p.ts - anchor.ts) / 1000;
+    // agrees he went somewhere — and "somewhere" is the net displacement of a window, not the step
+    // from the last fix: a fix that never left its noise circle is a parked phone whatever its
+    // Doppler claims (a cached last-known position used to read as 150 km/h and open a trip for a
+    // driver sitting still, and a parked phone's 40 m wander out-and-back read as a 6 km/h stroll).
     const noiseRadiusM = Math.min(Math.max(p.accuracyM ?? 0, NOISE_FLOOR_M), th?.accuracyDriftM ?? NOISE_FLOOR_M);
+    this.pushWindow(track.window, { lat: p.lat, lng: p.lng, ts: p.ts, noiseM: noiseRadiusM });
+    const net = this.netEvidence(track.window);
     const ground = this.classifier.groundSpeed({
       deviceKmh: p.speedKmh,
       stepM: distanceFromLast,
       stepDtS: dtS,
-      anchorM,
-      anchorDtS: anchorDtS > 0 ? anchorDtS : null,
-      noiseRadiusM,
+      ...net,
     });
     const speed = ground.speedKmh;
-    if (ground.moved) track.anchor = { lat: p.lat, lng: p.lng, ts: p.ts };
 
-    // absurd-jump guard → the point is not credible ground. Mark it, then re-anchor and move the
-    // window there: a driver who genuinely was relocated must not stay "behind" his own position.
+    // absurd-jump guard → the point is not credible ground. Mark it, then start the window again
+    // from here: a driver who genuinely was relocated must not stay "behind" his own position.
     if (th && this.classifier.isAbsurd(speed, distanceFromLast, dtS, th.accuracyDriftM)) {
       await this.prisma.position.update({ where: { id: p.id }, data: { motionState: 'UNKNOWN' } }).catch(() => undefined);
-      track.anchor = { lat: p.lat, lng: p.lng, ts: p.ts };
+      track.window = [{ lat: p.lat, lng: p.lng, ts: p.ts, noiseM: noiseRadiusM }];
       track.last = { lat: p.lat, lng: p.lng, ts: p.ts, speedKmh: null };
       return alertsRaised;
     }
 
+    // Two fixes and a span is all the rule needs; the window only keeps growing more confident
+    // from here. The first minute of a day therefore judges on a small bubble, not on nothing.
     const res = ground.stationary ? this.classifier.confirmStationary(track.motion, speed) : this.classifier.classify(track.motion, speed);
     const state: MotionState = res.state;
 
@@ -784,7 +830,7 @@ export class PositionsService {
     const drift = RULE_DEFAULTS.accuracyDriftM;
     const out: ReplayPoint[] = [];
     let last: { lat: number; lng: number; ts: number } | null = null;
-    let anchor: { lat: number; lng: number; ts: number } | null = null;
+    const window: NetFix[] = [];
     const day = this.dropSpikes(rows);
     day.forEach(({ row: r, credible }, i) => {
       const ts = r.clientTs.getTime();
@@ -802,21 +848,19 @@ export class PositionsService {
       // The day's first fix has no "where from" behind it, so it is read against the window ahead —
       // the evidence the live pipeline gets one sample later. A phone parked since check-in stops
       // showing a journey that started before it had anywhere to have come from.
-      const deviceKmh = anchor ? r.speedKmh : (this.forwardSpeedKmh(day, i, noiseRadiusM) ?? r.speedKmh);
-      if (!anchor) anchor = { lat: r.lat, lng: r.lng, ts };
-      const anchorDtS = (ts - anchor.ts) / 1000;
+      const deviceKmh = window.length ? r.speedKmh : (this.forwardSpeedKmh(day, i, noiseRadiusM) ?? r.speedKmh);
+      this.pushWindow(window, { lat: r.lat, lng: r.lng, ts, noiseM: noiseRadiusM });
+      const net = this.netEvidence(window);
       const ground = this.classifier.groundSpeed({
         deviceKmh,
         stepM,
         stepDtS: dtS,
-        anchorM: this.geo.distanceM(anchor, r),
-        anchorDtS: anchorDtS > 0 ? anchorDtS : null,
-        noiseRadiusM,
+        ...net,
       });
-      if (ground.moved) anchor = { lat: r.lat, lng: r.lng, ts };
       const speed = ground.speedKmh;
       if (this.classifier.isAbsurd(speed, stepM, dtS, drift)) {
-        anchor = { lat: r.lat, lng: r.lng, ts };
+        window.length = 0;
+        this.pushWindow(window, { lat: r.lat, lng: r.lng, ts, noiseM: noiseRadiusM });
         last = { lat: r.lat, lng: r.lng, ts };
         out.push({ ...r, motionState: 'UNKNOWN' as MotionState, speedKmh: round(speed, 1), credible: false });
         return;

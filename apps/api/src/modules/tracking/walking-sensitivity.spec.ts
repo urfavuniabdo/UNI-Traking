@@ -105,7 +105,7 @@ afterAll(async () => {
 });
 
 describe('a driver on foot must not read as STOPPED (§5)', () => {
-  it('walks out of STOPPED once the phone uploads the speed its fixes covered', async () => {
+  it('walks out of STOPPED once the window has proved the walk', async () => {
     const { deviceId, employeeId } = await mkDriver();
     const t0 = Date.now();
     const stand = (s: number): PositionItemDto => ({
@@ -125,11 +125,15 @@ describe('a driver on foot must not read as STOPPED (§5)', () => {
       speed: 4.8, // what the new build uploads: max(doppler, metres covered / dt)
       accuracy: 5,
     });
-    await positions.ingestBatch({
-      deviceId,
-      batchSeq: 2,
-      positions: [walk(15, 1), walk(20, 2), walk(25, 3), walk(30, 4)],
-    });
+    const step = (n: number): PositionItemDto => walk(10 + n * 5, n);
+
+    // 20 s of walking is 27 m of net travel against a 12 m-per-fix wander: the coordinates cannot
+    // separate it from standing yet, and the board must say واقف rather than guess.
+    await positions.ingestBatch({ deviceId, batchSeq: 2, positions: [step(1), step(2), step(3), step(4)] });
+    expect(await stateOf(employeeId)).toBe('STOPPED');
+
+    // By ~50 s the window has MIN_NET_SAMPLES fixes of one-direction travel, and he leaves STOPPED.
+    await positions.ingestBatch({ deviceId, batchSeq: 3, positions: [step(5), step(6), step(7), step(8), step(9), step(10)] });
     expect(await stateOf(employeeId)).toBe('WALKING');
   });
 

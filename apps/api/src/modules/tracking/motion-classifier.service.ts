@@ -19,8 +19,15 @@ export interface GroundSpeedInput {
   deviceKmh: number | null;
   stepM: number; // metres covered since the previous accepted fix
   stepDtS: number | null;
-  anchorM: number; // metres since the last position whose movement was confirmed
+  /**
+   * Net displacement over the window: the mean of its older half to the mean of its newer half.
+   * Means, not endpoints — GPS drift is zero-mean noise, so the noise cancels out of a mean and a
+   * driver standing still has nothing to report, while one on foot translates the whole window.
+   */
+  anchorM: number;
   anchorDtS: number | null;
+  /** fixes in the window — the more of them, the less a single wander counts against the move */
+  netSamples: number;
   /** his own accuracy circle, floored — inside it a "move" is a guess, not a fact */
   noiseRadiusM: number;
 }
@@ -52,7 +59,9 @@ export interface HarshResult {
  *  - EMA speed smoothing (SPEED_EMA_ALPHA)
  *  - hysteresis: HYSTERESIS_SAMPLES consecutive same-state samples before switching
  *  - sample gating: drop poor-accuracy (ACCURACY_REJECT_M) / too-fast (MIN_INTERVAL_S) samples
- *  - groundSpeed: the coordinates, not the phone's speed field, decide whether he moved
+ *  - groundSpeed: the coordinates, not the phone's speed field, decide whether he moved — and they
+ *    decide it on the NET displacement of a window measured between the means of its two halves,
+ *    because drift is zero-mean noise and endpoint-to-endpoint steps read it as speed
  * Thresholds are §5 of the CONTRACT. No DB access → trivially unit-testable.
  */
 @Injectable()
@@ -93,29 +102,47 @@ export class MotionClassifierService {
   }
 
   /**
-   * The speed the *ground* supports, from coordinates alone.
-   *  - movement confirmed (anchorM past the noise circle) → the phone's reading stands, and the
-   *    metres actually covered can raise it (a walking phone under-reports by design).
-   *  - no confirmed movement → he is where we last saw him, so nothing can be faster than the
-   *    radius allows over the time since that anchor. A parked phone reporting 150 km/h reads
-   *    ~0 here: the Doppler value cannot outrun a position that never changed.
+   * The speed the *ground* supports, from coordinates alone. One question, at any span: did the
+   * window actually go somewhere?
+   *  - yes — the window's net displacement (mean of its older half to mean of its newer half) beat
+   *    both the noise bubble, MOVED_CIRCLE_FACTOR circles — a parked phone wanders three times its
+   *    own "accuracy", 40 m out and back at 5 m — and what the stationary band could drift over the
+   *    same span. Then the phone's reading stands, and the metres covered can raise it (a walking
+   *    phone under-reports Doppler by design).
+   *  - no — his speed is the displacement left over *after* the bubble is subtracted, which inside
+   *    the bubble is nothing. "He has not left his bubble in half a minute" is not an estimate any
+   *    more: it is a fact, so STOPPED commits without waiting for the hysteresis samples.
    */
   groundSpeed(i: GroundSpeedInput): GroundSpeedResult {
     // A step smaller than the noise circle is not a step: the phone ping-ponging 4 m either way at
-    // 25 m accuracy covers "12 km/h" on paper every 5 s without going anywhere. Only a step that
-    // leaves the circle carries evidence; the anchor window below still picks up a real walk.
+    // 25 m accuracy covers "12 km/h" on paper every 5 s without going anywhere.
     const stepDerived =
       i.stepDtS !== null && i.stepDtS > 0 && i.stepM > i.noiseRadiusM ? (i.stepM / i.stepDtS) * 3.6 : null;
-    const anchorDerived = i.anchorDtS !== null && i.anchorDtS > 0 ? (i.anchorM / i.anchorDtS) * 3.6 : null;
-    const derived = this.resolveSpeed(stepDerived, anchorDerived);
-    if (i.anchorM > i.noiseRadiusM) return { speedKmh: this.resolveSpeed(i.deviceKmh, derived), moved: true, stationary: false };
-    if (i.anchorDtS === null || i.anchorDtS <= 0) return { speedKmh: this.resolveSpeed(i.deviceKmh, derived), moved: false, stationary: false };
-    const cap = (i.noiseRadiusM / i.anchorDtS) * 3.6;
-    const candidate = this.resolveSpeed(i.deviceKmh, derived);
-    const speedKmh = candidate === null ? null : Math.min(candidate, cap);
-    // Nothing it reports can outrun the radius over the time since the anchor, and once that
-    // bound falls inside the stationary band the reading is no longer an estimate — it is a fact.
-    return { speedKmh, moved: false, stationary: cap <= MOTION.STATIONARY_SPEED_KMH };
+    const spanS = i.anchorDtS ?? 0;
+    const netKmh = spanS > 0 ? (i.anchorM / spanS) * 3.6 : null;
+    const candidate = this.resolveSpeed(i.deviceKmh, this.resolveSpeed(stepDerived, netKmh));
+    // One fix is not a window: the coordinates have no opinion yet, so the phone's reading stands and
+    // no state is confirmed either way. The next fix — seconds later for a moving device — settles it.
+    if (i.netSamples < 2) return { speedKmh: candidate, moved: false, stationary: false };
+    // The bubble around the *pair of means*, not around a single fix: averaging n fixes cuts the
+    // wander by √n, so the more of the window the phone has uploaded, the smaller a real
+    // translation has to be before the coordinates are allowed to call it a move.
+    const bubbleM = (MOTION.MOVED_CIRCLE_FACTOR * i.noiseRadiusM * Math.sqrt(2)) / Math.sqrt(Math.max(2, i.netSamples));
+    // He left his bubble only if the window travelled more than the bubble *and* more than the
+    // stationary band could itself wander across the same time.
+    const allowanceM = Math.max(bubbleM, (MOTION.STATIONARY_SPEED_KMH / 3.6) * spanS);
+    // A window younger than MIN_NET_SAMPLES fixes has averaged too little wander to tell a 3 km/h
+    // drift burst from a 3 km/h walk — but a car is far above the walking band, so an immature
+    // window is allowed to prove a vehicle and nothing else.
+    const provesVehicle = netKmh !== null && netKmh > MOTION.WALK_MAX_KMH;
+    if (spanS > 0 && i.anchorM > allowanceM && (i.netSamples >= MOTION.MIN_NET_SAMPLES || provesVehicle)) {
+      return { speedKmh: candidate, moved: true, stationary: false };
+    }
+
+    // What the coordinates prove past the bubble is his speed; the part inside it is noise.
+    const bounded = spanS > 0 ? (Math.max(0, i.anchorM - bubbleM) / spanS) * 3.6 : 0;
+    const speedKmh = candidate === null ? null : Math.min(candidate, bounded);
+    return { speedKmh, moved: false, stationary: bounded <= MOTION.STATIONARY_SPEED_KMH };
   }
 
   /**

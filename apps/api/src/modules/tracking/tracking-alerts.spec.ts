@@ -505,13 +505,15 @@ describe('POST /positions/batch — an office employee is never tracked (CONTRAC
   it('a driver on the same code path is still tracked, so the guard is per kind not global', async () => {
     const { employeeId, deviceId } = await mkDriver({ lat: 30.0, lng: 30.0, radiusM: 100000 });
     const t0 = Date.now();
+    // 60 km/h covers a kilometre a minute — the coordinates and the phone have to say the same
+    // thing, or the net-window rule is right to call the device a liar and keep him parked.
     const res = await positions.ingestBatch({
       deviceId,
       batchSeq: 1,
       positions: [
         { clientTs: iso(t0), lat: 30.0, lng: 30.0, speed: 60, accuracy: 5 },
-        { clientTs: iso(t0 + 60000), lat: 30.0009, lng: 30.0, speed: 190, accuracy: 5 },
-        { clientTs: iso(t0 + 120000), lat: 30.0018, lng: 30.0, speed: 0, accuracy: 5 },
+        { clientTs: iso(t0 + 60000), lat: 30.009, lng: 30.0, speed: 60, accuracy: 5 },
+        { clientTs: iso(t0 + 120000), lat: 30.018, lng: 30.0, speed: 60, accuracy: 5 },
       ],
     });
     expect(res.accepted).toBe(3);
