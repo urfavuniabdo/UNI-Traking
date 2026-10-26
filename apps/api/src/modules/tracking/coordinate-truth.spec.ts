@@ -154,6 +154,14 @@ describe('the coordinates decide the motion state (§5)', () => {
     expect(await prisma.trip.count({ where: { employeeId } })).toBe(0);
     const rows = await prisma.position.findMany({ where: { employeeId }, orderBy: { clientTs: 'asc' } });
     expect(rows[rows.length - 1].speedKmh).toBeLessThan(1.5);
+
+    // and the day he is shown for has to agree with the chip: no road, no route line, 0 km.
+    const parked = (await positions.route(employeeId, new Date(t0).toISOString().slice(0, 10))) as {
+      distanceKm: number;
+      geojson: { coordinates: [number, number][] };
+    };
+    expect(parked.distanceKm).toBe(0);
+    expect(parked.geojson.coordinates.length).toBeLessThan(4);
   });
 
   it('a real drive out of the site still opens a trip and reads في رحلة', async () => {

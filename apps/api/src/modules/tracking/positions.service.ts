@@ -4,7 +4,8 @@ import { createHash } from 'node:crypto';
 import type { MotionState } from '../../shared/constants';
 import { EMPLOYEE_KIND, MOTION, RULE_DEFAULTS, SEVERITY, type AlertType } from '../../shared/constants';
 import { PrismaService } from '../../common/prisma.service';
-import { GeoService } from '../../common/geo/geo.service';
+import { GeoService, NOISE_FLOOR_M } from '../../common/geo/geo.service';
+import { TraceService } from '../../common/geo/trace.service';
 import { json, parseJson, round, workDateOf, isValidLat, isValidLng } from '../../common/utils';
 import {
   ALERT_DISPATCHER,
@@ -54,26 +55,6 @@ interface Track {
 }
 
 const MAX_BATCH = 500;
-
-/**
- * Tightest radius treated as "he did not move". A phone with 1 m accuracy still jitters a few
- * metres when parked, so the accuracy circle alone is not a floor.
- */
-const NOISE_FLOOR_M = 12;
-
-/**
- * A silence longer than the net window means the fix at the other end of it was never *seen*
- * moving: the device dozed and woke holding a position from somewhere else. §5 refuses to call that
- * a walk, and the trace refuses to draw it as ground.
- */
-const UNSEEN_LEG_S = MOTION.MAX_NET_WINDOW_S;
-
-/**
- * How many beyond-the-band fixes an excursion may hold before it is a journey rather than a blip.
- * A device that is awake reports every 15-60 s, so a run this long already covers minutes of road —
- * the pass has no business judging it, and a real round trip is left exactly as it happened.
- */
-const MAX_UNSEEN_RUN_FIXES = 6;
 
 /** One fix inside the net-displacement window: where it was, when, and how far it could have lied. */
 interface NetFix {
@@ -137,14 +118,6 @@ interface ReplayRow {
 /** A replayed position: the raw fix plus what the coordinates say about it. */
 type ReplayPoint = ReplayRow & { motionState: MotionState; speedKmh: number | null; credible: boolean };
 
-/** What the trace passes need from a row: where, when, and how far that fix could have lied. */
-interface TraceRow {
-  lat: number;
-  lng: number;
-  clientTs: Date;
-  accuracyM: number | null;
-}
-
 const META_TTL_MS = 60_000;
 
 @Injectable()
@@ -160,6 +133,7 @@ export class PositionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly geo: GeoService,
+    private readonly trace: TraceService,
     private readonly rules: RulesService,
     private readonly classifier: MotionClassifierService,
     @Optional() @Inject(ALERT_DISPATCHER) private readonly dispatcher?: AlertDispatcher,
@@ -660,16 +634,15 @@ export class PositionsService {
       orderBy: { clientTs: 'asc' },
       select: { lat: true, lng: true, clientTs: true, speedKmh: true, accuracyM: true, bearing: true, buffered: true, stale: true },
     });
-    const trace = this.groundTrace(rows);
+    const trace = this.trace.groundTrace(rows);
     let distanceM = 0;
     let maxStepKmh = 0;
     for (let i = 1; i < trace.length; i++) {
-      const a = { lat: trace[i - 1].lat, lng: trace[i - 1].lng, at: trace[i - 1].clientTs.getTime() };
-      const b = { lat: trace[i].lat, lng: trace[i].lng, at: trace[i].clientTs.getTime() };
-      const m = this.geo.credibleDistanceM(a, b);
-      distanceM += m;
-      const dtS = (b.at - a.at) / 1000;
-      if (dtS > 0) maxStepKmh = Math.max(maxStepKmh, (m / dtS) * 3.6);
+      const a = trace[i - 1];
+      const b = trace[i];
+      distanceM += this.trace.stepMetres(a, b);
+      const dtS = (b.clientTs.getTime() - a.clientTs.getTime()) / 1000;
+      if (dtS > 0) maxStepKmh = Math.max(maxStepKmh, (this.geo.distanceM(a, b) / dtS) * 3.6);
     }
     const distanceKm = distanceM / 1000;
     const hours = Math.max(1 / 3600, (endedAt - open.startedAt) / 3600_000);
@@ -790,86 +763,6 @@ export class PositionsService {
   }
 
   /**
-   * The day without the jumps. A point that can only be reached from the previous kept one faster
-   * than MAX_CREDIBLE_SPEED_KMH was never ground — a cached last-known fix, a re-fix after a
-   * tunnel, a relocation between sites — and drawing it is what makes a parked driver look like he
-   * crossed the city. Rows the ingest already rejected (`motionState: 'UNKNOWN'`) stay out too.
-   */
-  private groundTrace<T extends TraceRow>(rows: T[]): T[] {
-    const day = this.dropSpikes(rows);
-    this.dropOutAndBack(day);
-    return day.filter((x) => x.credible).map((x) => x.row);
-  }
-
-  /**
-   * Pass 1 of the replay: fixes that cannot be ground. A position needing more than
-   * MAX_CREDIBLE_SPEED_KMH from the last kept one is a spike — unless the fix right after it lands
-   * on the same spot, which is what a real relocation looks like (he moved and stayed there). A
-   * cached last-known position re-published in the middle of the day is the other case: there and
-   * back, and it is what used to draw a detour across a driver who never left the yard.
-   */
-  private dropSpikes<T extends TraceRow>(rows: T[]): { row: T; credible: boolean }[] {
-    const out: { row: T; credible: boolean }[] = [];
-    let kept: T | null = null;
-    rows.forEach((r, i) => {
-      if (!kept) {
-        kept = r;
-        out.push({ row: r, credible: true });
-        return;
-      }
-      const dtS = (r.clientTs.getTime() - kept.clientTs.getTime()) / 1000;
-      const kmh = dtS > 0 ? (this.geo.distanceM(kept, r) / dtS) * 3.6 : Infinity;
-      if (kmh <= MOTION.MAX_CREDIBLE_SPEED_KMH) {
-        kept = r;
-        out.push({ row: r, credible: true });
-        return;
-      }
-      const n = rows[i + 1];
-      const staysThere = !!n && this.geo.distanceM(r, n) <= Math.max(n.accuracyM ?? 0, NOISE_FLOOR_M);
-      if (staysThere) kept = r;
-      out.push({ row: r, credible: staysThere });
-    });
-    return out;
-  }
-
-  /**
-   * Pass 2 of the trace: the round trip nobody saw. A run of fixes that leaves the day's drift band
-   * and comes back into it covered no ground unless the road itself was reported — fixes a normal
-   * cadence apart on the way out *and* on the way back. A phone that dozed and woke holding a cached
-   * fix from the other side of the city uploads one point 1.2 km away, maybe a second beside it,
-   * then lands back where it started: the net window never existed across either leg, so the
-   * coordinates never claimed the trip. Drawing it anyway gave a driver who had not moved since
-   * check-in a 7 km line while his state read متوقف — the line must answer to the same evidence the
-   * state does. Rejected fixes stay in the day, flagged `credible: false`, out of the line, the
-   * mileage and the stops together.
-   */
-  private dropOutAndBack(day: { row: TraceRow; credible: boolean }[]): void {
-    const band = RULE_DEFAULTS.accuracyDriftM;
-    const apartS = (a: TraceRow, b: TraceRow) => Math.abs(b.clientTs.getTime() - a.clientTs.getTime()) / 1000;
-    const kept = day.filter((d) => d.credible);
-    let i = 0;
-    for (;;) {
-      const anchor = kept[i]?.row;
-      if (!anchor) return;
-      let j = i + 1;
-      while (j < kept.length && this.geo.distanceM(anchor, kept[j].row) <= band) j++;
-      if (j >= kept.length) return;
-      let k = j;
-      // Only a short blip can be a ghost: look for the return within the cap, never across a journey.
-      while (k < kept.length && k - j < MAX_UNSEEN_RUN_FIXES && this.geo.distanceM(anchor, kept[k].row) > band) k++;
-      const cameBack = k < kept.length && this.geo.distanceM(anchor, kept[k].row) <= band;
-      // Both legs witnessed at the device's own cadence, or the excursion is a claim on thin air.
-      const witnessed =
-        apartS(anchor, kept[j].row) <= UNSEEN_LEG_S &&
-        (!cameBack || apartS(kept[k - 1].row, kept[k].row) <= UNSEEN_LEG_S);
-      if (cameBack && !witnessed) for (let m = j; m < k; m++) kept[m].credible = false;
-      // Either way the day carries on from past the excursion: back at the anchor, or relocated to
-      // the place he stayed at.
-      i = cameBack ? k : j;
-    }
-  }
-
-  /**
    * Re-derives a whole day from the raw coordinates with the current ground rule (the same
    * classifier the live pipeline runs). The phone's speed field never decides anything here, so a
    * day recorded by an older build — a parked phone re-publishing its cached position at 150 km/h —
@@ -882,8 +775,8 @@ export class PositionsService {
     const out: ReplayPoint[] = [];
     let last: { lat: number; lng: number; ts: number } | null = null;
     const window: NetFix[] = [];
-    const day = this.dropSpikes(rows);
-    this.dropOutAndBack(day);
+    const day = this.trace.dropSpikes(rows);
+    this.trace.dropOutAndBack(day);
     day.forEach(({ row: r, credible }, i) => {
       const ts = r.clientTs.getTime();
       if (!credible) {
@@ -939,16 +832,6 @@ export class PositionsService {
     return d <= noiseRadiusM ? 0 : kmh;
   }
 
-  /**
-   * A stop is on the day only where a fix the trace stands behind happened. A cached fix from the
-   * other side of the city used to plant an amber marker a kilometre from a driver who never moved,
-   * contradicting the line right next to it.
-   */
-  private groundedStops<T extends { lat: number; lng: number }, S extends { lat: number; lng: number }>(trace: T[], stops: S[]): S[] {
-    const band = RULE_DEFAULTS.accuracyDriftM;
-    return stops.filter((s) => trace.some((t) => this.geo.distanceM(t, s) <= band));
-  }
-
   private async rebuildRouteLine(employeeId: string, workDate: string, track: Track): Promise<void> {
     const dayStart = new Date(`${workDate}T00:00:00.000Z`);
     const dayEnd = new Date(`${workDate}T23:59:59.999Z`);
@@ -959,7 +842,7 @@ export class PositionsService {
     });
     if (!positions.length) return;
     // The same trace GET /positions/route draws, so the stored line can never disagree with it.
-    const simplified = this.geo.simplify(this.groundTrace(positions).map((p) => ({ lat: p.lat, lng: p.lng })), 25);
+    const simplified = this.geo.simplify(this.trace.groundTrace(positions).map((p) => ({ lat: p.lat, lng: p.lng })), 25);
     await this.prisma.routeLine
       .upsert({
         where: { employeeId_workDate: { employeeId, workDate } },
@@ -1151,13 +1034,9 @@ export class PositionsService {
       orderBy: { startedAt: 'asc' },
     });
 
-    // distance (km): sum of haversine over consecutive clientTs-ordered points — credible steps only.
+    // distance (km): the ground under the credible trace — a step inside the noise circle counts zero.
     let distanceM = 0;
-    for (let i = 1; i < trace.length; i++)
-      distanceM += this.geo.credibleDistanceM(
-        { lat: trace[i - 1].lat, lng: trace[i - 1].lng, at: trace[i - 1].clientTs.getTime() },
-        { lat: trace[i].lat, lng: trace[i].lng, at: trace[i].clientTs.getTime() },
-      );
+    for (let i = 1; i < trace.length; i++) distanceM += this.trace.stepMetres(trace[i - 1], trace[i]);
 
     const points = replayed.map((p) => ({
       clientTs: p.clientTs.toISOString(),
@@ -1187,7 +1066,7 @@ export class PositionsService {
       rejectedPoints: Math.max(0, rows.length - trace.length),
       geojson: { type: 'LineString', coordinates: line.map((p) => [p.lng, p.lat]) },
       points,
-      stops: this.groundedStops(trace, stopRows).map((s) => ({
+      stops: this.trace.groundedStops(trace, stopRows).map((s) => ({
         id: s.id,
         kind: s.kind,
         lat: s.lat,
@@ -1246,7 +1125,7 @@ export class PositionsService {
         for (let i = 1; i < trace.length; i++) {
           const a = { lat: trace[i - 1].lat, lng: trace[i - 1].lng, at: trace[i - 1].clientTs.getTime() };
           const b = { lat: trace[i].lat, lng: trace[i].lng, at: trace[i].clientTs.getTime() };
-          distanceM += this.geo.credibleDistanceM(a, b);
+          distanceM += this.trace.stepMetres(trace[i - 1], trace[i]);
           const dtMin = (b.at - a.at) / 60_000;
           if (dtMin > RULE_DEFAULTS.gapMinMin) gaps.push({ from: [a.lat, a.lng], to: [b.lat, b.lng], minutes: Math.round(dtMin) });
         }
@@ -1260,7 +1139,7 @@ export class PositionsService {
           /** the drawn line: the credible trace thinned to 8 m, so detail survives and jitter doesn't */
           line: this.geo.simplify(trace.map((p) => ({ lat: p.lat, lng: p.lng })), 8).map((p) => [p.lat, p.lng]),
           pointCount: trace.length,
-          stops: this.groundedStops(trace, stopRows.filter((s) => s.employeeId === d.employeeId)).map((s) => ({
+          stops: this.trace.groundedStops(trace, stopRows.filter((s) => s.employeeId === d.employeeId)).map((s) => ({
               id: s.id,
               kind: s.kind,
               lat: s.lat,

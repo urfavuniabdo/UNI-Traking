@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { GeoService } from '../../common/geo/geo.service';
+import { TraceService } from '../../common/geo/trace.service';
 import { PrismaService } from '../../common/prisma.service';
 import { round, workDateOf } from '../../common/utils';
 import { ATTENDANCE_STATUS, RULE_DEFAULTS } from '../../shared/constants';
@@ -69,6 +70,7 @@ export class ReportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly geo: GeoService,
+    private readonly trace: TraceService,
     private readonly leave: LeaveService,
   ) {}
 
@@ -234,15 +236,13 @@ export class ReportsService {
     const employeeId = await this.employeeIdForUser(userId);
     const range = dayRange(date);
     const positions = employeeId
-      ? await this.prisma.position.findMany({ where: { employeeId, clientTs: range }, orderBy: { clientTs: 'asc' }, select: { lat: true, lng: true, speedKmh: true, buffered: true, stale: true, motionState: true, clientTs: true } })
+      ? await this.prisma.position.findMany({ where: { employeeId, clientTs: range }, orderBy: { clientTs: 'asc' }, select: { lat: true, lng: true, speedKmh: true, accuracyM: true, buffered: true, stale: true, motionState: true, clientTs: true } })
       : [];
     const stops = employeeId ? await this.prisma.stopEvent.findMany({ where: { employeeId, startedAt: range }, orderBy: { startedAt: 'asc' } }) : [];
+    // The day's length from the same trace the map draws, so the report and the line never disagree.
+    const trace = this.trace.groundTrace(positions);
     let distanceM = 0;
-    for (let i = 0; i < positions.length - 1; i++) {
-      const a = positions[i];
-      const b = positions[i + 1];
-      distanceM += this.geo.credibleDistanceM({ lat: a.lat, lng: a.lng, at: a.clientTs.getTime() }, { lat: b.lat, lng: b.lng, at: b.clientTs.getTime() });
-    }
+    for (let i = 1; i < trace.length; i++) distanceM += this.trace.stepMetres(trace[i - 1], trace[i]);
     interface StopRow { startedAt: string; endedAt: Cell; durationS: number; kind: string; lat: number; lng: number }
     const stopRows: StopRow[] = stops.map((s) => ({ startedAt: s.startedAt.toISOString(), endedAt: s.endedAt ? s.endedAt.toISOString() : '', durationS: s.durationS, kind: s.kind, lat: s.lat, lng: s.lng }));
     const cols: Column<StopRow>[] = [

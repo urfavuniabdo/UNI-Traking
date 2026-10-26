@@ -1,8 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { MOTION } from '../../shared/constants';
+import { MOTION, RULE_DEFAULTS } from '../../shared/constants';
 import { bbox, lineString, simplify } from '@turf/turf';
 import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
 import { point as turfPoint, polygon } from '@turf/helpers';
+
+/**
+ * Tightest radius treated as "he did not move". A phone with 1 m accuracy still jitters a few
+ * metres when parked, so the accuracy circle alone is not a floor.
+ */
+export const NOISE_FLOOR_M = 12;
 
 export interface FenceShape {
   id: string;
@@ -17,6 +23,12 @@ export interface FenceShape {
 export interface LatLng {
   lat: number;
   lng: number;
+}
+
+/** A fix with the two things a step needs to be judged: when it was taken and how far it could lie. */
+export interface MeasuredStep extends LatLng {
+  at: number;
+  accuracyM?: number | null;
 }
 
 export interface FenceHit {
@@ -69,6 +81,28 @@ export class GeoService {
     if (!(dtS > 0)) return 0;
     const m = this.distanceM(a, b);
     return (m / dtS) * 3.6 > MOTION.MAX_CREDIBLE_SPEED_KMH ? 0 : m;
+  }
+
+  /**
+   * المسافة اللي تُجمَّع كأرض مقطوعة: سقف `credibleDistanceM` ويز عليه فقاعة §5.
+   * خطوة أقصر من `MOVED_CIRCLE_FACTOR × noiseRadiusM` المصنِّف برفضها أصلًا كسرعة — موبايل راكن
+   * يترجّاع 15 م حوالين مكانه كل نص دقيقة — فممنوع تُجمَّع كيلو مترات. من غير الفلتر ده يوم سواق
+   * «متوقف» من ساعة التشيك ان كان بيطلّع بالظبط نصف كم من اهتزاز الـ GPS، والخط بيقول راح وجا
+   * والحالة بتقول قاعد. نفس الفقاعة اللي بيركبها `replayDay` على العينة الواحدة، بس على الخطوة.
+   */
+  groundDistanceM(a: MeasuredStep, b: MeasuredStep): number {
+    const dtS = (b.at - a.at) / 1000;
+    if (!(dtS > 0)) return 0;
+    const m = this.distanceM(a, b);
+    if ((m / dtS) * 3.6 > MOTION.MAX_CREDIBLE_SPEED_KMH) return 0;
+    return m > this.movedCircleM(a, b) ? m : 0;
+  }
+
+  /** فقاعة الحركة لزوج نقاط: دقتان موزونتان، بأرضية سُمكها الطبيعي وسقف الـ drift بتاع §5. */
+  movedCircleM(a: { accuracyM?: number | null }, b: { accuracyM?: number | null }): number {
+    const accuracy = ((a.accuracyM ?? 0) + (b.accuracyM ?? 0)) / 2;
+    const noiseRadiusM = Math.min(Math.max(accuracy, NOISE_FLOOR_M), RULE_DEFAULTS.accuracyDriftM);
+    return MOTION.MOVED_CIRCLE_FACTOR * noiseRadiusM;
   }
 
   /** التسارع بـ m/s² من سرعتين (km/h) وفاصل زمني بالثواني. */

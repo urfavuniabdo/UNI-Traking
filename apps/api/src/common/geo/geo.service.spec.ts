@@ -69,6 +69,20 @@ describe('GeoService', () => {
     expect(svc.credibleDistanceM(a, { lat: 30.07, lng: 31.33, at: a.at - 1000 })).toBe(0);
   });
 
+  it('groundDistanceM counts a step only once it clears the fixes’ own motion circle', () => {
+    const a = { lat: 30.06, lng: 31.33, at: Date.parse('2026-10-22T08:00:00.000Z'), accuracyM: 8 };
+    // 18 m in 30 s at 8 m accuracy: 2.2 km/h of paper, and inside the 24 m circle the phone is
+    // allowed to lie by — a parked device jittering, not a driver covering ground.
+    const jitter = { lat: 30.060163, lng: 31.33, at: a.at + 30_000, accuracyM: 8 };
+    expect(svc.distanceM(a, jitter)).toBeLessThan(svc.movedCircleM(a, jitter));
+    expect(svc.groundDistanceM(a, jitter)).toBe(0);
+    // the same step with the accuracy he really had when moving fast enough to be believed
+    const drive = { lat: 30.0721, lng: 31.33, at: a.at + 120_000, accuracyM: 30 };
+    expect(svc.groundDistanceM(a, drive)).toBeCloseTo(svc.distanceM(a, drive), 6);
+    // and a teleport stays a teleport, whatever the circle says
+    expect(svc.groundDistanceM(a, { lat: 30.2654, lng: 31.33, at: a.at + 3802, accuracyM: 5 })).toBe(0);
+  });
+
   it('simplify keeps shape and collapses duplicates', () => {
     const line = Array.from({ length: 200 }, (_, i) => ({ lat: 30 + i * 0.0002, lng: 31.2 }));
     const out = svc.simplify(line, 25);
