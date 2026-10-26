@@ -81,6 +81,52 @@ export const MOTION = {
   MAX_NET_WINDOW_S: 90,
   MOVED_CIRCLE_FACTOR: 2,
   MIN_NET_SAMPLES: 6,
+  /**
+   * A window is never allowed to starve below this many fixes. Sliding it strictly on time left a
+   * driver who stops reporting every 90 s (a phone dozing after he sat down) with a single fix: the
+   * coordinates had no opinion, so stationarity was never *proven*, hysteresis needed three
+   * disagreeing samples, and he stayed RIDING for the rest of the day — two fixes 105 and 258 s
+   * apart 10 m from each other being the clearest evidence of standing there is. The time slide
+   * keeps the newest fixes and the pair survives, and the stationary allowance grows with the span.
+   */
+  MIN_WINDOW_FIXES: 2,
+  /**
+   * How long an *immature* move must hold before it may state a driver who is standing still.
+   * Telematics rules state their conditions as a duration ("faster than X **for more than 5 s**"),
+   * and a phone that dozed and woke with a cached position from the other side of the city produces
+   * exactly one fast, confident, false sample — with the window starved by 105-258 s fix gaps, the
+   * vehicle-proof path was the only one left open to it. One extra sample at the device's own cadence
+   * is what that costs a driver who really set off, which is why the clock is not longer.
+   * A window that already averaged MIN_NET_SAMPLES fixes of one-direction travel *is* sustained
+   * evidence and states him at once.
+   */
+  MOVE_CONFIRM_S: 15,
+  /**
+   * The largest speed change consecutive fixes may demand and still be ground. The ceiling sits at
+   * 0.6 g: a real vehicle hard-braked from 50 km/h to a stop in two seconds is ~7 m/s² and every
+   * telematics platform believes that, so anything below it stays his speed. What it refuses is the
+   * receiver waking up — a driver standing in his apartment produced 0.9 → 77 → 136 → 12.9 km/h
+   * inside 16 s, with reported accelerations up to 8.1 m/s², every one of them internally consistent
+   * and none of it ground. Steps above the ceiling keep the previous speed: noise, not motion.
+   */
+  MAX_ACCEL_MS2: 6.0,
+  /**
+   * Steps per minute that prove feet on the ground. No GPS reading can separate a man walking in
+   * place from a man riding, and every production classifier settles it from the IMU instead
+   * (walking is a 0.5-3 Hz oscillation of ~1.5-2 m/s²). At this rate or above the phone's owner is
+   * on foot: the state may be WALKING, never RIDING, whatever speed the fix suggests.
+   */
+  STEPS_PER_MIN_ON_FOOT: 12,
+  /**
+   * Acceleration variance (m/s²) under which the phone itself says «nothing is moving me». Every
+   * fleet device decides motion from the accelerometer for the same reason the GPS cannot be trusted
+   * alone at the worst moment: when a receiver wakes from a long idle it delivers a solution that is
+   * internally consistent — position, Doppler and bearing all agreeing with each other — and simply
+   * fictional (2026-10-26: 33 fixes, 137 km/h, 1.9 km of route, all of it inside a living room). A
+   * device lying flat measures 0.01-0.05; a car on any road never drops below a few tenths, and a
+   * walking hand 1-2. Devices with no sensor samples send null and are judged on the ground alone.
+   */
+  STILL_ENERGY_MS2: 0.12,
 } as const;
 
 export const RULE_DEFAULTS = {
@@ -99,6 +145,8 @@ export const RULE_DEFAULTS = {
   shiftGraceMin: Number(process.env.SHIFT_GRACE_MIN ?? 30),
   accuracyDriftM: 120,
   dedupeWindowS: 20,
+  /** A speed condition must hold this long (seconds) before it pages the supervisor (Geotab-style). */
+  speedingHoldS: Number(process.env.SPEEDING_HOLD_S ?? 5),
 } as const;
 
 /** Which alerts the driver him/herself receives (واجهة السواق تبقى ضئيلة). */

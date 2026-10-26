@@ -11,7 +11,12 @@
     "MAX_CREDIBLE_SPEED_KMH": 250,
     "MAX_NET_WINDOW_S": 90,
     "MOVED_CIRCLE_FACTOR": 2,
-    "MIN_NET_SAMPLES": 6
+    "MIN_NET_SAMPLES": 6,
+    "MIN_WINDOW_FIXES": 2,
+    "MOVE_CONFIRM_S": 15,
+    "MAX_ACCEL_MS2": 6,
+    "STEPS_PER_MIN_ON_FOOT": 12,
+    "STILL_ENERGY_MS2": 0.12
   },
   "RULE_DEFAULTS": {
     "maxSpeedKmh": 80,
@@ -28,7 +33,8 @@
     "replayMaxAgeHours": 72,
     "shiftGraceMin": 30,
     "accuracyDriftM": 120,
-    "dedupeWindowS": 20
+    "dedupeWindowS": 20,
+    "speedingHoldS": 5
   },
   "MOTION_STATES": [
     "STOPPED",
