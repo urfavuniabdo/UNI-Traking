@@ -77,6 +77,8 @@ export interface ResetPlan {
   apply: false;
   wouldDelete: Record<OpsTable, number>;
   total: number;
+  /** Only when the caller asked for `includeFences` — the zones the apply will remove. */
+  fences?: { Zone: number };
 }
 
 export interface ResetResult {
@@ -85,6 +87,7 @@ export interface ResetResult {
   total: number;
   remaining: number;
   kept: Record<(typeof KEPT_TABLES)[number], number>;
+  fencesDeleted?: { Zone: number };
 }
 
 const sum = (o: Record<string, number>): number => Object.values(o).reduce((a, b) => a + b, 0);
@@ -151,8 +154,12 @@ export class OpsResetService {
    * One transaction, deletes in FK order, then drops the in-memory track/live state so the live board
    * empties instead of replaying wiped positions out of RAM.
    */
-  async reset(input: { apply?: unknown; confirm?: unknown }): Promise<ResetPlan | ResetResult> {
-    if (input?.apply !== true) return this.plan();
+  async reset(input: { apply?: unknown; confirm?: unknown; includeFences?: unknown }): Promise<ResetPlan | ResetResult> {
+    const wantFences = input?.includeFences === true;
+    if (input?.apply !== true) {
+      const plan = await this.plan();
+      return wantFences ? { ...plan, fences: { Zone: await this.prisma.zone.count() } } : plan;
+    }
     if (input.confirm !== RESET_CONFIRM) {
       throw new BadRequestException(`CONFIRM_REQUIRED: send { "confirm": "${RESET_CONFIRM}" }`);
     }
@@ -164,6 +171,15 @@ export class OpsResetService {
       for (const t of OPS_TABLES) deleted[t] = (await w[t].deleteMany()).count;
     });
 
+    let fencesDeleted: ResetResult['fencesDeleted'];
+    if (wantFences) {
+      fencesDeleted = await this.prisma.$transaction(async (tx) => {
+        // Each assigned driver holds a foreign key on his zone, so the links go before the rows.
+        await tx.employee.updateMany({ where: { zoneId: { not: null } }, data: { zoneId: null } });
+        return { Zone: (await tx.zone.deleteMany()).count };
+      });
+    }
+
     for (const { id } of await this.prisma.employee.findMany({ select: { id: true } })) {
       this.positions.clearTrack(id);
     }
@@ -173,6 +189,6 @@ export class OpsResetService {
     const kept = {} as ResetResult['kept'];
     for (const t of KEPT_TABLES) kept[t] = await keptClient[t].count();
 
-    return { apply: true, deleted, total: sum(before), remaining: sum(remaining), kept };
+    return { apply: true, deleted, total: sum(before), remaining: sum(remaining), kept, ...(fencesDeleted ? { fencesDeleted } : {}) };
   }
 }

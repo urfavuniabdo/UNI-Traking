@@ -374,9 +374,9 @@ Push (FCM/APNs) يطابق نفس الحدث ويوصل والتطبيق مقف�
 
 | Method | Path | الوصف |
 |---|---|---|
-| POST | `/ops/reset-data` | `ADMIN`+`SUPERVISOR` → يمسح التاريخ التشغيلي كله ويترك المنظّمَة (السواقين/المناطق/الأجهزة/القواعد). |
+| POST | `/ops/reset-data` | `ADMIN`+`SUPERVISOR` → يمسح التاريخ التشغيلي كله ويترك المنظّمَة (السواقين/المناطق/الأجهزة/القواعد). مع `includeFences:true` بيمسح **كل المناطق** كمان، بعد ما يفضّي `zoneId` من السواقين (الداش بورد بيرفض يحذف منطقة عليها سواقين). |
 
-**الجسم**: `{ apply?: boolean, confirm?: "RESET-OPS-DATA" }`. بدون `apply:true` يرجع **معاينة** فقط `{ apply:false, wouldDelete, total }`؛ ومع `apply:true` بلا عبارة التأكيد ⇒ `400 CONFIRM_REQUIRED`.
+**الجسم**: `{ apply?: boolean, confirm?: "RESET-OPS-DATA", includeFences?: boolean }`. بدون `apply:true` يرجع **معاينة** فقط `{ apply:false, wouldDelete, total }` (وبـ `includeFences` تزيد `fences:{Zone}`)، ومع `apply:true` بلا عبارة التأكيد ⇒ `400 CONFIRM_REQUIRED`.
 
 **المحذوف** (بترتيب آمن على المفاتيح الأجنبية، أولاد قبل آبائهم، في transaction واحد): `CallLog, NotificationLog, Alert, GeoEvent, RouteLine, StopEvent, Position, Trip, AttendanceRecord, LeaveRequest, SyncIssue, SyncRun` → `{ apply:true, deleted, total, remaining:0, kept }`.
 

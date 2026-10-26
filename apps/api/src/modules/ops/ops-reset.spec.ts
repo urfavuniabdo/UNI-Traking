@@ -145,4 +145,22 @@ describe('POST /ops/reset-data', () => {
     expect(res.total).toBe(0);
     expect(res.remaining).toBe(0);
   });
+
+  it('includeFences previews the drawn zones and leaves them standing', async () => {
+    await seed();
+    const plan = await reset.reset({ includeFences: true });
+    if (plan.apply !== false) throw new Error('expected a preview');
+    expect(plan.fences).toEqual({ Zone: 1 });
+    expect(await prisma.zone.count()).toBe(1);
+  });
+
+  it('includeFences wipes every zone and unassigns its drivers, org and sites intact', async () => {
+    const { employeeId } = await seed();
+    const res = await reset.reset({ apply: true, confirm: RESET_CONFIRM, includeFences: true });
+    if (res.apply !== true) throw new Error('expected an apply result');
+    expect(res.fencesDeleted).toEqual({ Zone: 1 });
+    expect(res.kept).toMatchObject({ Zone: 0, Site: 1, OrgUnit: 1, Employee: 1, Device: 1, User: 1 });
+    const emp = await prisma.employee.findUniqueOrThrow({ where: { id: employeeId } });
+    expect(emp.zoneId).toBeNull();
+  });
 });
