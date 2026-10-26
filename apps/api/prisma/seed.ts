@@ -1,4 +1,9 @@
-/* Deterministic, idempotent dev seed — safe to run repeatedly (all upserts). */
+/*
+ * Deterministic, idempotent dev bootstrap — it CREATES what an empty database is missing and never
+ * rewrites a row that already exists (`update: {}`). This script runs on every container start
+ * (render.yaml startCommand), so an `update:` here used to undo, on each deploy, whatever the
+ * operator had just edited in the dashboard: a redrawn zone, a renamed driver, a promoted role.
+ */
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { readFileSync, existsSync } from 'fs';
@@ -34,18 +39,12 @@ const sites = [
   { id: 'site-alex', code: 'ALEX', name: 'Alexandria Depot', orgUnitId: ouAlex.id, lat: 31.2001, lng: 29.9187, radiusM: 300, strictReject: false },
 ];
 
-const zones = [
-  { id: 'zone-nasr', code: 'NASR', name: 'Nasr City', orgUnitId: ouCairo.id, lat: 30.06, lng: 31.33, radiusM: 6000, maxSpeedKmh: 70, stopAlertMin: 30 },
-  { id: 'zone-helwan', code: 'HELWAN', name: 'Helwan', orgUnitId: ouCairo.id, lat: 29.864, lng: 31.346, radiusM: 6000, maxSpeedKmh: 80, stopAlertMin: 45 },
-  { id: 'zone-maadi', code: 'MAADI', name: 'Maadi', orgUnitId: ouCairo.id, lat: 30.007, lng: 31.25, radiusM: 5000, maxSpeedKmh: 60, stopAlertMin: 30 },
-];
-
 const schedules = [
   { id: 'sched-day', code: 'DAY', name: 'Day shift', startMinDay: 480, endMinDay: 1080, crossMidnight: false, graceMin: 30 },
   { id: 'sched-night', code: 'NIGHT', name: 'Night shift', startMinDay: 1200, endMinDay: 360, crossMidnight: true, graceMin: 30 },
 ];
 
-type Emp = { id: string; externalId: string; name: string; phone: string; siteId?: string; zoneId?: string; orgUnitId: string; jobTitle?: string };
+type Emp = { id: string; externalId: string; name: string; phone: string; siteId?: string; orgUnitId: string; jobTitle?: string };
 
 const employees: Emp[] = [
   { id: 'emp-e0101', externalId: 'E0101', name: 'Ahmed Ali', phone: '01000000101', siteId: 'site-cairo', orgUnitId: ouCairo.id, jobTitle: 'Accountant' },
@@ -59,33 +58,32 @@ const employees: Emp[] = [
 ];
 
 const drivers: Emp[] = [
-  { id: 'emp-d0201', externalId: 'D0201', name: 'Mostafa Amin', phone: '01000000201', zoneId: 'zone-nasr', orgUnitId: ouCairo.id },
-  { id: 'emp-d0202', externalId: 'D0202', name: 'Islam Shedid', phone: '01000000202', zoneId: 'zone-helwan', orgUnitId: ouCairo.id },
-  { id: 'emp-d0203', externalId: 'D0203', name: 'Wael Gamal', phone: '01000000203', zoneId: 'zone-maadi', orgUnitId: ouCairo.id },
-  { id: 'emp-d0204', externalId: 'D0204', name: 'Hamdy Sobhy', phone: '01000000204', zoneId: 'zone-nasr', orgUnitId: ouCairo.id },
-  { id: 'emp-d0205', externalId: 'D0205', name: 'Sayed Refaie', phone: '01000000205', zoneId: 'zone-helwan', orgUnitId: ouCairo.id },
-  { id: 'emp-d0206', externalId: 'D0206', name: 'Adel Marzouk', phone: '01000000206', zoneId: 'zone-maadi', orgUnitId: ouCairo.id },
+  { id: 'emp-d0201', externalId: 'D0201', name: 'Mostafa Amin', phone: '01000000201', orgUnitId: ouCairo.id },
+  { id: 'emp-d0202', externalId: 'D0202', name: 'Islam Shedid', phone: '01000000202', orgUnitId: ouCairo.id },
+  { id: 'emp-d0203', externalId: 'D0203', name: 'Wael Gamal', phone: '01000000203', orgUnitId: ouCairo.id },
+  { id: 'emp-d0204', externalId: 'D0204', name: 'Hamdy Sobhy', phone: '01000000204', orgUnitId: ouCairo.id },
+  { id: 'emp-d0205', externalId: 'D0205', name: 'Sayed Refaie', phone: '01000000205', orgUnitId: ouCairo.id },
+  { id: 'emp-d0206', externalId: 'D0206', name: 'Adel Marzouk', phone: '01000000206', orgUnitId: ouCairo.id },
 ];
 
 async function main() {
   // Org units
-  await prisma.orgUnit.upsert({ where: { id: ou.id }, update: { code: ou.code, name: ou.name }, create: ou });
-  await prisma.orgUnit.upsert({ where: { id: ouCairo.id }, update: ouCairo, create: ouCairo });
-  await prisma.orgUnit.upsert({ where: { id: ouAlex.id }, update: ouAlex, create: ouAlex });
+  await prisma.orgUnit.upsert({ where: { id: ou.id }, update: {}, create: ou });
+  await prisma.orgUnit.upsert({ where: { id: ouCairo.id }, update: {}, create: ouCairo });
+  await prisma.orgUnit.upsert({ where: { id: ouAlex.id }, update: {}, create: ouAlex });
 
   // Sites
   for (const s of sites) {
-    await prisma.site.upsert({ where: { id: s.id }, update: s, create: { ...s, polygon: null, active: true } });
+    await prisma.site.upsert({ where: { id: s.id }, update: {}, create: { ...s, polygon: null, active: true } });
   }
 
-  // Zones
-  for (const z of zones) {
-    await prisma.zone.upsert({ where: { id: z.id }, update: z, create: { ...z, polygon: null, active: true } });
-  }
+  // Zones are NOT seeded: the operator draws them in the dashboard, and this script runs on every
+  // container start — seeding them back would resurrect the demo circles he deleted and snap the
+  // circles he redrawn to the seed's coordinates.
 
   // Shift schedules
   for (const s of schedules) {
-    await prisma.shiftSchedule.upsert({ where: { id: s.id }, update: s, create: s });
+    await prisma.shiftSchedule.upsert({ where: { id: s.id }, update: {}, create: s });
   }
 
   // Employees (8) — kind EMPLOYEE
@@ -93,13 +91,13 @@ async function main() {
     const phone = normalizePhone(e.phone) ?? e.phone;
     await prisma.employee.upsert({
       where: { id: e.id },
-      update: { name: e.name, phone, siteId: e.siteId ?? null, orgUnitId: e.orgUnitId, jobTitle: e.jobTitle ?? null, kind: 'EMPLOYEE', source: 'MANUAL' },
+      update: {},
       create: { id: e.id, externalId: e.externalId, name: e.name, phone, email: `${e.externalId.toLowerCase()}@uni-group.example`, siteId: e.siteId ?? null, orgUnitId: e.orgUnitId, jobTitle: e.jobTitle ?? null, kind: 'EMPLOYEE', source: 'MANUAL', active: true },
     });
     // login for the employee (identifier = externalId, must change temp password)
     await prisma.user.upsert({
       where: { identifier: e.externalId },
-      update: { name: e.name, role: 'EMPLOYEE', employeeId: e.id },
+      update: {},
       create: { identifier: e.externalId, name: e.name, role: 'EMPLOYEE', passwordHash: PW_HASH, mustChangePassword: true, employeeId: e.id },
     });
     // day shift assignment (daily, weekday null)
@@ -111,12 +109,12 @@ async function main() {
     const phone = normalizePhone(d.phone) ?? d.phone;
     await prisma.employee.upsert({
       where: { id: d.id },
-      update: { name: d.name, phone, zoneId: d.zoneId ?? null, orgUnitId: d.orgUnitId, kind: 'DRIVER', source: 'MANUAL' },
-      create: { id: d.id, externalId: d.externalId, name: d.name, phone, zoneId: d.zoneId ?? null, orgUnitId: d.orgUnitId, kind: 'DRIVER', source: 'MANUAL', active: true },
+      update: {},
+      create: { id: d.id, externalId: d.externalId, name: d.name, phone, orgUnitId: d.orgUnitId, kind: 'DRIVER', source: 'MANUAL', active: true },
     });
     await prisma.user.upsert({
       where: { identifier: d.externalId },
-      update: { name: d.name, role: 'DRIVER', employeeId: d.id },
+      update: {},
       create: { identifier: d.externalId, name: d.name, role: 'DRIVER', passwordHash: PW_HASH, mustChangePassword: true, employeeId: d.id },
     });
     await upsertShift(d.id, 'sched-night', null);
@@ -125,25 +123,25 @@ async function main() {
   // Admin + supervisor accounts
   await prisma.user.upsert({
     where: { identifier: 'admin' },
-    update: { name: 'System Administrator', role: 'ADMIN', scopeOrgUnitId: ou.id },
+    update: {},
     create: { identifier: 'admin', name: 'System Administrator', role: 'ADMIN', passwordHash: PW_HASH, mustChangePassword: true, scopeOrgUnitId: ou.id },
   });
   await prisma.user.upsert({
     where: { identifier: 'supervisor' },
-    update: { name: 'Ops Supervisor', role: 'SUPERVISOR', scopeOrgUnitId: ouCairo.id },
+    update: {},
     create: { identifier: 'supervisor', name: 'Ops Supervisor', role: 'SUPERVISOR', passwordHash: PW_HASH, mustChangePassword: true, scopeOrgUnitId: ouCairo.id },
   });
   // HR owns attendance + leave approvals; it never sees trips or live tracking.
   await prisma.user.upsert({
     where: { identifier: 'hr' },
-    update: { name: 'HR Manager', role: 'HR', scopeOrgUnitId: ou.id },
+    update: {},
     create: { identifier: 'hr', name: 'HR Manager', role: 'HR', passwordHash: PW_HASH, mustChangePassword: true, scopeOrgUnitId: ou.id },
   });
 
   // Sync source (CSV master) — the sync agent owns import; this row + sample CSV are the contract target.
   await prisma.syncSource.upsert({
     where: { code: 'MASTER_CSV' },
-    update: { kind: 'csv', config: JSON.stringify({ path: '../../_data/employees.sample.csv', delimiter: ',' }) },
+    update: {},
     create: {
       code: 'MASTER_CSV',
       name: 'HR Master (CSV)',
