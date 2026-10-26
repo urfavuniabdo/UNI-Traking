@@ -30,6 +30,7 @@ Base URL: `/api/v1` — كل الطلبات محمية بـ `Authorization: Bear
 | POST | `/devices/register` | `{ token, platform: "android"\|"ios", appVersion, deviceId }` — idempotent بـ `deviceId` |
 | POST | `/devices/heartbeat` | `{ deviceId, battery?, tracking: boolean, gpsEnabled: boolean, online: boolean }` كل 5 د |
 | POST | `/devices/toggle-event` | `{ deviceId, kind: "GPS_OFF"\|"GPS_ON"\|"DATA_OFF"\|"DATA_ON"\|"APP_KILLED"\|"BUFFER_FLUSH" }` |
+| POST | `/devices/help` | `{}` — **للسواق فقط** (`@Roles(DRIVER)`؛ الموظف العادي ما لوش حالة ميدانية يطلب فيها عونًا). لا يحمل `deviceId`: الهوية تُقرأ من التوكن والجهاز الملحق به يُرفق في `meta`. يمرّ بنفس قناة التنبيهات (`ALERT_DISPATCHER`) بـ `HELP_REQUESTED` + `CRITICAL` + `force: true`، فيصل `alert:new` لكل `ADMIN`/`SUPERVISOR` مع push في نفس الثانية. لا بوابة «يوم مفتوح» ولا cooldown — طلب مساعدة إنسان ليس قاعدة تجاوزت حدًا |
 
 `user` = `{ id, identifier, name, role, employeeId, phone, siteId?, zoneId?, driver: boolean }`
 
@@ -174,6 +175,7 @@ IDLE_ALARM_MIN         = 30      // توقف > 30 دقيقة ⇒ STOP_EXCEEDED
 | `BUFFER_REPLAYED` | وصول دفعة `buffered=true` | INFO | المشرفون |
 | `CHECK_IN_OUT_OF_FENCE` | انطباق فاشل | WARNING | الطرفين |
 | `ROUTE_GAP` | فجوة > `gapMinMin=10` د أثناء الرحلة | WARNING | المشرفون |
+| `HELP_REQUESTED` | ضغطة مطوّلة **٣ ثوانٍ متصلة** على دائرة «طلب مساعدة طارئة» في موبايل السواق (`POST /devices/help`) — لا تُرفع تلقائيًا من السيرفر أبدًا | CRITICAL | المشرفون (والسواق يرى طلبه لأنه في `DRIVER_VISIBLE_ALERTS`) |
 
 خصائص قابلة للتعديل لكل `Zone`/سواق عبر `RuleOverride`؛ الأولوية: override للسواق ← override للمنطقة ← الافتراضي في `.env`.
 **Cooldown/De-dupe:** نفس `(userId, type)` لا يتكرر قبل `cooldownS` (افتراضي 180) ما لم تتصاعد الخطورة.
