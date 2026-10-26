@@ -78,14 +78,14 @@ function ruleDefaults(rawBody) {
   return out;
 }
 
-/** AR_ALERT_TEXT: `KEY: { title: '...', body: '...' }` */
+/** AR_ALERT_TEXT: `KEY: { title: '...', body: '...' }` — with or without a trailing comma. */
 function arAlertText() {
   const re = /export const AR_ALERT_TEXT[^=]*=\s*\{([\s\S]*?)\n\};/m;
   const m = re.exec(src);
   if (!m) throw new Error('AR_ALERT_TEXT not found');
   const body = m[1];
   const out = {};
-  for (const entry of body.matchAll(/(\w+):\s*\{\s*title:\s*'([^']*)',\s*body:\s*'([^']*)'\s*\}/g)) {
+  for (const entry of body.matchAll(/(\w+):\s*\{\s*title:\s*'([^']*)',\s*body:\s*'([^']*)',?\s*\}/g)) {
     out[entry[1]] = { title: entry[2], body: entry[3] };
   }
   return out;

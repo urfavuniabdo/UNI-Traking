@@ -35,6 +35,7 @@ export const ALERT_TYPES = [
   'CHECKOUT_MISSING',
   'ROUTE_GAP',
   'IDLE_LONG',
+  'HELP_REQUESTED',
 ] as const;
 export type AlertType = (typeof ALERT_TYPES)[number];
 
@@ -109,6 +110,7 @@ export const DRIVER_VISIBLE_ALERTS: AlertType[] = [
   'DATA_OFF',
   'CHECK_IN_OUT_OF_FENCE',
   'CHECKOUT_MISSING',
+  'HELP_REQUESTED',
 ];
 
 export const SOCKET_EVENTS = {
@@ -151,26 +153,33 @@ export const LEAVE_STATUS = {
 export type LeaveStatus = (typeof LEAVE_STATUS)[keyof typeof LEAVE_STATUS];
 
 export const AR_ALERT_TEXT: Record<AlertType, { title: string; body: string }> = {
-  GEOFENCE_EXIT: { title: 'خروج عن المنطقة المحددة', body: 'خرجت عن نطاق منطقتك المصرّح لك بها' },
+  GEOFENCE_EXIT: { title: 'خروج عن المنطقة المحددة', body: 'خرجت عن نطاق المنطقة المصرّح لك بها' },
   GEOFENCE_ENTER: { title: 'دخول المنطقة', body: 'عدت إلى نطاق منطقتك' },
   CHECK_IN_OUT_OF_FENCE: { title: 'بدء اليوم خارج النطاق', body: 'بدأت يومك خارج النطاق المحدد' },
   SPEEDING: { title: 'تجاوز السرعة', body: 'السرعة أعلى من الحد المسموح في هذه المنطقة' },
   HARSH_BRAKING: { title: 'فرملة مفاجئة', body: 'تم رصد فرملة قوية مفاجئة' },
   HARSH_ACCELERATION: { title: 'تسارع مفاجئ', body: 'تم رصد تسارع قوي مفاجئ' },
   STOP_EXCEEDED: { title: 'توقف طويل', body: 'توقف تجاوز المدة المسموحة بدون إشعار' },
-  GPS_OFF: { title: 'إيقاف الـ GPS', body: 'خدمة الموقع مقفلة والتتبع متوقف' },
-  DATA_OFF: { title: 'إيقاف الداتا', body: 'الإنترنت مقطوع — يتم تخزين خط السير محليًا' },
-  APP_OFFLINE: { title: 'التطبيق غير متصل', body: 'لم تصل بيانات من جهازك منذ فترة' },
+  GPS_OFF: { title: 'إيقاف خدمة تحديد الموقع', body: 'خدمة تحديد الموقع مغلقة والتتبع متوقف' },
+  DATA_OFF: { title: 'انقطاع الاتصال بالإنترنت', body: 'لا يوجد اتصال بالإنترنت — يُحفظ خط السير محليًا' },
+  APP_OFFLINE: { title: 'انقطاع اتصال التطبيق', body: 'لم تصل بيانات من جهازك منذ فترة' },
   HEARTBEAT_MISSING: { title: 'انقطاع نبض الجهاز', body: 'الجهاز لم يرسل نبضًا في الموعد المحدد' },
-  BUFFER_REPLAYED: { title: 'استعادة بيانات أوف لاين', body: 'تم رفع خط السير المخزّن محليًا وإظهاره كأنه لحظي' },
+  BUFFER_REPLAYED: {
+    title: 'إعادة إرسال البيانات المحفوظة',
+    body: 'تم رفع خط السير المحفوظ في الجهاز وعرضه بتوقيته الأصلي',
+  },
   CHECKOUT_MISSING: { title: 'إنهاء اليوم غير مسجّل', body: 'انتهى اليوم ولم يتم تسجيل إنهاؤه' },
   ROUTE_GAP: { title: 'فجوة في خط السير', body: 'انقطاع في تسجيل المسار أثناء الرحلة' },
   IDLE_LONG: { title: 'سكون طويل', body: 'لم يتم رصد أي حركة لفترة طويلة' },
+  HELP_REQUESTED: {
+    title: 'طلب مساعدة طارئة',
+    body: 'السائق يطلب مساعدة طارئة — يرجى التواصل معه فورًا',
+  },
 };
 
 export const MOTION_STATE_AR: Record<MotionState, string> = {
-  STOPPED: 'واقف',
-  WALKING: 'ماشي',
-  RIDING: 'في رحلة',
+  STOPPED: 'متوقف',
+  WALKING: 'يسير',
+  RIDING: 'أثناء القيادة',
   UNKNOWN: 'غير معروف',
 };

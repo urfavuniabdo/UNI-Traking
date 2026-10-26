@@ -51,7 +51,8 @@
     "BUFFER_REPLAYED",
     "CHECKOUT_MISSING",
     "ROUTE_GAP",
-    "IDLE_LONG"
+    "IDLE_LONG",
+    "HELP_REQUESTED"
   ],
   "DRIVER_VISIBLE_ALERTS": [
     "GEOFENCE_EXIT",
@@ -60,7 +61,8 @@
     "GPS_OFF",
     "DATA_OFF",
     "CHECK_IN_OUT_OF_FENCE",
-    "CHECKOUT_MISSING"
+    "CHECKOUT_MISSING",
+    "HELP_REQUESTED"
   ],
   "GEO_EVENT_KINDS": [
     "GPS_OFF",
@@ -93,7 +95,7 @@
   "AR_ALERT_TEXT": {
     "GEOFENCE_EXIT": {
       "title": "خروج عن المنطقة المحددة",
-      "body": "خرجت عن نطاق منطقتك المصرّح لك بها"
+      "body": "خرجت عن نطاق المنطقة المصرّح لك بها"
     },
     "GEOFENCE_ENTER": {
       "title": "دخول المنطقة",
@@ -120,15 +122,15 @@
       "body": "توقف تجاوز المدة المسموحة بدون إشعار"
     },
     "GPS_OFF": {
-      "title": "إيقاف الـ GPS",
-      "body": "خدمة الموقع مقفلة والتتبع متوقف"
+      "title": "إيقاف خدمة تحديد الموقع",
+      "body": "خدمة تحديد الموقع مغلقة والتتبع متوقف"
     },
     "DATA_OFF": {
-      "title": "إيقاف الداتا",
-      "body": "الإنترنت مقطوع — يتم تخزين خط السير محليًا"
+      "title": "انقطاع الاتصال بالإنترنت",
+      "body": "لا يوجد اتصال بالإنترنت — يُحفظ خط السير محليًا"
     },
     "APP_OFFLINE": {
-      "title": "التطبيق غير متصل",
+      "title": "انقطاع اتصال التطبيق",
       "body": "لم تصل بيانات من جهازك منذ فترة"
     },
     "HEARTBEAT_MISSING": {
@@ -136,8 +138,8 @@
       "body": "الجهاز لم يرسل نبضًا في الموعد المحدد"
     },
     "BUFFER_REPLAYED": {
-      "title": "استعادة بيانات أوف لاين",
-      "body": "تم رفع خط السير المخزّن محليًا وإظهاره كأنه لحظي"
+      "title": "إعادة إرسال البيانات المحفوظة",
+      "body": "تم رفع خط السير المحفوظ في الجهاز وعرضه بتوقيته الأصلي"
     },
     "CHECKOUT_MISSING": {
       "title": "إنهاء اليوم غير مسجّل",
@@ -150,12 +152,16 @@
     "IDLE_LONG": {
       "title": "سكون طويل",
       "body": "لم يتم رصد أي حركة لفترة طويلة"
+    },
+    "HELP_REQUESTED": {
+      "title": "طلب مساعدة طارئة",
+      "body": "السائق يطلب مساعدة طارئة — يرجى التواصل معه فورًا"
     }
   },
   "MOTION_STATE_AR": {
-    "STOPPED": "واقف",
-    "WALKING": "ماشي",
-    "RIDING": "في رحلة",
+    "STOPPED": "متوقف",
+    "WALKING": "يسير",
+    "RIDING": "أثناء القيادة",
     "UNKNOWN": "غير معروف"
   }
 }

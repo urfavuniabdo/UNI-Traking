@@ -94,9 +94,9 @@ class MotionStates {
   static const List<String> all = <String>[stopped, walking, riding, unknown];
 
   static const Map<String, String> ar = <String, String>{
-    stopped: 'واقف',
-    walking: 'ماشي',
-    riding: 'في رحلة',
+    stopped: 'متوقف',
+    walking: 'يسير',
+    riding: 'أثناء القيادة',
     unknown: 'غير معروف',
   };
 }
@@ -121,6 +121,7 @@ class AlertTypes {
     'CHECKOUT_MISSING',
     'ROUTE_GAP',
     'IDLE_LONG',
+    'HELP_REQUESTED',
   ];
 }
 
@@ -136,6 +137,7 @@ class DriverVisibleAlerts {
     'DATA_OFF',
     'CHECK_IN_OUT_OF_FENCE',
     'CHECKOUT_MISSING',
+    'HELP_REQUESTED',
   ];
 }
 
@@ -230,7 +232,7 @@ class ArAlertText {
       <String, ({String title, String body})>{
     'GEOFENCE_EXIT': (
       title: 'خروج عن المنطقة المحددة',
-      body: 'خرجت عن نطاق منطقتك المصرّح لك بها'
+      body: 'خرجت عن نطاق المنطقة المصرّح لك بها'
     ),
     'GEOFENCE_ENTER': (title: 'دخول المنطقة', body: 'عدت إلى نطاق منطقتك'),
     'CHECK_IN_OUT_OF_FENCE': (
@@ -248,15 +250,15 @@ class ArAlertText {
       body: 'توقف تجاوز المدة المسموحة بدون إشعار'
     ),
     'GPS_OFF': (
-      title: 'إيقاف الـ GPS',
-      body: 'خدمة الموقع مقفلة والتتبع متوقف'
+      title: 'إيقاف خدمة تحديد الموقع',
+      body: 'خدمة تحديد الموقع مغلقة والتتبع متوقف'
     ),
     'DATA_OFF': (
-      title: 'إيقاف الداتا',
-      body: 'الإنترنت مقطوع — يتم تخزين خط السير محليًا'
+      title: 'انقطاع الاتصال بالإنترنت',
+      body: 'لا يوجد اتصال بالإنترنت — يُحفظ خط السير محليًا'
     ),
     'APP_OFFLINE': (
-      title: 'التطبيق غير متصل',
+      title: 'انقطاع اتصال التطبيق',
       body: 'لم تصل بيانات من جهازك منذ فترة'
     ),
     'HEARTBEAT_MISSING': (
@@ -264,8 +266,8 @@ class ArAlertText {
       body: 'الجهاز لم يرسل نبضًا في الموعد المحدد'
     ),
     'BUFFER_REPLAYED': (
-      title: 'استعادة بيانات أوف لاين',
-      body: 'تم رفع خط السير المخزّن محليًا وإظهاره كأنه لحظي'
+      title: 'إعادة إرسال البيانات المحفوظة',
+      body: 'تم رفع خط السير المحفوظ في الجهاز وعرضه بتوقيته الأصلي'
     ),
     'CHECKOUT_MISSING': (
       title: 'إنهاء اليوم غير مسجّل',
@@ -276,6 +278,10 @@ class ArAlertText {
       body: 'انقطاع في تسجيل المسار أثناء الرحلة'
     ),
     'IDLE_LONG': (title: 'سكون طويل', body: 'لم يتم رصد أي حركة لفترة طويلة'),
+    'HELP_REQUESTED': (
+      title: 'طلب مساعدة طارئة',
+      body: 'السائق يطلب مساعدة طارئة — يرجى التواصل معه فورًا'
+    ),
   };
 
   static Map<String, Object> toGoldenMap() => byType.map<String, Object>(
