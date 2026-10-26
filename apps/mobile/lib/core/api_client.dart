@@ -234,6 +234,12 @@ class ApiClient {
     );
   }
 
+  /// «طلب مساعدة طارئة» — the driver held the circle for three seconds (§6). The server owns the
+  /// identity (from the bearer token) and pushes a CRITICAL alert straight to the admins.
+  Future<void> requestHelp() async {
+    await _postJson('/devices/help');
+  }
+
   // ===========================================================================
   // Attendance (§3)
   // ===========================================================================

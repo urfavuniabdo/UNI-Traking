@@ -59,12 +59,6 @@ class BackgroundServiceAdapter {
     await WakelockPlus.disable();
   }
 
-  /// Emergency hold-to-stop: hard-stops the foreground service too.
-  Future<void> forceStop() async {
-    _service.invoke('STOP');
-    await WakelockPlus.disable();
-  }
-
   Future<bool> get isRunning => _service.isRunning();
 
   /// Subscribe the UI to an event the isolate emits via `serviceInstance.invoke(...)`.

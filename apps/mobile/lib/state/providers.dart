@@ -477,7 +477,7 @@ class HomeController extends StateNotifier<HomeState> {
       state = state.copyWith(
         busy: false,
         notice: open
-            ? 'بدأت يومك بالفعل — اضغط «إنهاء اليوم» لينتهي'
+            ? 'لديك يوم مفتوح بالفعل — لإنهائه استمر بالضغط ثلاث ثوانٍ على «إنهاء اليوم»'
             : 'تم بدء اليوم وإنهائه — لا يمكن بدء يوم آخر بنفس التاريخ',
       );
     } on NetworkException {
@@ -525,17 +525,17 @@ class HomeController extends StateNotifier<HomeState> {
 
   void dismissNotice() => state = state.copyWith(notice: null);
 
-  /// Emergency hold-to-stop (requires the driver to hold 3s). Fires immediately after.
-  Future<void> emergencyStopTracking() async {
-    await BackgroundServiceAdapter.instance.forceStop();
-    // Report to admins so it's never silent power.
+  /// «طلب مساعدة طارئة» — the driver held the circle for three continuous seconds. Nothing about
+  /// tracking changes: the server stores a CRITICAL alert and pushes it to the admins at once.
+  Future<void> requestHelp() async {
     try {
-      await _ref.read(apiClientProvider).toggleEvent(
-            deviceId: await _ref.read(deviceIdProvider.future),
-            kind: 'APP_KILLED',
-          );
-    } on Exception {/* offline — buffered */}
-    state = state.copyWith(tracking: false, notice: 'تم إيقاف التتبع الطارئ — تم تنبيه المشرف');
+      await _ref.read(apiClientProvider).requestHelp();
+      state = state.copyWith(notice: 'تم إرسال طلب المساعدة الطارئة إلى الإدارة');
+    } on NetworkException {
+      state = state.copyWith(notice: 'لا يوجد اتصال بالخادم — أعد المحاولة بعد تحسّن الشبكة');
+    } on ApiException catch (e) {
+      state = state.copyWith(notice: _ar(e));
+    }
   }
 }
 

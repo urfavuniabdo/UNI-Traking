@@ -21,6 +21,12 @@ Color _inkOf(BuildContext context) => Theme.of(context).brightness == Brightness
     ? Colors.white
     : TraccerTheme.inkLight;
 
+/// Both confirmations on this screen — ending the day and asking for help — are held gestures:
+/// three continuous seconds, so a pocket or a slipped thumb can never fire them.
+const int _holdTotalMs = 3000;
+const int _holdStepMs = 50;
+const double _helpMaxSide = 220;
+
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
@@ -80,6 +86,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           Expanded(
+            flex: isDriver ? 2 : 1,
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
               child: Column(
@@ -100,10 +107,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ],
                   const SizedBox(height: 10),
                   _AutoIndicators(home: home, isDriver: isDriver, isDark: isDark),
-                  if (home.tracking) ...<Widget>[
-                    const SizedBox(height: 10),
-                    _EmergencyStop(onHold: _emergencyStop, isDark: isDark),
-                  ],
                   const SizedBox(height: 14),
                   Text(
                     S.t('automatic'),
@@ -118,24 +121,50 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
             ),
           ),
+          // The help circle owns the band the cards left empty. It is a driver's request only —
+          // an office employee has no field emergency to raise from this app.
+          if (isDriver)
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: _HelpCircle(
+                  onHold: _requestHelp,
+                  onTooShort: _showHelpHint,
+                  isDark: isDark,
+                ),
+              ),
+            ),
           _BottomBar(
             home: home,
             isDark: isDark,
             onCheckIn: controller.checkIn,
             onCheckOut: controller.checkOut,
+            onTooShort: _showHoldHint,
           ),
         ],
       ),
     );
   }
 
-  Future<void> _emergencyStop() async {
-    await ref.read(homeControllerProvider.notifier).emergencyStopTracking();
+  Future<void> _requestHelp() async {
+    await ref.read(homeControllerProvider.notifier).requestHelp();
     if (!mounted) {
       return;
     }
     ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(S.t('stoppedEmergency'))));
+        .showSnackBar(SnackBar(content: Text(S.t('helpSent'))));
+  }
+
+  void _showHoldHint() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(S.t('holdToFinish')), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  void _showHelpHint() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(S.t('holdToHelp')), duration: const Duration(seconds: 2)),
+    );
   }
 
   void _showFenceViolation(FenceViolationException e) {
@@ -404,21 +433,87 @@ class _StatusCard extends StatelessWidget {
 }
 
 /// THE pill button: بدء اليوم ⇄ إنهاء اليوم. The only action on this screen.
-class _CheckButton extends StatelessWidget {
+/// Ending the day is the one thing a thumb must not do by accident, so it asks for three
+/// continuous seconds of pressure and fires when the finger lifts. Starting stays one tap.
+class _CheckButton extends StatefulWidget {
   const _CheckButton({
     required this.home,
+    required this.isDark,
     required this.onCheckIn,
     required this.onCheckOut,
+    required this.onTooShort,
   });
   final HomeState home;
+  final bool isDark;
   final Future<void> Function() onCheckIn;
   final Future<void> Function() onCheckOut;
+  final VoidCallback onTooShort;
+
+  @override
+  State<_CheckButton> createState() => _CheckButtonState();
+}
+
+class _CheckButtonState extends State<_CheckButton> {
+  Timer? _timer;
+  double _progress = 0;
+
+  bool get _holdRequired => widget.home.checkedIn && !widget.home.busy;
+
+  void _startHold() {
+    if (!_holdRequired) {
+      return;
+    }
+    _timer?.cancel();
+    setState(() => _progress = 0);
+    _timer = Timer.periodic(const Duration(milliseconds: _holdStepMs), (Timer t) {
+      final double next = _progress + _holdStepMs / _holdTotalMs;
+      setState(() => _progress = next >= 1 ? 1 : next);
+      if (_progress >= 1) {
+        t.cancel();
+      }
+    });
+  }
+
+  /// Stops the clock but keeps the measured hold: the button's own tap arrives right after
+  /// the pointer-up event, and that is what decides whether three seconds were held.
+  void _stopHold() {
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  void _cancelHold() {
+    _stopHold();
+    if (mounted) {
+      setState(() => _progress = 0);
+    }
+  }
+
+  void _onTap() {
+    _stopHold();
+    final double held = _progress;
+    setState(() => _progress = 0);
+    if (!widget.home.checkedIn) {
+      unawaited(widget.onCheckIn());
+      return;
+    }
+    if (held >= 1) {
+      unawaited(widget.onCheckOut());
+      return;
+    }
+    widget.onTooShort();
+  }
+
+  @override
+  void dispose() {
+    _stopHold();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final bool checkedIn = home.checkedIn;
+    final bool checkedIn = widget.home.checkedIn;
     // An approved leave day is already accounted for — the CTA goes inert, it doesn't lie.
-    final bool locked = home.onLeave && !checkedIn;
+    final bool locked = widget.home.onLeave && !checkedIn;
     if (locked) {
       return FilledButton(
         style: FilledButton.styleFrom(
@@ -438,31 +533,64 @@ class _CheckButton extends StatelessWidget {
         ),
       );
     }
-    return FilledButton(
-      style: FilledButton.styleFrom(
-        backgroundColor: checkedIn ? TraccerTheme.brandDark : TraccerTheme.brand,
-      ),
-      onPressed: home.busy ? null : (checkedIn ? onCheckOut : onCheckIn),
-      child: home.busy
-          ? const SizedBox(
-              height: 26,
-              width: 26,
-              child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
-            )
-          : Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: <Widget>[
-                Icon(checkedIn ? Icons.logout : Icons.login, color: Colors.white),
-                const SizedBox(width: 12),
-                Flexible(
-                  child: Text(
-                    checkedIn ? S.t('checkOut') : S.t('checkIn'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (checkedIn) ...<Widget>[
+          Text(
+            _progress >= 1 ? S.t('releaseToFinish') : S.t('holdToFinish'),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.3,
+              color: _legible(_progress >= 1 ? TraccerTheme.brandDark : TraccerTheme.muted, widget.isDark),
+              fontWeight: FontWeight.w600,
             ),
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: _progress,
+              minHeight: 5,
+              backgroundColor: TraccerTheme.brand.withValues(alpha: widget.isDark ? 0.24 : 0.12),
+              valueColor: const AlwaysStoppedAnimation<Color>(TraccerTheme.brand),
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
+        Listener(
+          onPointerDown: (PointerDownEvent _) => _startHold(),
+          onPointerUp: (PointerUpEvent _) => _stopHold(),
+          onPointerCancel: (PointerCancelEvent _) => _cancelHold(),
+          child: FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: checkedIn ? TraccerTheme.brandDark : TraccerTheme.brand,
+            ),
+            onPressed: widget.home.busy ? null : _onTap,
+            child: widget.home.busy
+                ? const SizedBox(
+                    height: 26,
+                    width: 26,
+                    child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      Icon(checkedIn ? Icons.logout : Icons.login, color: Colors.white),
+                      const SizedBox(width: 12),
+                      Flexible(
+                        child: Text(
+                          checkedIn ? S.t('checkOut') : S.t('checkIn'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -474,11 +602,13 @@ class _BottomBar extends StatelessWidget {
     required this.isDark,
     required this.onCheckIn,
     required this.onCheckOut,
+    required this.onTooShort,
   });
   final HomeState home;
   final bool isDark;
   final Future<void> Function() onCheckIn;
   final Future<void> Function() onCheckOut;
+  final VoidCallback onTooShort;
 
   @override
   Widget build(BuildContext context) {
@@ -497,8 +627,10 @@ class _BottomBar extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           child: _CheckButton(
             home: home,
+            isDark: isDark,
             onCheckIn: onCheckIn,
             onCheckOut: onCheckOut,
+            onTooShort: onTooShort,
           ),
         ),
       ),
@@ -648,119 +780,188 @@ class _AmberNotice extends StatelessWidget {
   }
 }
 
-/// Documented emergency "إيقاف التتبع" — requires a 3s hold, then alerts admins.
-class _EmergencyStop extends StatefulWidget {
-  const _EmergencyStop({required this.onHold, required this.isDark});
+/// The driver's «طلب مساعدة طارئة» circle. It takes whatever space the cards left above the
+/// CTA, and no thumb sends it by accident: three continuous seconds of pressure, then lift.
+class _HelpCircle extends StatefulWidget {
+  const _HelpCircle({
+    required this.onHold,
+    required this.onTooShort,
+    required this.isDark,
+  });
   final Future<void> Function() onHold;
+  final VoidCallback onTooShort;
   final bool isDark;
 
   @override
-  State<_EmergencyStop> createState() => _EmergencyStopState();
+  State<_HelpCircle> createState() => _HelpCircleState();
 }
 
-class _EmergencyStopState extends State<_EmergencyStop> {
-  static const int _totalMs = 3000;
-  static const int _stepMs = 50;
-
+class _HelpCircleState extends State<_HelpCircle> {
   Timer? _timer;
   double _progress = 0;
+  bool _busy = false;
 
   void _startHold() {
+    if (_busy) {
+      return;
+    }
     _timer?.cancel();
     setState(() => _progress = 0);
-    _timer = Timer.periodic(const Duration(milliseconds: _stepMs), (Timer t) {
-      final double next = _progress + _stepMs / _totalMs;
+    _timer = Timer.periodic(const Duration(milliseconds: _holdStepMs), (Timer t) {
+      final double next = _progress + _holdStepMs / _holdTotalMs;
       setState(() => _progress = next >= 1 ? 1 : next);
       if (_progress >= 1) {
         t.cancel();
         _timer = null;
-        unawaited(widget.onHold());
       }
     });
   }
 
-  void _cancelHold() {
+  /// The clock stops on pointer-up, but the measured hold survives: the tap the button recognises
+  /// arrives right after that event and is what actually decides.
+  void _stopHold() {
     _timer?.cancel();
     _timer = null;
+  }
+
+  void _cancelHold() {
+    _stopHold();
     if (mounted) {
       setState(() => _progress = 0);
     }
   }
 
+  void _onTap() {
+    _stopHold();
+    final double held = _progress;
+    setState(() => _progress = 0);
+    if (_busy) {
+      return;
+    }
+    if (held < 1) {
+      widget.onTooShort();
+      return;
+    }
+    setState(() => _busy = true);
+    unawaited(widget.onHold().whenComplete(() {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }));
+  }
+
   @override
   void dispose() {
-    _timer?.cancel();
+    _stopHold();
     super.dispose();
+  }
+
+  /// The circle grows into the empty band it was handed, capped at a size a thumb can hit.
+  double _sideOf(BoxConstraints box) {
+    final double width = box.hasBoundedWidth ? box.maxWidth : _helpMaxSide;
+    final double height = box.hasBoundedHeight ? box.maxHeight : width;
+    final double shortest = width < height ? width : height;
+    return shortest > _helpMaxSide ? _helpMaxSide : shortest;
   }
 
   @override
   Widget build(BuildContext context) {
     final Color ink = _legible(TraccerTheme.red, widget.isDark);
-    return Semantics(
-      label: '${S.t('emergencyStop')} — ${S.t('holdToStop')}',
-      button: true,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onLongPressStart: (LongPressStartDetails _) => _startHold(),
-        onLongPressEnd: (LongPressEndDetails _) => _cancelHold(),
-        onLongPressCancel: _cancelHold,
-        child: SizedBox(
-          height: 48,
-          width: double.infinity,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: TraccerTheme.red.withValues(alpha: widget.isDark ? 0.16 : 0.08),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: TraccerTheme.red.withValues(alpha: widget.isDark ? 0.45 : 0.32),
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints box) {
+        final double side = _sideOf(box);
+        return Center(
+          child: SizedBox(
+            width: side,
+            height: side,
+            child: Semantics(
+              label: '${S.t('helpRequest')} — ${S.t('holdToHelp')}',
+              button: true,
+              child: Listener(
+                onPointerDown: (PointerDownEvent _) => _startHold(),
+                onPointerUp: (PointerUpEvent _) => _stopHold(),
+                onPointerCancel: (PointerCancelEvent _) => _cancelHold(),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _onTap,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: <Widget>[
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: TraccerTheme.red.withValues(alpha: widget.isDark ? 0.16 : 0.08),
+                          border: Border.all(
+                            color: TraccerTheme.red.withValues(alpha: widget.isDark ? 0.45 : 0.32),
+                            width: 2,
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(5),
+                        child: CircularProgressIndicator(
+                          value: _progress,
+                          strokeWidth: 5,
+                          color: ink,
+                          backgroundColor: TraccerTheme.red.withValues(alpha: 0.10),
+                        ),
+                      ),
+                      _label(ink, side),
+                    ],
+                  ),
+                ),
               ),
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(11),
-              child: Stack(
-                fit: StackFit.expand,
-                children: <Widget>[
-                  // The alignment must live on the FractionallySizedBox itself: under the
-                  // tight width constraints coming from StackFit.expand an outer Align is
-                  // a no-op and the fill would grow from the centre.
-                  FractionallySizedBox(
-                    widthFactor: _progress.clamp(0.0, 1.0),
-                    alignment: AlignmentDirectional.centerStart,
-                    child: ColoredBox(
-                      color: TraccerTheme.red.withValues(alpha: widget.isDark ? 0.42 : 0.26),
-                    ),
-                  ),
-                  Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: <Widget>[
-                          Icon(Icons.stop_circle_outlined, size: 18, color: ink),
-                          const SizedBox(width: 8),
-                          Flexible(
-                            child: Text(
-                              S.t('holdToStop'),
-                              maxLines: 2,
-                              textAlign: TextAlign.center,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: ink,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _label(Color ink, double side) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: <Widget>[
+        Icon(
+          _busy ? Icons.hourglass_top : Icons.sos,
+          color: ink,
+          size: (side * 0.2).clamp(18.0, 42.0).toDouble(),
+        ),
+        SizedBox(height: side * 0.05),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: side * 0.12),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              S.t('helpRequest'),
+              maxLines: 1,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: ink,
+                fontWeight: FontWeight.w800,
+                fontSize: (side * 0.075).clamp(12.0, 16.0).toDouble(),
               ),
             ),
           ),
         ),
-      ),
+        if (side >= 150) ...<Widget>[
+          SizedBox(height: side * 0.03),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: side * 0.14),
+            child: Text(
+              S.t('holdToHelp'),
+              maxLines: 2,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _legible(TraccerTheme.muted, widget.isDark),
+                fontWeight: FontWeight.w600,
+                fontSize: 11,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
