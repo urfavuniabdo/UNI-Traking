@@ -42,11 +42,17 @@ class LocationAdapter {
   /// The filter stays at 10m because a walking person covers 25m in ~20s, and the motion
   /// classifier needs three samples to commit a state — at 25m a short walk never reads
   /// as walking.
+  ///
+  /// `forceLocationManager` is the root cut behind §5's wake-up ghost: the Fused provider is allowed
+  /// to answer from Wi-Fi/RF fingerprinting and from its own cache, and on 2026-10-26 that is exactly
+  /// what put his apartment block 509 m away in 67 s at 137 km/h after a doze. The GnssLocationProvider
+  /// has no such answer — the fix is satellite, or there is no fix.
   Stream<Position> positionStream() {
     final AndroidSettings settings = AndroidSettings(
       accuracy: LocationAccuracy.best,
       distanceFilter: 10, // metres
       intervalDuration: const Duration(seconds: 5),
+      forceLocationManager: true,
     );
     return Geolocator.getPositionStream(locationSettings: settings);
   }
@@ -67,6 +73,7 @@ class LocationAdapter {
           accuracy: LocationAccuracy.best,
           distanceFilter: 0,
           intervalDuration: const Duration(seconds: 2),
+          forceLocationManager: true,
         ),
       ).first.timeout(const Duration(seconds: 12));
       if (DateTime.now().toUtc().difference(p.timestamp.toUtc()) > maxAge) return null;
@@ -81,6 +88,10 @@ class LocationAdapter {
   ///
   /// Android 12+ lets the user grant *approximate* location, which lands ~3 km off and
   /// silently corrupts fence validation.
+  ///
+  /// The cache is deliberately missing from the tracking path and present here: a button that
+  /// cannot be pressed indoors is worse than a check-in point read one minute late. The engine's
+  /// own "a fix must be newer than the last one accepted" gate is what keeps this cache out of the line.
   static const double _approximateAccuracyM = 1000;
 
   Future<Position?> currentFix() async {
