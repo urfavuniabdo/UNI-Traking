@@ -114,7 +114,7 @@ export default function ReportsPage() {
             action={
               <div className="flex items-center gap-1.5">
                 <Btn size="sm" variant={groupBy === 'driver' ? 'primary' : 'ghost'} onClick={() => setGroupBy('driver')}>
-                  بالسواق
+                  بالسائق
                 </Btn>
                 <Btn size="sm" variant={groupBy === 'zone' ? 'primary' : 'ghost'} onClick={() => setGroupBy('zone')}>
                   بالنطاق

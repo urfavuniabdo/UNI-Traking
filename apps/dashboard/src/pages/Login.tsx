@@ -36,7 +36,7 @@ export default function LoginPage() {
           />
           <h1 className="text-2xl font-extrabold">UNI Tracking</h1>
           <p className="mt-1 font-semibold text-blue-100" style={{ fontSize: '.85rem' }}>
-            مراقبة الموظفين والسواقين
+            مراقبة الموظفين والسائقين
           </p>
         </div>
 

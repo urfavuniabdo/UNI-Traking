@@ -180,7 +180,7 @@ export default function LeavePage() {
         ) : res.error ? (
           <ErrorState message={res.error} onRetry={res.reload} />
         ) : !rows.length ? (
-          <EmptyState title="لا طلبات إجازة" hint={status === LEAVE_STATUS.PENDING ? 'مفيش طلبات مستنية قرار دلوقتي' : undefined} />
+          <EmptyState title="لا طلبات إجازة" hint={status === LEAVE_STATUS.PENDING ? 'لا توجد طلبات بانتظار القرار' : undefined} />
         ) : (
           <table className="w-full min-w-[860px]" style={{ fontSize: '.82rem' }}>
             <thead>

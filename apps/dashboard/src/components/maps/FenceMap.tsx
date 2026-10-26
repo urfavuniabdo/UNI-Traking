@@ -142,7 +142,7 @@ export default function FenceMap(props: Props) {
           >
             <Tooltip sticky direction="top" permanent={selected}>
               <span style={{ direction: 'rtl', fontFamily: 'Cairo' }}>
-                <b>{c.name}</b> · <span className="num">{Math.round(c.radiusM)}</span> م — دوس للتفاصيل
+                <b>{c.name}</b> · <span className="num">{Math.round(c.radiusM)}</span> م — اضغط لعرض التفاصيل
               </span>
             </Tooltip>
           </Circle>
@@ -159,7 +159,7 @@ export default function FenceMap(props: Props) {
           >
             <Tooltip sticky direction="top" permanent={selected}>
               <span style={{ direction: 'rtl', fontFamily: 'Cairo' }}>
-                <b>{p.name}</b> — <span className="num">{p.points.length}</span> نقطة · دوس للتفاصيل
+                <b>{p.name}</b> — <span className="num">{p.points.length}</span> نقطة · اضغط لعرض التفاصيل
               </span>
             </Tooltip>
           </Polygon>

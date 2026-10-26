@@ -222,7 +222,7 @@ export default function FencesPage() {
       <div className="space-y-3 min-h-0 overflow-y-auto">
         <Card className="p-3">
           <p className="muted mb-2" style={{ fontSize: '.78rem' }}>
-            دوس على الخريطة لعمل دائرة؛ اسحب المركز للنقل، واسحب المقبض الأزرق على الحافة لتغيير نصف القطر، أو دوس على أي نطاق محفوظ لفتح تفاصيله كاملة. للمضلع: اضغط &laquo;مضلع جديد&raquo; ثم نقاط متتالية ودبل كليك للإغلاق.
+            اضغط على الخريطة لإنشاء دائرة؛ اسحب المركز للنقل، واسحب المقبض الأزرق على الحافة لتغيير نصف القطر، أو اضغط على أي نطاق محفوظ لعرض تفاصيله كاملة. للمضلع: اضغط &laquo;مضلع جديد&raquo; ثم نقاطًا متتالية، والنقر المزدوج يُغلق الشكل.
           </p>
           <div className="flex gap-2">
             <Btn variant="primary" onClick={() => setDraft({ mode: 'new-circle', target: 'zone', center: [30.0444, 31.2357], radiusM: 2000, name: '' })}>
@@ -467,11 +467,11 @@ export default function FencesPage() {
 
             <p className="muted" style={{ fontSize: '.72rem' }}>
               {draft.mode === 'new-polygon' && (
-                <>عدد النقاط: <Num>{draft.vertices.length}</Num> — دوس على الخريطة لإضافة نقطة، ودبل كليك للإغلاق.</>
+                <>عدد النقاط: <Num>{draft.vertices.length}</Num> — اضغط على الخريطة لإضافة نقطة، والنقر المزدوج يُغلق الشكل.</>
               )}
-              {draft.mode === 'edit-polygon' && <>اسحب الرؤوس لتعديل الحدود، ودوس على رأس لحذفه، ثم احفظ.</>}
+              {draft.mode === 'edit-polygon' && <>اسحب الرؤوس لتعديل الحدود، والضغط على رأس يحذفه، ثم احفظ.</>}
               {draft.mode === 'edit-circle' && 'اسحب المركز للنقل، والمقبض الأزرق على الحافة للتكبير والتصغير.'}
-              {draft.mode === 'new-circle' && 'دوس على الخريطة لنقل المركز، واسحب المقبض الأزرق لتحديد نصف القطر.'}
+              {draft.mode === 'new-circle' && 'اضغط على الخريطة لتحديد المركز، واسحب المقبض الأزرق لتعيين نصف القطر.'}
             </p>
 
             <div className="flex justify-end gap-2">

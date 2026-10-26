@@ -102,7 +102,7 @@ export default function AlertsPage() {
           </Select>
         </div>
         <div>
-          <label className="label">السواق (ID)</label>
+          <label className="label">السائق (ID)</label>
           <Input value={f.userId} onChange={(e) => setF({ ...f, userId: e.target.value })} placeholder="u-ahmed" />
         </div>
         <div>
@@ -388,7 +388,7 @@ function CallLogModal({ alert, onClose, onDone }: { alert: AlertPayload | null; 
           </Btn>
         </div>
         <label className="label">ملاحظة</label>
-        <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="رد السواق / لم يرد…" />
+        <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="رد السائق / لم يرد…" />
         <div className="flex justify-end gap-2">
           <Btn onClick={onClose}>إلغاء</Btn>
           <Btn variant="primary" disabled={busy} onClick={() => void submit()}>

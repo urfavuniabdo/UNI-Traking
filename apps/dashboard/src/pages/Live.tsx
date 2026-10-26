@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { MOTION_STATE_AR } from '@shared';
 import { api } from '@/api/client';
 import type { AlertPayload, AlertsResponse, Employee, FencesResponse, LivePosition, MapEvent, RoutePoint, RouteResponse, TrailsResponse } from '@/api/types';
 import { useAlertFeed, useLive } from '@/stores/ui';
@@ -175,9 +176,9 @@ export default function LivePage() {
   return (
     <div className="grid h-full min-h-0 grid-cols-1 gap-3 lg:grid-cols-[280px_minmax(0,1fr)_320px] max-lg:h-auto">
       {/* LEFT: driver cards */}
-      <section className="card order-2 flex min-h-0 flex-col max-lg:order-3 lg:order-1" aria-label="السواقين">
+      <section className="card order-2 flex min-h-0 flex-col max-lg:order-3 lg:order-1" aria-label="السائقون">
         <div className="flex items-center justify-between border-b p-3 pb-2" style={{ borderColor: 'var(--line)' }}>
-          <h2 className="font-bold">السواقين <Num className="muted">({driverCards.length})</Num></h2>
+          <h2 className="font-bold">السائقون <Num className="muted">({driverCards.length})</Num></h2>
           <Chip tone="blue"><Num>{list.filter((p) => p.online).length}</Num> متصل</Chip>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-2 space-y-2">
@@ -211,10 +212,10 @@ export default function LivePage() {
             <span className="muted">· <Num>{list.length}</Num> سيارة على الخريطة</span>
           </div>
           <div className="card hidden items-center gap-2 px-2 py-1 sm:flex" style={{ fontSize: '.72rem' }}>
-            <Chip tone="amber">ماشي</Chip>
-            <Chip tone="blue">في رحلة</Chip>
-            <Chip tone="red">واقف</Chip>
-            <Chip tone="gray">غير معروف</Chip>
+            <Chip tone="amber">{MOTION_STATE_AR.WALKING}</Chip>
+            <Chip tone="blue">{MOTION_STATE_AR.RIDING}</Chip>
+            <Chip tone="red">{MOTION_STATE_AR.STOPPED}</Chip>
+            <Chip tone="gray">{MOTION_STATE_AR.UNKNOWN}</Chip>
           </div>
         </div>
 
@@ -230,20 +231,20 @@ export default function LivePage() {
             onChange={(e) => e.target.value && setDate(e.target.value)}
             className="input !h-9 !w-auto px-2 py-0"
           />
-          <label className="ink2 font-bold" htmlFor="live-driver">السواق</label>
+          <label className="ink2 font-bold" htmlFor="live-driver">السائق</label>
           <Select
             id="live-driver"
             value={focus ?? ''}
             onChange={(e) => setFocus(e.target.value || null)}
             className="!h-9 !w-auto min-w-[130px] px-2 py-0"
           >
-            <option value="">— كل السواقين —</option>
+            <option value="">— جميع السائقين —</option>
             {driverCards.map(({ emp }) => (
               <option key={emp.id} value={emp.id}>{emp.name}</option>
             ))}
           </Select>
           {!isToday && <Chip tone="violet">أرشيف <Num>{date}</Num></Chip>}
-          {!isToday && <Btn size="sm" onClick={() => setDate(todayISODate())}>رجّع لليوم</Btn>}
+          {!isToday && <Btn size="sm" onClick={() => setDate(todayISODate())}>العودة إلى اليوم</Btn>}
           <span className="muted flex items-center gap-1.5" title="رموز الأحداث على خط السير">
             <span>🔴 سرعة</span><span>🛑 فرملة</span><span>⏸ توقف طويل</span><span>🚪 خروج نطاق</span>
           </span>
@@ -403,14 +404,14 @@ function CarDetails({
         </div>
         {routeLoading && <Skeleton className="mt-1 h-4" />}
         {!routeLoading && !trailLength(route) && (
-          <p className="muted mt-1">لا نقاط مسجّلة في اليوم ده — سيظهر الخط أول ما وصلت نقاط اليوم.</p>
+          <p className="muted mt-1">لا توجد نقاط مسجّلة في هذا اليوم — يظهر الخط فور وصول نقاط اليوم.</p>
         )}
         {!routeLoading && trailLength(route) > 0 && (
           <div className="muted mt-1 flex flex-wrap items-center gap-2">
             <span>⬤ <Num>{route?.stops?.length ?? 0}</Num> توقف</span>
             <span>✂️ <Num>{route?.gaps?.length ?? 0}</Num> فجوة</span>
             <span>⚑ <Num>{eventsOnMap}</Num> حدث على الخريطة</span>
-            <Btn size="sm" onClick={onFit}>وسّع للخط</Btn>
+            <Btn size="sm" onClick={onFit}>إظهار كامل الخط</Btn>
           </div>
         )}
       </div>
@@ -419,7 +420,7 @@ function CarDetails({
         <div className="flex items-center justify-between">
           <span className="font-bold" style={{ fontSize: '.78rem' }}>أحداث اليوم <Num className="muted">({events.length})</Num></span>
         </div>
-        {!events.length && <p className="muted mt-1" style={{ fontSize: '.73rem' }}>لا أحداث في اليوم ده.</p>}
+        {!events.length && <p className="muted mt-1" style={{ fontSize: '.73rem' }}>لا توجد أحداث في هذا اليوم.</p>}
         <div className="mt-1 space-y-1">
           {events.slice(0, 30).map((a) => {
             const onMap = Number.isFinite(a.meta?.lat) && Number.isFinite(a.meta?.lng);

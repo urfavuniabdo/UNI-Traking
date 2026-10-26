@@ -10,7 +10,7 @@ export const NAV_ITEMS: { to: string; label: string; icon: IconName }[] = [
   { to: '/alerts', label: 'التنبيهات', icon: 'alerts' },
   { to: '/attendance', label: 'الحضور والانصراف', icon: 'attendance' },
   { to: '/leave', label: 'الإجازات', icon: 'leave' },
-  { to: '/drivers', label: 'السواقين', icon: 'drivers' },
+  { to: '/drivers', label: 'السائقون', icon: 'drivers' },
   { to: '/fences', label: 'المواقع والنطاقات', icon: 'fences' },
   { to: '/reports', label: 'التقارير', icon: 'reports' },
   { to: '/sync', label: 'مزامنة الموظفين', icon: 'sync' },
@@ -34,7 +34,7 @@ export default function Sidebar({ mobile }: { mobile?: boolean }) {
         <div className="leading-tight">
           <div className="font-extrabold">UNI Tracking</div>
           <div className="muted font-semibold" style={{ fontSize: '.7rem' }}>
-            مراقبة الموظفين والسواقين
+            مراقبة الموظفين والسائقين
           </div>
         </div>
       </div>

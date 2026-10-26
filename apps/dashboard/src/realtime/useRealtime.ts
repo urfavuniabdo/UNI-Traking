@@ -54,7 +54,7 @@ export function useRealtime(): void {
           lastSeen: p.lastSeen,
         });
         if (!p.online) {
-          useUi.getState().pushToast({ title: 'السواق غير متصل', body: 'لم يصل نبض من الجهاز', kind: 'error' });
+          useUi.getState().pushToast({ title: 'السائق غير متصل', body: 'لم تصل بيانات من الجهاز', kind: 'error' });
         }
       }),
       on(SOCKET_EVENTS.ATTENDANCE_CHANGED, () => {

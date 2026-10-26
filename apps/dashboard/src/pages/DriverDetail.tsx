@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { MOTION_STATE_AR } from '@shared';
 import { api } from '@/api/client';
 import type { AlertPayload, Employee, LivePosition, Zone } from '@/api/types';
 import { useAsync } from '@/hooks/useAsync';
@@ -100,7 +101,7 @@ export default function DriverDetailPage() {
       <div className="grid gap-3 lg:grid-cols-2">
         {/* rules */}
         <Card>
-          <CardTitle>قواعد هذا السواق (Override)</CardTitle>
+          <CardTitle>قواعد هذا السائق</CardTitle>
           <div className="grid grid-cols-2 gap-3 p-3 pt-0">
             <div>
               <label className="label">حد السرعة (كم/س)</label>
@@ -116,7 +117,7 @@ export default function DriverDetailPage() {
                 }}
               />
               <div className="muted mt-1" style={{ fontSize: '.7rem' }}>
-                {e.ruleOverride?.maxSpeedKmh != null ? 'override لهذا السواق' : 'مورّث من النطاق / الإعدادات العامة'}
+                {e.ruleOverride?.maxSpeedKmh != null ? 'تجاوز خاص بهذا السائق' : 'من النطاق أو الإعدادات العامة'}
               </div>
             </div>
             <div>
@@ -133,7 +134,7 @@ export default function DriverDetailPage() {
                 }}
               />
               <div className="muted mt-1" style={{ fontSize: '.7rem' }}>
-                {e.ruleOverride?.stopAlertMin != null ? 'override لهذا السواق' : 'مورّث من النطاق / الإعدادات العامة'}
+                {e.ruleOverride?.stopAlertMin != null ? 'تجاوز خاص بهذا السائق' : 'من النطاق أو الإعدادات العامة'}
               </div>
             </div>
             <div className="col-span-2">
@@ -162,9 +163,9 @@ export default function DriverDetailPage() {
             {summary.loading && <Skeleton className="h-32" />}
             {mm && (
               <>
-                <MotionBar label="في رحلة (قيادة)" min={mm.riding} tone="#2563eb" />
-                <MotionBar label="ماشي" min={mm.walking} tone="#f59e0b" />
-                <MotionBar label="واقف" min={mm.stopped} tone="#dc2626" />
+                <MotionBar label={MOTION_STATE_AR.RIDING} min={mm.riding} tone="#2563eb" />
+                <MotionBar label={MOTION_STATE_AR.WALKING} min={mm.walking} tone="#f59e0b" />
+                <MotionBar label={MOTION_STATE_AR.STOPPED} min={mm.stopped} tone="#dc2626" />
                 <div className="flex justify-between pt-2 font-bold ink2">
                   <span>تنبيهات مفتوحة</span>
                   <Chip tone="red"><Num>{summary.data?.openAlerts ?? 0}</Num></Chip>

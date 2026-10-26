@@ -115,7 +115,7 @@ export function LiveSpeed({ state, speedKmh, className = '' }: { state: MotionSt
   }
   const instant = state !== 'UNKNOWN' && (speedKmh <= MOTION.STATIONARY_SPEED_KMH ? 'STOPPED' : speedKmh <= MOTION.WALK_MAX_KMH ? 'WALKING' : 'RIDING') !== state;
   return (
-    <span className={className} title={instant ? `قراءة العينة دي لحظية — الحالة بتتثبت بعد ${MOTION.HYSTERESIS_SAMPLES} عينات متتالية` : undefined}>
+    <span className={className} title={instant ? `قراءة لحظية لهذه العينة — تتثبت الحالة بعد ${MOTION.HYSTERESIS_SAMPLES} عينات متتالية` : undefined}>
       <Num>{Math.round(speedKmh)}</Num> كم/س
       {instant && <span className="muted" style={{ fontSize: '.68rem' }}> لحظية</span>}
     </span>

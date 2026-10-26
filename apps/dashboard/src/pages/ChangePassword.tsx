@@ -28,7 +28,7 @@ export default function ChangePasswordPage() {
         <div>
           <h1 className="text-xl font-extrabold">تعيين كلمة مرور جديدة</h1>
           <p className="muted mt-1" style={{ fontSize: '.8rem' }}>
-            حساب <b>{user?.name ?? user?.identifier}</b> لسه على كلمة المرور الافتراضية.
+            حساب <b>{user?.name ?? user?.identifier}</b> لا يزال يستخدم كلمة المرور الافتراضية.
           </p>
         </div>
 
