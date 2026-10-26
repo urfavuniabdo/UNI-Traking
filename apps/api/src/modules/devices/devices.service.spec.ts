@@ -12,6 +12,7 @@ function fakePrisma(openShift = true) {
       findUnique: async ({ where }: any) =>
         devices.find((d) => (where.deviceId ? d.deviceId === where.deviceId : d.id === where.id)) ?? null,
       findMany: async () => devices,
+      findFirst: async ({ where }: any) => devices.find((d) => d.userId === where.userId) ?? null,
       count: async () => devices.length,
       create: async ({ data }: any) => {
         const row = { id: `d${seq++}`, online: true, tracking: false, gpsEnabled: true, lastSeenAt: null, batteryPct: null, pushToken: null, appVersion: null, employeeId: null, userId: null, ...data };
@@ -145,5 +146,37 @@ describe('DevicesService', () => {
     await svc.toggleEvent({ deviceId: 'dev-1', kind: 'APP_KILLED' } as never);
 
     expect(dispatcher.calls.map((c) => c.type).sort()).toEqual(['APP_OFFLINE', 'DATA_OFF', 'GPS_OFF']);
+  });
+
+  // A held button is a person asking for help, not a rule crossing a threshold: it is CRITICAL,
+  // it is forced past the cooldown, and an open day is not a precondition for sending it.
+  it('requestHelp raises a forced CRITICAL HELP_REQUESTED even with no day open', async () => {
+    const { prisma } = fakePrisma(false);
+    const dispatcher = fakeDispatcher();
+    const svc = new DevicesService(prisma, dispatcher as never);
+    await svc.register('u1', { deviceId: 'dev-1', platform: 'android' } as never);
+
+    await svc.requestHelp('u1');
+
+    expect(dispatcher.calls).toHaveLength(1);
+    expect(dispatcher.calls[0]).toMatchObject({
+      type: 'HELP_REQUESTED',
+      severity: 'CRITICAL',
+      employeeId: 'e1',
+      targetUserId: 'u1',
+      force: true,
+    });
+  });
+
+  it('requestHelp refuses a user with no attendance profile', async () => {
+    const { prisma } = fakePrisma();
+    const dispatcher = fakeDispatcher();
+    const orphan = new DevicesService(
+      { ...(prisma as object), user: { findUnique: async () => null } } as never,
+      dispatcher as never,
+    );
+
+    await expect(orphan.requestHelp('u9')).rejects.toThrow('NO_EMPLOYEE_PROFILE');
+    expect(dispatcher.calls).toHaveLength(0);
   });
 });

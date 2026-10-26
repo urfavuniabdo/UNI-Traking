@@ -120,6 +120,40 @@ export class DevicesService {
     return { ok: true };
   }
 
+  /**
+   * «طلب مساعدة طارئة» — the driver held the button for three seconds. This is not a rule firing
+   * on a threshold, it is a person asking for help: it goes through the same delivery funnel
+   * (Alert row → socket → push to ADMIN/SUPERVISOR) but with `force`, so a cooldown from his
+   * previous request can never swallow a second one, and with no on-shift gate, since needing
+   * help does not wait for the day to be open.
+   */
+  async requestHelp(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { employeeId: true },
+    });
+    if (!user?.employeeId) throw new NotFoundException('NO_EMPLOYEE_PROFILE');
+    const device = await this.prisma.device.findFirst({
+      where: { userId },
+      orderBy: { lastSeenAt: 'desc' },
+    });
+    if (!this.dispatcher) return { ok: false, alertId: null };
+
+    const text = AR_ALERT_TEXT.HELP_REQUESTED;
+    const raised = await this.dispatcher.raise({
+      type: 'HELP_REQUESTED',
+      severity: SEVERITY.CRITICAL,
+      employeeId: user.employeeId,
+      targetUserId: userId,
+      title: text.title,
+      body: text.body,
+      meta: { deviceId: device?.deviceId ?? null, platform: device?.platform ?? null },
+      at: new Date(),
+      force: true,
+    });
+    return { ok: true, alertId: raised?.id ?? null };
+  }
+
   /** ADMIN list with computed presence. */
   async list(query: { page?: number; pageSize?: number; userId?: string }) {
     const page = Math.max(1, Number(query.page ?? 1));

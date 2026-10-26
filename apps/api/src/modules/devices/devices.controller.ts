@@ -35,6 +35,17 @@ export class DevicesController {
     return this.devices.mine(user.id);
   }
 
+  /**
+   * «طلب مساعدة طارئة» — held for three seconds on the driver's home screen. Driver-only by
+   * contract: an office employee has no field emergency to raise from this app.
+   */
+  @Roles(ROLES.DRIVER)
+  @HttpCode(200)
+  @Post('help')
+  help(@CurrentUser() user: AuthUser) {
+    return this.devices.requestHelp(user.id);
+  }
+
   // ---- admin list ----
   @Roles(ROLES.ADMIN)
   @Get()
