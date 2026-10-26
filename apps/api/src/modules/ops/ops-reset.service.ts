@@ -77,8 +77,8 @@ export interface ResetPlan {
   apply: false;
   wouldDelete: Record<OpsTable, number>;
   total: number;
-  /** Only when the caller asked for `includeFences` — the zones the apply will remove. */
-  fences?: { Zone: number };
+  /** Only when the caller asked for `includeFences` — the drawn fences the apply will remove. */
+  fences?: { Zone: number; Site: number };
 }
 
 export interface ResetResult {
@@ -87,7 +87,7 @@ export interface ResetResult {
   total: number;
   remaining: number;
   kept: Record<(typeof KEPT_TABLES)[number], number>;
-  fencesDeleted?: { Zone: number };
+  fencesDeleted?: { Zone: number; Site: number };
 }
 
 const sum = (o: Record<string, number>): number => Object.values(o).reduce((a, b) => a + b, 0);
@@ -158,7 +158,9 @@ export class OpsResetService {
     const wantFences = input?.includeFences === true;
     if (input?.apply !== true) {
       const plan = await this.plan();
-      return wantFences ? { ...plan, fences: { Zone: await this.prisma.zone.count() } } : plan;
+      return wantFences
+        ? { ...plan, fences: { Zone: await this.prisma.zone.count(), Site: await this.prisma.site.count() } }
+        : plan;
     }
     if (input.confirm !== RESET_CONFIRM) {
       throw new BadRequestException(`CONFIRM_REQUIRED: send { "confirm": "${RESET_CONFIRM}" }`);
@@ -174,9 +176,10 @@ export class OpsResetService {
     let fencesDeleted: ResetResult['fencesDeleted'];
     if (wantFences) {
       fencesDeleted = await this.prisma.$transaction(async (tx) => {
-        // Each assigned driver holds a foreign key on his zone, so the links go before the rows.
+        // Each employee holds a foreign key on his zone and his site, so the links go before the rows.
         await tx.employee.updateMany({ where: { zoneId: { not: null } }, data: { zoneId: null } });
-        return { Zone: (await tx.zone.deleteMany()).count };
+        await tx.employee.updateMany({ where: { siteId: { not: null } }, data: { siteId: null } });
+        return { Zone: (await tx.zone.deleteMany()).count, Site: (await tx.site.deleteMany()).count };
       });
     }
 

@@ -146,21 +146,23 @@ describe('POST /ops/reset-data', () => {
     expect(res.remaining).toBe(0);
   });
 
-  it('includeFences previews the drawn zones and leaves them standing', async () => {
+  it('includeFences previews the drawn fences and leaves them standing', async () => {
     await seed();
     const plan = await reset.reset({ includeFences: true });
     if (plan.apply !== false) throw new Error('expected a preview');
-    expect(plan.fences).toEqual({ Zone: 1 });
+    expect(plan.fences).toEqual({ Zone: 1, Site: 1 });
     expect(await prisma.zone.count()).toBe(1);
+    expect(await prisma.site.count()).toBe(1);
   });
 
-  it('includeFences wipes every zone and unassigns its drivers, org and sites intact', async () => {
+  it('includeFences wipes every zone and site and unassigns their people', async () => {
     const { employeeId } = await seed();
     const res = await reset.reset({ apply: true, confirm: RESET_CONFIRM, includeFences: true });
     if (res.apply !== true) throw new Error('expected an apply result');
-    expect(res.fencesDeleted).toEqual({ Zone: 1 });
-    expect(res.kept).toMatchObject({ Zone: 0, Site: 1, OrgUnit: 1, Employee: 1, Device: 1, User: 1 });
+    expect(res.fencesDeleted).toEqual({ Zone: 1, Site: 1 });
+    expect(res.kept).toMatchObject({ Zone: 0, Site: 0, OrgUnit: 1, Employee: 1, Device: 1, User: 1 });
     const emp = await prisma.employee.findUniqueOrThrow({ where: { id: employeeId } });
     expect(emp.zoneId).toBeNull();
+    expect(emp.siteId).toBeNull();
   });
 });

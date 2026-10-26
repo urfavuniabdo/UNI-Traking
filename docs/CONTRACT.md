@@ -374,9 +374,11 @@ Push (FCM/APNs) يطابق نفس الحدث ويوصل والتطبيق مقف�
 
 | Method | Path | الوصف |
 |---|---|---|
-| POST | `/ops/reset-data` | `ADMIN`+`SUPERVISOR` → يمسح التاريخ التشغيلي كله ويترك المنظّمَة (السواقين/المناطق/الأجهزة/القواعد). مع `includeFences:true` بيمسح **كل المناطق** كمان، بعد ما يفضّي `zoneId` من السواقين (الداش بورد بيرفض يحذف منطقة عليها سواقين). |
+| POST | `/ops/reset-data` | `ADMIN`+`SUPERVISOR` → يمسح التاريخ التشغيلي كله ويترك المنظّمَة (السواقين/الأجهزة/القواعد). مع `includeFences:true` بيمسح **كل المناطق والمواقع** كمان، بعد ما يفضّي `zoneId` و`siteId` من الموظفين (الداش بورد بيرفض يحذف نطاق/موقع عليه ناس). |
 
-**الجسم**: `{ apply?: boolean, confirm?: "RESET-OPS-DATA", includeFences?: boolean }`. بدون `apply:true` يرجع **معاينة** فقط `{ apply:false, wouldDelete, total }` (وبـ `includeFences` تزيد `fences:{Zone}`)، ومع `apply:true` بلا عبارة التأكيد ⇒ `400 CONFIRM_REQUIRED`.
+**الجسم**: `{ apply?: boolean, confirm?: "RESET-OPS-DATA", includeFences?: boolean }`. بدون `apply:true` يرجع **معاينة** فقط `{ apply:false, wouldDelete, total }` (وبـ `includeFences` تزيد `fences:{Zone,Site}`)، ومع `apply:true` بلا عبارة التأكيد ⇒ `400 CONFIRM_REQUIRED`.
+
+**النطاق (Zone) ≠ الموقع (Site):** النطاق ساحة تشغيل السواق وأساس `GEOFENCE_EXIT`/`STOP_EXCEEDED`/`SPEEDING` و`insideZone`، والموقع نقطة حضور الموظف (`siteId` + `distanceToSiteM` في سجل اليوم) و`strictReject` بيمنع التسجيل بره **للموظفين بس** (`attendance.service.ts:136`). الاتنين ليهم نفس الشكل على الخريطة ومفيش بينهم أي حساب مشترك. **الاتنين مش سييديين**: `prisma/seed.ts` ما بيبنيش fences خالص، فاللي يكوده المشرف من الداش بورد بيفضل بتاعه.
 
 **المحذوف** (بترتيب آمن على المفاتيح الأجنبية، أولاد قبل آبائهم، في transaction واحد): `CallLog, NotificationLog, Alert, GeoEvent, RouteLine, StopEvent, Position, Trip, AttendanceRecord, LeaveRequest, SyncIssue, SyncRun` → `{ apply:true, deleted, total, remaining:0, kept }`.
 
