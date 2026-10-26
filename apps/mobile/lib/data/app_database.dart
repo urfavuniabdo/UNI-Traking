@@ -13,7 +13,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String _name = 'traccer_positions.db';
-  static const int _version = 1;
+  static const int _version = 2;
 
   /// DDL, exposed so the (device-free) unit tests can build the same table via sqflite_common_ffi.
   static const String createPositionsSql = '''
@@ -31,12 +31,21 @@ class AppDatabase {
         buffered   INTEGER NOT NULL DEFAULT 0,
         seq        INTEGER NOT NULL UNIQUE,
         uploaded   INTEGER NOT NULL DEFAULT 0,
-        motionState TEXT
+        motionState TEXT,
+        stepsPerMin REAL,
+        motionEnergy REAL
       )
     ''';
   static const List<String> createIndexSql = <String>[
     'CREATE INDEX idx_positions_uploaded ON positions (uploaded, clientTs)',
     'CREATE INDEX idx_positions_seq ON positions (seq)',
+  ];
+
+  /// v1→v2: the phone's own motion evidence (§5). Nullable — a device that cannot measure them
+  /// uploads nothing and the backend judges it on the ground alone.
+  static const List<String> upgradeToV2Sql = <String>[
+    'ALTER TABLE positions ADD COLUMN stepsPerMin REAL',
+    'ALTER TABLE positions ADD COLUMN motionEnergy REAL',
   ];
 
   Database? _db;
@@ -53,6 +62,7 @@ class AppDatabase {
         path,
         version: _version,
         onCreate: _onCreate,
+        onUpgrade: _onUpgrade,
         onConfigure: (Database d) async => d.execute('PRAGMA foreign_keys = ON'),
       );
       _db = db;
@@ -77,6 +87,14 @@ class AppDatabase {
     await db.execute(createPositionsSql);
     for (final String sql in createIndexSql) {
       await db.execute(sql);
+    }
+  }
+
+  Future<void> _onUpgrade(Database db, int oldV, int newV) async {
+    if (oldV < 2) {
+      for (final String sql in upgradeToV2Sql) {
+        await db.execute(sql);
+      }
     }
   }
 

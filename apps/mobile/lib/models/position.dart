@@ -23,6 +23,8 @@ class TrackPosition {
     required this.seq,
     this.uploaded = false,
     this.motionState,
+    this.stepsPerMin,
+    this.motionEnergy,
     this.id,
   });
 
@@ -39,6 +41,8 @@ class TrackPosition {
   final int seq; // monotonic client sequence — UNIQUE dedupe key in the DAO
   final bool uploaded;
   final String? motionState; // STOPPED/WALKING/RIDING/UNKNOWN
+  final double? stepsPerMin; // §5: the accelerometer's cadence, null when unmeasured
+  final double? motionEnergy; // §5: acceleration variance over the last seconds, m/s²
   final int? id; // sqflite rowid
 
   /// Dedup key tuple per CONTRACT §4: `(clientTs, lat, lng)` (+ `batchSeq` per device).
@@ -60,6 +64,8 @@ class TrackPosition {
         seq: seq,
         uploaded: uploaded ?? this.uploaded,
         motionState: motionState ?? this.motionState,
+        stepsPerMin: stepsPerMin,
+        motionEnergy: motionEnergy,
         id: id ?? this.id,
       );
 
@@ -79,6 +85,8 @@ class TrackPosition {
         'seq': seq,
         'uploaded': uploaded ? 1 : 0,
         'motionState': motionState,
+        'stepsPerMin': stepsPerMin,
+        'motionEnergy': motionEnergy,
       };
 
   static TrackPosition fromRow(Map<String, Object?> r) => TrackPosition(
@@ -99,6 +107,8 @@ class TrackPosition {
         seq: (r['seq'] as int?) ?? 0,
         uploaded: ((r['uploaded'] as int?) ?? 0) == 1,
         motionState: r['motionState'] as String?,
+        stepsPerMin: (r['stepsPerMin'] as num?)?.toDouble(),
+        motionEnergy: (r['motionEnergy'] as num?)?.toDouble(),
       );
 
   /// JSON item for the wire (CONTRACT §4). Only the keys the backend declares.
@@ -113,6 +123,8 @@ class TrackPosition {
         'battery': batteryPct,
         'provider': provider,
         if (motionState != null) 'motionState': motionState,
+        if (stepsPerMin != null) 'stepsPerMin': stepsPerMin,
+        if (motionEnergy != null) 'motionEnergy': motionEnergy,
         'buffered': buffered,
       };
 

@@ -7,7 +7,8 @@ import 'package:traccer/data/app_database.dart';
 import 'package:traccer/data/position_dao.dart';
 import 'package:traccer/models/position.dart';
 
-TrackPosition row(int sec, {int? seq, bool uploaded = false}) => TrackPosition(
+TrackPosition row(int sec, {int? seq, bool uploaded = false, double? stepsPerMin, double? motionEnergy}) =>
+    TrackPosition(
       clientTs: DateTime.utc(2026, 10, 22, 6, 0, sec),
       lat: 30.0 + sec / 100000,
       lng: 31.0,
@@ -20,7 +21,29 @@ TrackPosition row(int sec, {int? seq, bool uploaded = false}) => TrackPosition(
       buffered: false,
       seq: seq ?? sec,
       uploaded: uploaded,
+      stepsPerMin: stepsPerMin,
+      motionEnergy: motionEnergy,
     );
+
+/// The table exactly as the shipped v1 buffer created it — no motion-evidence columns.
+const String v1PositionsSql = '''
+  CREATE TABLE positions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    clientTs   INTEGER NOT NULL,
+    lat        REAL    NOT NULL,
+    lng        REAL    NOT NULL,
+    speedKmh   REAL    NOT NULL,
+    bearing    REAL    NOT NULL,
+    accuracyM  REAL    NOT NULL,
+    altitudeM  REAL    NOT NULL DEFAULT 0,
+    batteryPct INTEGER NOT NULL DEFAULT 0,
+    provider   TEXT    NOT NULL,
+    buffered   INTEGER NOT NULL DEFAULT 0,
+    seq        INTEGER NOT NULL UNIQUE,
+    uploaded   INTEGER NOT NULL DEFAULT 0,
+    motionState TEXT
+  )
+''';
 
 void main() {
   late Database db;
@@ -86,5 +109,39 @@ void main() {
     // the 6 survivors must be the newest (seconds 5..10), oldest 1..4 gone
     expect(left.first.clientTs.second, 5);
     expect(left.last.clientTs.second, 10);
+  });
+
+  test('the motion evidence rides the buffer and the wire (§5)', () async {
+    await dao.insert(row(1, seq: 1, stepsPerMin: 96, motionEnergy: 1.4));
+    await dao.insert(row(2, seq: 2)); // an unmeasured fix keeps its nulls and is judged on ground alone
+    final List<TrackPosition> batch = await dao.takeBatch();
+    final TrackPosition measured = batch.firstWhere((TrackPosition p) => p.seq == 1);
+    expect(measured.stepsPerMin, 96);
+    expect(measured.motionEnergy, 1.4);
+    expect(measured.toJson()['stepsPerMin'], 96);
+    expect(measured.toJson()['motionEnergy'], 1.4);
+    final TrackPosition bare = batch.firstWhere((TrackPosition p) => p.seq == 2);
+    expect(bare.toJson().containsKey('stepsPerMin'), isFalse);
+    expect(bare.toJson().containsKey('motionEnergy'), isFalse);
+  });
+
+  test('a v1 buffer upgrades without losing the points it had not uploaded', () async {
+    // The way the installed build left it: v1 table, one shift still pending in it.
+    await db.execute('DROP TABLE positions');
+    await db.execute(v1PositionsSql);
+    await db.rawInsert(
+      'INSERT INTO positions (clientTs, lat, lng, speedKmh, bearing, accuracyM, altitudeM, batteryPct, provider, buffered, seq, uploaded)'
+      ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      <Object>[DateTime.utc(2026, 10, 22, 6, 0, 7).millisecondsSinceEpoch, 30.1, 31.0, 10, 0, 5, 0, 80, 'gps', 0, 7, 0],
+    );
+    for (final String sql in AppDatabase.upgradeToV2Sql) {
+      await db.execute(sql);
+    }
+    final List<TrackPosition> batch = await dao.takeBatch();
+    expect(batch, hasLength(1));
+    expect(batch.first.clientTs.second, 7);
+    expect(batch.first.stepsPerMin, isNull);
+    await dao.insert(row(8, seq: 8, stepsPerMin: 60, motionEnergy: 0.9));
+    expect((await dao.takeBatch()).length, 2);
   });
 }

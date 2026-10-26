@@ -17,6 +17,7 @@ import 'adapters/connectivity_adapter.dart';
 import 'adapters/device_adapter.dart';
 import 'adapters/location_adapter.dart';
 import 'motion_classifier.dart';
+import 'motion_sensor.dart';
 
 /// The background tracking brain. It owns:
 ///   * the live GPS stream (foreground service on Android / BG task on iOS)
@@ -35,8 +36,9 @@ class TrackingEngine {
     required this.connectivity,
     required this.battery,
     required this.deviceId,
+    MotionSensor? sensor,
     this.onUiEvent,
-  });
+  }) : _sensor = sensor ?? MotionSensor();
 
   final ApiClient api;
   final PositionDao dao;
@@ -50,6 +52,7 @@ class TrackingEngine {
   final void Function(String event, Map<String, Object?> data)? onUiEvent;
 
   final MotionClassifier _classifier = MotionClassifier();
+  final MotionSensor _sensor;
 
   StreamSubscription<Position>? _posSub;
   StreamSubscription<bool>? _connSub;
@@ -81,20 +84,23 @@ class TrackingEngine {
       _emit('GPS_ERROR', {'message': '$e'});
     });
 
-    // 2) data connectivity → DATA_OFF/DATA_ON + catch-up
+    // 2) the accelerometer: the second witness the receiver cannot bribe (§5)
+    unawaited(_sensor.start());
+
+    // 3) data connectivity → DATA_OFF/DATA_ON + catch-up
     _connSub = connectivity.onChange().listen(_onConnectivity);
 
-    // 3) GPS service toggles → GPS_OFF/GPS_ON
+    // 4) GPS service toggles → GPS_OFF/GPS_ON
     _gpsSub = location.serviceStatus().listen(_onServiceStatus);
 
-    // 4) drain + heartbeat timers
+    // 5) drain + heartbeat timers
     _drainTimer = Timer.periodic(Buffer.drainInterval, (_) => _drain());
     _heartbeatTimer = Timer.periodic(
       const Duration(seconds: RuleDefaults.heartbeatIntervalS),
       (_) => _heartbeat(),
     );
 
-    // 5) stationary keep-alive. FusedLocation treats distanceFilter as a gate, so a driver
+    // 6) stationary keep-alive. FusedLocation treats distanceFilter as a gate, so a driver
     // parked at a site emits no fix at all and the map freezes on his last point.
     _idleTimer = Timer.periodic(const Duration(seconds: _idlePollS), (_) => _pollWhenSilent());
 
@@ -122,6 +128,7 @@ class TrackingEngine {
     await _posSub?.cancel();
     await _connSub?.cancel();
     await _gpsSub?.cancel();
+    await _sensor.stop();
     _drainTimer?.cancel();
     _heartbeatTimer?.cancel();
     _idleTimer?.cancel();
@@ -189,12 +196,20 @@ class TrackingEngine {
     _lastFix = p;
     _lastFixTs = fixTs;
 
+    // The phone's own motion evidence travels with the fix: feet cap him at the walking band and a
+    // device nobody touched (§5 STILL_ENERGY_MS2) puts him back in his bubble whatever the receiver
+    // claims. Null until the sensor's window has filled — an unmeasured device is judged on ground.
+    final double? steps = _sensor.stepsPerMin;
+    final double? energy = _sensor.motionEnergyMs2;
+
     final String motion = _classifier.addSample(
       speedKmh: deviceSpeed,
       accuracyM: p.accuracy,
       ts: fixTs,
       lat: p.latitude,
       lng: p.longitude,
+      stepsPerMin: steps,
+      motionEnergyMs2: energy,
     );
     // Upload the speed the classifier actually judged, so the backend reasons from the same number
     // the phone's tag was derived from.
@@ -219,6 +234,8 @@ class TrackingEngine {
       buffered: false, // decided at upload time
       seq: seq,
       motionState: motion,
+      stepsPerMin: steps,
+      motionEnergy: energy,
     );
 
     await dao.insert(row); // WRITE-AHEAD: DB first, never lose a point on crash
