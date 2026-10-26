@@ -72,6 +72,9 @@ const NET_WINDOW_MAX_FIXES = 24;
 /** A run whose device has said nothing for this long is over — check-out, a killed app or a deploy. */
 const TRIP_IDLE_MS = 600_000;
 
+/** How far back before a journey the trace is read to ground it: the place he set off from. */
+const TRIP_ANCHOR_LOOKBACK_MS = 6 * 3_600_000;
+
 /** How often the whole board's trails are re-read: the line grows live between reads, so this is cold-start only. */
 const TRAILS_TTL_MS = 10_000;
 
@@ -672,23 +675,48 @@ export class PositionsService {
    * it must still be able to tell the truth about the ground it covered.
    */
   private async finalizeTrip(employeeId: string, open: NonNullable<Track['openTrip']>, endedAt: number): Promise<void> {
-    const rows = await this.prisma.position.findMany({
-      where: { employeeId, clientTs: { gte: new Date(open.startedAt), lte: new Date(endedAt) } },
+    // Grounded against the ground he came *from*, not just the journey's own minutes: the excursion
+    // test needs the fix before the phone woke up. Replaying only the window made the wake-up burst
+    // its own anchor, so the day's line refused the 137 km/h block while the trip still counted its
+    // metres. A working day of stand-by never runs longer than this, and the rows are read by time,
+    // not by a calendar label (which shifts with the dashboard's timezone).
+    const from = new Date(open.startedAt).getTime();
+    const to = new Date(endedAt).getTime();
+    const dayRows = await this.prisma.position.findMany({
+      where: { employeeId, clientTs: { gte: new Date(from - TRIP_ANCHOR_LOOKBACK_MS), lte: new Date(to) } },
       orderBy: { clientTs: 'asc' },
       select: { lat: true, lng: true, clientTs: true, speedKmh: true, accuracyM: true, bearing: true, buffered: true, stale: true },
     });
-    const trace = this.trace.groundTrace(rows);
+    // The exact credibility the day's line is drawn with, not a second reading of it: a trip that
+    // stands behind a fix the route refused reports metres and a top speed that contradict the chips
+    // and the polyline a supervisor is looking at one screen away.
+    const cleaned = this.replayDay(dayRows).filter((r) => r.credible && r.clientTs.getTime() >= from && r.clientTs.getTime() <= to);
+    const trace = this.trace.collapseStays(cleaned);
+    // The journey starts where the line starts: the ghost opened his trip at a 137 km/h fix that the
+    // trace refuses, and `collapseStays` stamps the stand-by it left him in at the moment he really
+    // set off. Never earlier than the accumulator's own word.
+    const startedAtMs = Math.max(open.startedAt, trace[0]?.clientTs.getTime() ?? open.startedAt);
     let distanceM = 0;
-    let maxStepKmh = 0;
+    // The fastest this journey ever moved him. §5's division of proof applies to the trip row too:
+    // the coordinates say *that* he travelled, the device says *how fast*, and the day's replayed
+    // speed is the two of them reconciled — so it is what the journey reports. The line's own
+    // metres-per-second is used only where the device was silent, and a step shorter than the noise
+    // circle counts neither as distance nor as speed: a fix folded into a stand-by point is a place,
+    // and a place has no speed. Without that gate his one-kilometre walk closed at 24.8 km/h on the
+    // 165 m the phone took back when its receiver re-locked.
+    let maxSpeedKmh = 0;
     for (let i = 1; i < trace.length; i++) {
       const a = trace[i - 1];
       const b = trace[i];
-      distanceM += this.trace.stepMetres(a, b);
+      const groundM = this.trace.stepMetres(a, b);
+      distanceM += groundM;
       const dtS = (b.clientTs.getTime() - a.clientTs.getTime()) / 1000;
-      if (dtS > 0) maxStepKmh = Math.max(maxStepKmh, (this.geo.distanceM(a, b) / dtS) * 3.6);
+      if (dtS > 0 && groundM > 0) {
+        maxSpeedKmh = Math.max(maxSpeedKmh, b.speedKmh ?? (this.geo.distanceM(a, b) / dtS) * 3.6);
+      }
     }
     const distanceKm = distanceM / 1000;
-    const hours = Math.max(1 / 3600, (endedAt - open.startedAt) / 3600_000);
+    const hours = Math.max(1 / 3600, (endedAt - startedAtMs) / 3600_000);
     const avgSpeed = distanceKm / hours;
     const simplified = this.geo.simplify(trace.map((pt) => ({ lat: pt.lat, lng: pt.lng })), 25);
     const lastPt = trace[trace.length - 1];
@@ -696,9 +724,13 @@ export class PositionsService {
       .update({
         where: { id: open.id },
         data: {
-          endedAt: new Date(Math.max(endedAt, open.startedAt)),
+          startedAt: new Date(startedAtMs),
+          endedAt: new Date(Math.max(endedAt, startedAtMs)),
           distanceKm: round(distanceKm, 3) ?? 0,
-          maxSpeedKmh: round(Math.max(maxStepKmh, open.maxSpeed ?? 0), 1) ?? null,
+          // A trip whose fixes the trace refused entirely has no line to derive a speed from, so the
+          // accumulator's own counter is kept. One stand-by point is a line of its own: he never left
+          // the place, whatever the phone claimed while it was waking up.
+          maxSpeedKmh: round(Math.max(maxSpeedKmh, trace.length ? 0 : (open.maxSpeed ?? 0)), 1) ?? null,
           avgSpeedKmh: round(avgSpeed, 1) ?? null,
           startPoint: trace[0] ? `${trace[0].lat},${trace[0].lng}` : '',
           endPoint: lastPt ? `${lastPt.lat},${lastPt.lng}` : null,
@@ -710,7 +742,7 @@ export class PositionsService {
       .catch(() => undefined);
     // close any dangling stop on this trip
     await this.prisma.stopEvent
-      .updateMany({ where: { tripId: open.id, endedAt: null }, data: { endedAt: new Date(endedAt), durationS: Math.max(0, Math.round((endedAt - open.startedAt) / 1000)) } })
+      .updateMany({ where: { tripId: open.id, endedAt: null }, data: { endedAt: new Date(endedAt), durationS: Math.max(0, Math.round((endedAt - startedAtMs) / 1000)) } })
       .catch(() => undefined);
   }
 

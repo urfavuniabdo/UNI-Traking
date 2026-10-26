@@ -413,7 +413,11 @@ describe('a journey ends when the ground stops (§5)', () => {
     expect(trip?.state).toBe('CLOSED');
     expect(trip?.endedAt?.getTime()).toBe(t0 + 240_000); // its last fix
     expect(trip?.distanceKm).toBe(0); // he never moved — the honest answer
-    expect(trip?.maxSpeedKmh).toBe(150); // what the phone claimed is kept, the ground is not
+    // §5's own arithmetic applied to the trip row: five fixes folded into the one place he sat
+    // covered no ground, so the journey has no top speed — the 150 the row carried was the phone
+    // asserting while its receiver was waking up, and the dashboard would have shown a car doing
+    // 150 km/h next to a dot that never moved.
+    expect(trip?.maxSpeedKmh).toBe(0);
   });
 
   it('waiting an hour at a customer keeps the run open — the phone is still talking', async () => {
