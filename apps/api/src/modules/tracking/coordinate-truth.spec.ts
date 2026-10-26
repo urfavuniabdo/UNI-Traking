@@ -287,13 +287,17 @@ describe('the line answers to the state (§5)', () => {
       distanceKm: number;
       rejectedPoints: number;
       points: { credible: boolean; motionState: string }[];
+      trace: { lat: number; lng: number }[];
       geojson: { coordinates: [number, number][] };
     };
     expect(route.rejectedPoints).toBe(5);
     expect(route.points.filter((p) => p.credible).every((p) => p.motionState === 'STOPPED')).toBe(true);
     // 7.7 km of ghosts became the ground he stood on: nothing moved, so nothing is drawn.
-    expect(route.distanceKm).toBeLessThan(0.1);
+    expect(route.distanceKm).toBe(0);
     expect(route.geojson.coordinates.every(([, lat]) => Math.abs(lat - 30.0) < 0.002)).toBe(true);
+    // and the hour of jitter around his stand-by spot is ONE point, not a star of spokes.
+    expect(route.trace).toHaveLength(1);
+    expect(route.geojson.coordinates.length).toBeLessThanOrEqual(1);
   });
 
   it('a round trip the device reported all the way keeps its road', async () => {
@@ -318,9 +322,13 @@ describe('the line answers to the state (§5)', () => {
     const route = (await positions.route(employeeId, new Date(t0).toISOString().slice(0, 10))) as {
       distanceKm: number;
       rejectedPoints: number;
+      trace: unknown[];
+      geojson: { coordinates: [number, number][] };
     };
     expect(route.rejectedPoints).toBe(0);
     expect(route.distanceKm).toBeGreaterThan(3.5);
+    // a man who really travelled 2 km out and back is not a stand-by: every step is on the line
+    expect(route.trace.length).toBeGreaterThan(35);
   });
 });
 

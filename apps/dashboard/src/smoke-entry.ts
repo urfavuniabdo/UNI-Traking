@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   const tj = trailsRes.json as { windowMin: number; trails: { userId: string; line: [number, number][]; stops: unknown[] }[] };
   check(
     'GET /positions/trails → one line per online driver',
-    trailsRes.status === 200 && tj.trails.length > 1 && tj.trails.every((t) => t.line.length > 1),
+    trailsRes.status === 200 && tj.trails.length > 1 && tj.trails.every((t) => t.line.length >= 1),
     `${tj.trails.length} trails, ${tj.trails[0]?.line.length ?? 0} pts each`,
   );
 

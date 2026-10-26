@@ -122,6 +122,11 @@ export interface RouteResponse {
   userName: string;
   date: string;
   geojson: { type: 'LineString'; coordinates: [number, number][] };
+  /**
+   * The day's ground: one entry per place the driver stood at, in order. A parked hour collapses to
+   * a single point, so the map draws his stand-by dot and no line. Absent on older payloads.
+   */
+  trace?: { clientTs: string; lat: number; lng: number; speedKmh?: number; motionState?: MotionState }[];
   points: RoutePoint[];
   stops: RouteStop[];
   gaps: RouteGap[];

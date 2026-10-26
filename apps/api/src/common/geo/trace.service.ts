@@ -10,6 +10,12 @@ export interface TraceRow {
   accuracyM: number | null;
 }
 
+/** The average position of a set of fixes — where GPS drift cancels out and the place shows. */
+function meanOf(rows: TraceRow[]): { lat: number; lng: number } {
+  const sum = rows.reduce((a, r) => ({ lat: a.lat + r.lat, lng: a.lng + r.lng }), { lat: 0, lng: 0 });
+  return { lat: sum.lat / rows.length, lng: sum.lng / rows.length };
+}
+
 /**
  * A silence longer than the net window means the fix at the other end of it was never *seen*
  * moving: the device dozed and woke holding a position from somewhere else. §5 refuses to call that
@@ -34,8 +40,18 @@ const MAX_UNSEEN_RUN_FIXES = 6;
 export class TraceService {
   constructor(private readonly geo: GeoService) {}
 
-  /** The day as ground: pass 1 (impossible steps) then pass 2 (unwatched round trips). */
+  /** The day as ground: impossible steps out, unwatched round trips out, then every stand-by
+   *  collapse into the one place it happened. */
   groundTrace<T extends TraceRow>(rows: T[]): T[] {
+    return this.collapseStays(this.dropAndClean(rows));
+  }
+
+  /** Pass 1 + pass 2 without the collapse — the fixes the trace still stands behind, one per report. */
+  groundFixes<T extends TraceRow>(rows: T[]): T[] {
+    return this.dropAndClean(rows);
+  }
+
+  private dropAndClean<T extends TraceRow>(rows: T[]): T[] {
     const day = this.dropSpikes(rows);
     this.dropOutAndBack(day);
     return day.filter((x) => x.credible).map((x) => x.row);
@@ -103,6 +119,59 @@ export class TraceService {
       // place he stayed at.
       i = cameBack ? k : j;
     }
+  }
+
+  /**
+   * A stand-by is a place, not a path. Consecutive fixes that never left one place — every one of
+   * them inside the day's drift band of their centre, and the window between the mean of their older
+   * half and the mean of their newer half never beat the noise bubble (§5's own arithmetic) — are
+   * collapsed to a single point at that place. A phone dozing on a desk jitters 30-50 m around its
+   * driver all hour; drawn fix-by-fix that jitter is a red star of spokes and 0.1 km of "route" for
+   * a man who has not moved since check-in, which contradicts the متوقف next to it. He gets one dot:
+   * نقطة وقوفه. A driver who actually walks blows the bubble within a few fixes, so his run breaks
+   * and the line between the run points is the road he took — distance and speed still decide it.
+   */
+  collapseStays<T extends TraceRow>(trace: T[]): T[] {
+    const out: T[] = [];
+    let run: T[] = [];
+    for (const fix of trace) {
+      if (!run.length) {
+        run = [fix];
+        continue;
+      }
+      if (this.stayedPut([...run, fix])) {
+        run.push(fix);
+        continue;
+      }
+      out.push(this.stayPoint(run));
+      run = [fix];
+    }
+    if (run.length) out.push(this.stayPoint(run));
+    return out;
+  }
+
+  /** Does this list of fixes describe one place a driver never left? */
+  private stayedPut(run: TraceRow[]): boolean {
+    const band = RULE_DEFAULTS.accuracyDriftM;
+    const centre = meanOf(run);
+    if (run.some((r) => this.geo.distanceM(centre, r) > band)) return false;
+    if (run.length < 2) return true;
+    const half = Math.ceil(run.length / 2);
+    const netM = this.geo.distanceM(meanOf(run.slice(0, half)), meanOf(run.slice(half)));
+    const spanS = (run[run.length - 1].clientTs.getTime() - run[0].clientTs.getTime()) / 1000;
+    const accuracy = run.reduce((s, r) => s + (r.accuracyM ?? 0), 0) / run.length;
+    const noiseRadiusM = Math.min(Math.max(accuracy, NOISE_FLOOR_M), band);
+    const bubbleM = (MOTION.MOVED_CIRCLE_FACTOR * noiseRadiusM * Math.sqrt(2)) / Math.sqrt(Math.max(2, run.length));
+    return netM <= Math.max(bubbleM, (MOTION.STATIONARY_SPEED_KMH / 3.6) * Math.max(0, spanS));
+  }
+
+  /** The one fix a stand-by reports: sitting at the middle of the cluster, stamped when it ended. */
+  private stayPoint<T extends TraceRow>(run: T[]): T {
+    const last = run[run.length - 1];
+    if (run.length === 1) return last;
+    const centre = meanOf(run);
+    const medoid = run.reduce((best, r) => (this.geo.distanceM(centre, r) < this.geo.distanceM(centre, best) ? r : best), run[0]);
+    return { ...last, lat: medoid.lat, lng: medoid.lng };
   }
 
   /**

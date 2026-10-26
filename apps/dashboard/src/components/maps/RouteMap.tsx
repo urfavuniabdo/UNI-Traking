@@ -18,10 +18,14 @@ interface Props {
 function FitRoute({ positions }: { positions: [number, number][] }) {
   const map = useMap();
   useEffect(() => {
-    if (positions.length) {
-      const b = L_latLngBounds(positions);
-      map.fitBounds(b, { padding: [24, 24] });
+    if (!positions.length) return;
+    if (positions.length === 1) {
+      // a stand-by has no extent to fit — frame the spot, not the whole world
+      map.setView(positions[0], 15);
+      return;
     }
+    const b = L_latLngBounds(positions);
+    map.fitBounds(b, { padding: [24, 24] });
   }, [positions, map]);
   return null;
 }
@@ -36,11 +40,20 @@ function L_latLngBounds(positions: [number, number][]): [number, number][] {
 }
 
 export default function RouteMap({ route, index, events = [], onSelectPoint, className = '' }: Props) {
-  // The server already refuses a fix whose ground it cannot stand behind; drawing it anyway would
-  // connect the day's real position to a cached fix across the city — a route for a driver who
-  // never moved. What is not on the ground is not on the line.
-  const trace = useMemo(() => route.points.filter((p) => p.credible !== false), [route]);
+  // The server's ground trace: one entry per place the driver stood at. A parked hour is ONE point,
+  // so his hour of GPS jitter draws no star of spokes and no 0.1 km "route" under a متوقف chip.
+  // Older payloads fall back to the fixes the trace still stands behind.
+  const trace = useMemo(
+    () =>
+      route.trace?.length
+        ? route.trace.map((p) => ({ lat: p.lat, lng: p.lng, motionState: p.motionState ?? ('UNKNOWN' as const) }))
+        : route.points
+            .filter((p) => p.credible !== false)
+            .map((p) => ({ lat: p.lat, lng: p.lng, motionState: p.motionState })),
+    [route],
+  );
   const coords = useMemo(() => trace.map((p) => [p.lat, p.lng] as [number, number]), [trace]);
+  const standby = trace.length <= 1 ? coords[0] : undefined;
   const current = route.points[Math.min(index, route.points.length - 1)];
 
   // color segments by motion state for visual richness
@@ -57,7 +70,8 @@ export default function RouteMap({ route, index, events = [], onSelectPoint, cla
         if (cur.positions[cur.positions.length - 1][0] !== p.lat) cur.positions.push([p.lat, p.lng]);
       }
     }
-    return out;
+    // a segment of one point is a place, not a road
+    return out.filter((s) => s.positions.length > 1);
   }, [trace]);
 
   return (
@@ -68,6 +82,12 @@ export default function RouteMap({ route, index, events = [], onSelectPoint, cla
       {segments.map((s, i) => (
         <Polyline key={i} positions={s.positions} pathOptions={{ color: s.color, weight: 4, opacity: 0.75 }} />
       ))}
+
+      {standby && (
+        <CircleMarker center={standby} radius={11} pathOptions={{ color: '#0f766e', fillColor: '#14b8a6', fillOpacity: 0.35, weight: 2 }}>
+          <Tooltip sticky direction="top">نقطة وقوفه — لم يغادرها طوال اليوم</Tooltip>
+        </CircleMarker>
+      )}
 
       {/* gaps: dashed red */}
       {route.gaps.map((g, i) => {

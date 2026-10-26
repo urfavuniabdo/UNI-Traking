@@ -1026,7 +1026,9 @@ export class PositionsService {
       select: { lat: true, lng: true, clientTs: true, speedKmh: true, accuracyM: true, bearing: true, buffered: true, stale: true },
     });
     const replayed = this.replayDay(rows);
-    const trace = replayed.filter((p) => p.credible);
+    const fixes = replayed.filter((p) => p.credible);
+    // What the day looks like on the ground: every stand-by reduced to the one place it was.
+    const trace = this.trace.collapseStays(fixes);
     const line = this.geo.simplify(trace.map((p) => ({ lat: p.lat, lng: p.lng })), 25);
     const routeLine = await this.prisma.routeLine.findUnique({ where: { employeeId_workDate: { employeeId, workDate: date } } });
     const stopRows = await this.prisma.stopEvent.findMany({
@@ -1063,8 +1065,19 @@ export class PositionsService {
       replayed: rows.some((p) => p.buffered || p.stale),
       replayedPoints: rows.filter((p) => p.buffered || p.stale).length,
       /** fixes the trace refused: too far apart to be ground, or rejected at ingest. */
-      rejectedPoints: Math.max(0, rows.length - trace.length),
+      rejectedPoints: Math.max(0, rows.length - fixes.length),
       geojson: { type: 'LineString', coordinates: line.map((p) => [p.lng, p.lat]) },
+      /**
+       * The day's ground: one point per place he stood at, in the order he reached them. A stand-by
+       * is a single point here, not the star of drift jitter its fixes describe.
+       */
+      trace: trace.map((p) => ({
+        clientTs: p.clientTs.toISOString(),
+        lat: p.lat,
+        lng: p.lng,
+        speedKmh: p.speedKmh,
+        motionState: p.motionState,
+      })),
       points,
       stops: this.trace.groundedStops(trace, stopRows).map((s) => ({
         id: s.id,
@@ -1119,7 +1132,9 @@ export class PositionsService {
         byEmp.set(r.employeeId, list);
       }
       for (const d of drivers) {
-        const trace = this.replayDay(byEmp.get(d.employeeId) ?? []).filter((p) => p.credible);
+        const replayed = this.replayDay(byEmp.get(d.employeeId) ?? []);
+        const fixes = replayed.filter((p) => p.credible);
+        const trace = this.trace.collapseStays(fixes);
         let distanceM = 0;
         const gaps: { from: [number, number]; to: [number, number]; minutes: number }[] = [];
         for (let i = 1; i < trace.length; i++) {
@@ -1127,7 +1142,11 @@ export class PositionsService {
           const b = { lat: trace[i].lat, lng: trace[i].lng, at: trace[i].clientTs.getTime() };
           distanceM += this.trace.stepMetres(trace[i - 1], trace[i]);
           const dtMin = (b.at - a.at) / 60_000;
-          if (dtMin > RULE_DEFAULTS.gapMinMin) gaps.push({ from: [a.lat, a.lng], to: [b.lat, b.lng], minutes: Math.round(dtMin) });
+          // Silence only if the device really went quiet: a collapsed stand-by spans minutes of fixes.
+          const silent = fixes.every((f, k) => k === 0 || f.clientTs.getTime() <= a.at || f.clientTs.getTime() >= b.at);
+          if (dtMin > RULE_DEFAULTS.gapMinMin && silent) {
+            gaps.push({ from: [a.lat, a.lng], to: [b.lat, b.lng], minutes: Math.round(dtMin) });
+          }
         }
         trails.push({
           userId: d.userId,

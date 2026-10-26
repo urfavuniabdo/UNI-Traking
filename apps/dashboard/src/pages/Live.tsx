@@ -5,7 +5,7 @@ import { api } from '@/api/client';
 import type { AlertPayload, AlertsResponse, Employee, FencesResponse, LivePosition, MapEvent, RoutePoint, RouteResponse, TrailsResponse } from '@/api/types';
 import { useAlertFeed, useLive } from '@/stores/ui';
 import { useAsync, useNow } from '@/hooks/useAsync';
-import { fmtTime, timeAgo, todayISODate, waLink, telLink } from '@/utils/format';
+import { fmtTime, haversineM, timeAgo, todayISODate, waLink, telLink } from '@/utils/format';
 import LiveMap, { type BoardTrail, type TrailLayer } from '@/components/maps/LiveMap';
 import { eventGlyph } from '@/components/maps/icons';
 import { Btn, Chip, EmptyState, ErrorState, LiveSpeed, MotionChip, Num, Select, SeverityChip, Skeleton } from '@/components/ui';
@@ -18,6 +18,23 @@ const colorOf = (id: string): string => {
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 997;
   return TRAIL_COLORS[h % TRAIL_COLORS.length];
 };
+
+/**
+ * The socket tail carries every read the phone makes; the server's line carries only ground. A read
+ * inside the stand-by bubble of the last drawn point is a phone jittering on a desk (§5), so it joins
+ * nothing: a parked driver keeps his one point on the board until he actually goes somewhere.
+ */
+function extendLine(line: [number, number][], tail: [number, number][] | undefined): [number, number][] {
+  if (!tail?.length) return line;
+  const STAY_M = 60;
+  const out = line.slice();
+  for (const p of tail) {
+    const last = out[out.length - 1];
+    if (last && haversineM(last[0], last[1], p[0], p[1]) <= STAY_M) continue;
+    out.push(p);
+  }
+  return out;
+}
 
 export default function LivePage() {
   const positions = useLive((s) => s.positions);
@@ -126,7 +143,13 @@ export default function LivePage() {
     if (!focus) return null;
     const r = routeRes.data;
     if (!r && !liveTrail.length) return null;
-    const points: [number, number][] = (r?.points ?? []).map((p) => [p.lat, p.lng] as [number, number]);
+    // The server's ground trace, not the raw fixes: an hour of stand-by jitter is one point on it,
+    // and drawing every read would hand a driver who never moved a star of spokes.
+    const points: [number, number][] = (
+      r?.trace?.length
+        ? r.trace.map((p) => [p.lat, p.lng] as [number, number])
+        : (r?.points ?? []).filter((p) => p.credible !== false).map((p) => [p.lat, p.lng] as [number, number])
+    );
     const gaps = (r?.gaps ?? []).flatMap((g) => {
       const a = pointNear(r?.points ?? [], g.fromTs, 'before');
       const b = pointNear(r?.points ?? [], g.toTs, 'after');
@@ -144,7 +167,7 @@ export default function LivePage() {
         severity: a.severity,
       }));
     return {
-      points: liveTrail.length ? [...points, ...liveTrail] : points,
+      points: extendLine(points, liveTrail),
       stops: (r?.stops ?? []).map((s) => ({ lat: s.lat, lng: s.lng, durationMin: s.durationMin, kind: s.kind, startTs: s.startTs })),
       gaps,
       events,
@@ -159,7 +182,7 @@ export default function LivePage() {
       isToday
         ? (trailsRes.data?.trails ?? [])
             .filter((t) => t.userId !== focus)
-            .map((t) => ({ ...t, color: colorOf(t.userId), line: [...t.line, ...(tails[t.userId] ?? [])] }))
+            .map((t) => ({ ...t, color: colorOf(t.userId), line: extendLine(t.line, tails[t.userId]) }))
         : [],
     [trailsRes.data, tails, focus, isToday],
   );

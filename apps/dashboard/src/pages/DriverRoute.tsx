@@ -63,6 +63,8 @@ export default function DriverRoutePage() {
 
   const current = route?.points[Math.min(idx, Math.max(0, count - 1))];
   const replayedPct = route && count ? Math.round((route.replayedPoints / count) * 100) : 0;
+  /** places the trace stands behind: a driver who never moved has one, and the header must not call it a route. */
+  const places = route?.trace?.length ?? route?.points.filter((p) => p.credible !== false).length ?? 0;
 
   const motionRuns = useMemo(() => {
     if (!route) return [];
@@ -120,7 +122,12 @@ export default function DriverRoutePage() {
           <div className="min-w-0">
             <h2 className="truncate font-extrabold">{route.userName}</h2>
             <span className="muted" style={{ fontSize: '.75rem' }}>
-              خط سير يوم <Num>{date}</Num> · <Num>{route.distanceKm}</Num> كم · <Num>{route.points.length}</Num> نقطة
+              {places <= 1 ? 'نقطة وقوف يوم' : 'خط سير يوم'} <Num>{date}</Num> · <Num>{route.distanceKm}</Num> كم ·{' '}
+              {places <= 1 ? (
+                <>لم يغادر مكانه · <Num>{count}</Num> قراءة</>
+              ) : (
+                <><Num>{places}</Num> موقعًا من <Num>{count}</Num> قراءة</>
+              )}
             </span>
           </div>
         </div>
