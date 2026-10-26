@@ -47,32 +47,44 @@ afterAll(async () => {
 });
 
 describe('prisma/seed.ts', () => {
-  it('bootstraps an empty database with the org, logins and sites', async () => {
+  it('bootstraps an empty database with the org, logins and shifts — but no fences', async () => {
     expect(await prisma.orgUnit.count()).toBe(3);
-    expect(await prisma.site.count()).toBe(2);
     expect(await prisma.employee.count()).toBe(14);
     expect(await prisma.user.count()).toBe(17);
     expect(await prisma.shiftAssignment.count()).toBe(14);
+    expect(await prisma.site.count()).toBe(0);
+    expect(await prisma.zone.count()).toBe(0);
   });
 
   it('a second boot keeps what the operator edited and resurrects nothing', async () => {
     const mine = await prisma.zone.create({
       data: { code: 'MY-ZONE', name: 'منطقتي', orgUnitId: 'ou-cairo', lat: 30.11, lng: 31.22, radiusM: 900 },
     });
+    const mySite = await prisma.site.create({
+      data: { code: 'MY-SITE', name: 'موقعي', orgUnitId: 'ou-cairo', lat: 30.05, lng: 31.24, radiusM: 180, strictReject: true },
+    });
     await prisma.employee.update({ where: { id: 'emp-d0203' }, data: { name: 'وائل جمال', zoneId: mine.id } });
+    await prisma.employee.update({ where: { id: 'emp-e0101' }, data: { siteId: mySite.id } });
     await prisma.user.update({ where: { identifier: 'D0201' }, data: { role: 'SUPERVISOR' } });
 
     runSeed();
 
     expect(await prisma.zone.count()).toBe(1);
+    expect(await prisma.site.count()).toBe(1);
     expect(await prisma.zone.findFirstOrThrow({ where: { id: mine.id } })).toMatchObject({
       name: 'منطقتي',
       lat: 30.11,
       radiusM: 900,
     });
+    expect(await prisma.site.findFirstOrThrow({ where: { id: mySite.id } })).toMatchObject({
+      name: 'موقعي',
+      radiusM: 180,
+      strictReject: true,
+    });
     const driver = await prisma.employee.findUniqueOrThrow({ where: { id: 'emp-d0203' } });
     expect(driver.name).toBe('وائل جمال');
     expect(driver.zoneId).toBe(mine.id);
+    expect((await prisma.employee.findUniqueOrThrow({ where: { id: 'emp-e0101' } })).siteId).toBe(mySite.id);
     expect((await prisma.user.findUniqueOrThrow({ where: { identifier: 'D0201' } })).role).toBe('SUPERVISOR');
   });
 });

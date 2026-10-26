@@ -34,27 +34,22 @@ const ou = { id: 'ou-hq', code: 'HQ', name: 'Uni Group HQ' };
 const ouCairo = { id: 'ou-cairo', code: 'CAIRO_OPS', name: 'Cairo Operations', parentId: ou.id };
 const ouAlex = { id: 'ou-alex', code: 'ALEX_OPS', name: 'Alexandria Operations', parentId: ou.id };
 
-const sites = [
-  { id: 'site-cairo', code: 'CAIRO', name: 'Cairo HQ', orgUnitId: ouCairo.id, lat: 30.0444, lng: 31.2357, radiusM: 250, strictReject: false },
-  { id: 'site-alex', code: 'ALEX', name: 'Alexandria Depot', orgUnitId: ouAlex.id, lat: 31.2001, lng: 29.9187, radiusM: 300, strictReject: false },
-];
-
 const schedules = [
   { id: 'sched-day', code: 'DAY', name: 'Day shift', startMinDay: 480, endMinDay: 1080, crossMidnight: false, graceMin: 30 },
   { id: 'sched-night', code: 'NIGHT', name: 'Night shift', startMinDay: 1200, endMinDay: 360, crossMidnight: true, graceMin: 30 },
 ];
 
-type Emp = { id: string; externalId: string; name: string; phone: string; siteId?: string; orgUnitId: string; jobTitle?: string };
+type Emp = { id: string; externalId: string; name: string; phone: string; orgUnitId: string; jobTitle?: string };
 
 const employees: Emp[] = [
-  { id: 'emp-e0101', externalId: 'E0101', name: 'Ahmed Ali', phone: '01000000101', siteId: 'site-cairo', orgUnitId: ouCairo.id, jobTitle: 'Accountant' },
-  { id: 'emp-e0102', externalId: 'E0102', name: 'Mona Farid', phone: '01000000102', siteId: 'site-cairo', orgUnitId: ouCairo.id, jobTitle: 'HR Officer' },
-  { id: 'emp-e0103', externalId: 'E0103', name: 'Karim Adel', phone: '01000000103', siteId: 'site-cairo', orgUnitId: ouCairo.id, jobTitle: 'IT Support' },
-  { id: 'emp-e0104', externalId: 'E0104', name: 'Hala Sabry', phone: '01000000104', siteId: 'site-alex', orgUnitId: ouAlex.id, jobTitle: 'Storekeeper' },
-  { id: 'emp-e0105', externalId: 'E0105', name: 'Tarek Nabil', phone: '01000000105', siteId: 'site-alex', orgUnitId: ouAlex.id, jobTitle: 'Receptionist' },
-  { id: 'emp-e0106', externalId: 'E0106', name: 'Nour Hamdy', phone: '01000000106', siteId: 'site-cairo', orgUnitId: ouCairo.id, jobTitle: 'Sales' },
-  { id: 'emp-e0107', externalId: 'E0107', name: 'Rana Fathy', phone: '01000000107', siteId: 'site-cairo', orgUnitId: ouCairo.id, jobTitle: 'Finance' },
-  { id: 'emp-e0108', externalId: 'E0108', name: 'Bassel Omar', phone: '01000000108', siteId: 'site-alex', orgUnitId: ouAlex.id, jobTitle: 'Logistics' },
+  { id: 'emp-e0101', externalId: 'E0101', name: 'Ahmed Ali', phone: '01000000101', orgUnitId: ouCairo.id, jobTitle: 'Accountant' },
+  { id: 'emp-e0102', externalId: 'E0102', name: 'Mona Farid', phone: '01000000102', orgUnitId: ouCairo.id, jobTitle: 'HR Officer' },
+  { id: 'emp-e0103', externalId: 'E0103', name: 'Karim Adel', phone: '01000000103', orgUnitId: ouCairo.id, jobTitle: 'IT Support' },
+  { id: 'emp-e0104', externalId: 'E0104', name: 'Hala Sabry', phone: '01000000104', orgUnitId: ouAlex.id, jobTitle: 'Storekeeper' },
+  { id: 'emp-e0105', externalId: 'E0105', name: 'Tarek Nabil', phone: '01000000105', orgUnitId: ouAlex.id, jobTitle: 'Receptionist' },
+  { id: 'emp-e0106', externalId: 'E0106', name: 'Nour Hamdy', phone: '01000000106', orgUnitId: ouCairo.id, jobTitle: 'Sales' },
+  { id: 'emp-e0107', externalId: 'E0107', name: 'Rana Fathy', phone: '01000000107', orgUnitId: ouCairo.id, jobTitle: 'Finance' },
+  { id: 'emp-e0108', externalId: 'E0108', name: 'Bassel Omar', phone: '01000000108', orgUnitId: ouAlex.id, jobTitle: 'Logistics' },
 ];
 
 const drivers: Emp[] = [
@@ -72,14 +67,9 @@ async function main() {
   await prisma.orgUnit.upsert({ where: { id: ouCairo.id }, update: {}, create: ouCairo });
   await prisma.orgUnit.upsert({ where: { id: ouAlex.id }, update: {}, create: ouAlex });
 
-  // Sites
-  for (const s of sites) {
-    await prisma.site.upsert({ where: { id: s.id }, update: {}, create: { ...s, polygon: null, active: true } });
-  }
-
-  // Zones are NOT seeded: the operator draws them in the dashboard, and this script runs on every
-  // container start — seeding them back would resurrect the demo circles he deleted and snap the
-  // circles he redrawn to the seed's coordinates.
+  // Sites and Zones are NOT seeded: the operator draws both in the dashboard, and this script runs on
+  // every container start — seeding them resurrected the fences he deleted the moment the service
+  // woke up. Their attendance/tracking logic is untouched; only the demo rows are gone.
 
   // Shift schedules
   for (const s of schedules) {
@@ -92,7 +82,7 @@ async function main() {
     await prisma.employee.upsert({
       where: { id: e.id },
       update: {},
-      create: { id: e.id, externalId: e.externalId, name: e.name, phone, email: `${e.externalId.toLowerCase()}@uni-group.example`, siteId: e.siteId ?? null, orgUnitId: e.orgUnitId, jobTitle: e.jobTitle ?? null, kind: 'EMPLOYEE', source: 'MANUAL', active: true },
+      create: { id: e.id, externalId: e.externalId, name: e.name, phone, email: `${e.externalId.toLowerCase()}@uni-group.example`, orgUnitId: e.orgUnitId, jobTitle: e.jobTitle ?? null, kind: 'EMPLOYEE', source: 'MANUAL', active: true },
     });
     // login for the employee (identifier = externalId, must change temp password)
     await prisma.user.upsert({
