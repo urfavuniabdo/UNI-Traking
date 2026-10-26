@@ -282,12 +282,17 @@ describe('the line answers to the state (§5)', () => {
     await store(1930, 30.00005, 10, 150.9); // and back, 25 s later — 145 km/h on paper
     await store(2000, 30.0001);
     await store(2400, 30.0);
+    // a stop the engine recorded a few metres off the man himself — the marker belongs on his spot
+    await prisma.stopEvent.create({
+      data: { employeeId, startedAt: new Date(t0 + 30_000), endedAt: new Date(t0 + 600_000), durationS: 570, kind: 'UNPLANNED', lat: 30.0003, lng: 31.2 },
+    });
 
     const route = (await positions.route(employeeId, new Date(t0).toISOString().slice(0, 10))) as {
       distanceKm: number;
       rejectedPoints: number;
       points: { credible: boolean; motionState: string }[];
       trace: { lat: number; lng: number }[];
+      stops: { lat: number; lng: number }[];
       geojson: { coordinates: [number, number][] };
     };
     expect(route.rejectedPoints).toBe(5);
@@ -298,6 +303,9 @@ describe('the line answers to the state (§5)', () => {
     // and the hour of jitter around his stand-by spot is ONE point, not a star of spokes.
     expect(route.trace).toHaveLength(1);
     expect(route.geojson.coordinates.length).toBeLessThanOrEqual(1);
+    expect(route.stops).toHaveLength(1);
+    expect(route.stops[0].lat).toBe(route.trace[0].lat);
+    expect(route.stops[0].lng).toBe(route.trace[0].lng);
   });
 
   it('a round trip the device reported all the way keeps its road', async () => {

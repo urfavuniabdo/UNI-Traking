@@ -193,6 +193,13 @@ export class TraceService {
    */
   groundedStops<T extends { lat: number; lng: number }, S extends { lat: number; lng: number }>(trace: T[], stops: S[]): S[] {
     const band = RULE_DEFAULTS.accuracyDriftM;
-    return stops.filter((s) => trace.some((t) => this.geo.distanceM(t, s) <= band));
+    return stops
+      .map((s) => {
+        const at = trace.find((t) => this.geo.distanceM(t, s) <= band);
+        // Snapped onto the place the trace says he was — a stand-by day's seven stops are seven
+        // readings of the same spot, not a fan of markers around it.
+        return at ? { ...s, lat: at.lat, lng: at.lng } : null;
+      })
+      .filter((s): s is S => s !== null);
   }
 }
