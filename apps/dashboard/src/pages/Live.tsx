@@ -379,8 +379,8 @@ function CarDetails({
         <Chip tone="blue"><LiveSpeed state={pos.motionState} speedKmh={pos.speedKmh} /></Chip>
         <Chip tone={pos.online ? 'green' : 'red'}>{pos.online ? 'متصل' : 'غير متصل'}</Chip>
         <Chip tone={pos.gpsEnabled ? 'green' : 'red'}>GPS {pos.gpsEnabled ? '✓' : '✗'}</Chip>
-        <Chip tone={pos.dataEnabled !== false ? 'green' : 'red'}>داتا {pos.dataEnabled !== false ? '✓' : '✗'}</Chip>
-        <Chip tone={pos.tracking ? 'green' : 'gray'}>{pos.tracking ? 'تتبع شغّال' : 'بدون تتبع'}</Chip>
+        <Chip tone={pos.dataEnabled !== false ? 'green' : 'red'}>الإنترنت {pos.dataEnabled !== false ? '✓' : '✗'}</Chip>
+        <Chip tone={pos.tracking ? 'green' : 'gray'}>{pos.tracking ? 'التتبع يعمل' : 'بلا تتبع'}</Chip>
       </div>
 
       <div className="muted mt-2 space-y-0.5" style={{ fontSize: '.73rem' }}>
@@ -519,7 +519,7 @@ function DriverCard({
           GPS {pos?.gpsEnabled ? '✓' : '✗'}
         </span>
         <span className={online ? 'text-green-700' : 'text-red-600 font-bold'} title="الاتصال">
-          داتا {pos?.dataEnabled !== false && online ? '✓' : '✗'}
+          الإنترنت {pos?.dataEnabled !== false && online ? '✓' : '✗'}
         </span>
         <span className="ms-auto flex items-center gap-2">
           <a

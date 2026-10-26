@@ -150,7 +150,7 @@ export default function LeavePage() {
               setPage(1);
             }}
           >
-            مسح الفلاتر
+            مسح عوامل التصفية
           </Btn>
         </div>
       </div>

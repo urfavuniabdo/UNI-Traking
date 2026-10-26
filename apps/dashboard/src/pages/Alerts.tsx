@@ -155,7 +155,7 @@ export default function AlertsPage() {
         ) : res.error ? (
           <ErrorState message={res.error} onRetry={res.reload} />
         ) : !alerts.length ? (
-          <EmptyState title="لا تنبيهات مطابقة" hint="جرّب توسيع الفلاتر" />
+          <EmptyState title="لا توجد تنبيهات مطابقة" hint="وسّع عوامل التصفية" />
         ) : (
           <table className="w-full min-w-[820px] text-start" style={{ fontSize: '.82rem' }}>
             <thead>
