@@ -101,7 +101,11 @@ export class MotionClassifierService {
    *    ~0 here: the Doppler value cannot outrun a position that never changed.
    */
   groundSpeed(i: GroundSpeedInput): GroundSpeedResult {
-    const stepDerived = i.stepDtS !== null && i.stepDtS > 0 ? (i.stepM / i.stepDtS) * 3.6 : null;
+    // A step smaller than the noise circle is not a step: the phone ping-ponging 4 m either way at
+    // 25 m accuracy covers "12 km/h" on paper every 5 s without going anywhere. Only a step that
+    // leaves the circle carries evidence; the anchor window below still picks up a real walk.
+    const stepDerived =
+      i.stepDtS !== null && i.stepDtS > 0 && i.stepM > i.noiseRadiusM ? (i.stepM / i.stepDtS) * 3.6 : null;
     const anchorDerived = i.anchorDtS !== null && i.anchorDtS > 0 ? (i.anchorM / i.anchorDtS) * 3.6 : null;
     const derived = this.resolveSpeed(stepDerived, anchorDerived);
     if (i.anchorM > i.noiseRadiusM) return { speedKmh: this.resolveSpeed(i.deviceKmh, derived), moved: true, stationary: false };

@@ -133,6 +133,29 @@ describe('the coordinates decide the motion state (§5)', () => {
     expect(rows.every((r) => r.motionState === 'STOPPED')).toBe(true);
   });
 
+  it('GPS drift that ping-pongs inside the circle ends in واقف and opens no trip', async () => {
+    const { employeeId, deviceId } = await mkDriver();
+    const t0 = Date.now();
+    // today's real trace from the field: ±16 m every 3 s at ~19 m accuracy — 19 km/h on paper,
+    // and not one metre of ground he is provably missing from.
+    const jitter = (i: number): PositionItemDto => ({
+      clientTs: iso(t0 + i * 3000),
+      lat: 30.0 + (i % 2 === 1 ? 0.000144 : -0.000144),
+      lng: 31.2,
+      speed: 0.5,
+      accuracy: 19.4,
+    });
+    const batch: PositionItemDto[] = [];
+    batch.push({ clientTs: iso(t0), lat: 30.0, lng: 31.2, speed: 0.3, accuracy: 19.4 });
+    for (let i = 1; i <= 24; i++) batch.push(jitter(i));
+    await positions.ingestBatch({ deviceId, batchSeq: 1, positions: batch });
+
+    expect(await stateOf(employeeId)).toBe('STOPPED');
+    expect(await prisma.trip.count({ where: { employeeId } })).toBe(0);
+    const rows = await prisma.position.findMany({ where: { employeeId }, orderBy: { clientTs: 'asc' } });
+    expect(rows[rows.length - 1].speedKmh).toBeLessThan(1.5);
+  });
+
   it('a real drive out of the site still opens a trip and reads في رحلة', async () => {
     const { employeeId, deviceId } = await mkDriver();
     const t0 = Date.now();
