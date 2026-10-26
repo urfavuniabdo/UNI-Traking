@@ -8,6 +8,12 @@ export interface TraceRow {
   lng: number;
   clientTs: Date;
   accuracyM: number | null;
+  /**
+   * The speed the device reported with the fix. Optional: a reader that only pulls coordinates
+   * cannot be asked to judge a speed profile, and an excursion is only refused by this test when
+   * the day's speeds are actually present.
+   */
+  speedKmh?: number | null;
 }
 
 /** The average position of a set of fixes — where GPS drift cancels out and the place shows. */
@@ -107,18 +113,58 @@ export class TraceService {
       let j = i + 1;
       while (j < kept.length && this.geo.distanceM(anchor, kept[j].row) <= band) j++;
       if (j >= kept.length) return;
+      // Only a short blip is judged on cadence: past the cap the run is long enough to be a real
+      // journey, and nothing but its own physics may call it a ghost.
       let k = j;
-      // Only a short blip can be a ghost: look for the return within the cap, never across a journey.
       while (k < kept.length && k - j < MAX_UNSEEN_RUN_FIXES && this.geo.distanceM(anchor, kept[k].row) > band) k++;
-      const cameBack = k < kept.length && this.geo.distanceM(anchor, kept[k].row) <= band;
+      const cameBackShort = k < kept.length && this.geo.distanceM(anchor, kept[k].row) <= band;
       // Both legs witnessed at the device's own cadence, or the excursion is a claim on thin air.
       const witnessed =
-        apartS(anchor, kept[j].row) <= UNSEEN_LEG_S && (!cameBack || apartS(kept[k - 1].row, kept[k].row) <= UNSEEN_LEG_S);
-      if (cameBack && !witnessed) for (let m = j; m < k; m++) kept[m].credible = false;
+        apartS(anchor, kept[j].row) <= UNSEEN_LEG_S && (!cameBackShort || apartS(kept[k - 1].row, kept[k].row) <= UNSEEN_LEG_S);
+      if (cameBackShort && !witnessed) {
+        for (let m = j; m < k; m++) kept[m].credible = false;
+        i = k;
+        continue;
+      }
+      // A long excursion that returns to the very place it left is refused by its own numbers: a
+      // receiver waking from idle reports speed and position out of the same fictional solution, and
+      // they contradict each other (see `profilePossible`).
+      let e = j;
+      while (e < kept.length && this.geo.distanceM(anchor, kept[e].row) > band) e++;
+      if (e < kept.length && !this.profilePossible(kept.slice(i, e + 1).map((x) => x.row))) {
+        for (let m = j; m < e; m++) kept[m].credible = false;
+        i = e;
+        continue;
+      }
       // Either way the day carries on past the excursion: back at the anchor, or relocated to the
       // place he stayed at.
-      i = cameBack ? k : j;
+      i = e < kept.length ? e : j;
     }
+  }
+
+  /**
+   * Did this run's own speed profile happen? Two readings of the same journey have to agree with
+   * each other: the metres between consecutive fixes, and the speed the device says it was doing
+   * while covering them. A receiver waking from a long idle delivers both out of the same fictional
+   * solution, and the 2026-10-26 one said 52 km/h for 42 seconds while its fixes moved 10 metres,
+   * and asked for 8.1 m/s² between two of them. No car and no pair of feet performs either — so an
+   * excursion that leaves a place and comes back to it while its own numbers contradict each other
+   * is not ground, however many fixes it brought. A run reported without speeds (a reader that only
+   * pulls coordinates) is left alone: this test needs the device's claim to contradict.
+   */
+  private profilePossible(run: TraceRow[]): boolean {
+    for (let m = 1; m < run.length; m++) {
+      const a = run[m - 1];
+      const b = run[m];
+      const dtS = (b.clientTs.getTime() - a.clientTs.getTime()) / 1000;
+      if (!(dtS > 0) || a.speedKmh == null || b.speedKmh == null) continue;
+      if (Math.abs(b.speedKmh - a.speedKmh) / 3.6 / dtS > MOTION.MAX_ACCEL_MS2) return false;
+      const claimedM = ((a.speedKmh + b.speedKmh) / 2 / 3.6) * dtS;
+      const groundM = this.geo.distanceM(a, b);
+      const slackM = Math.max(a.accuracyM ?? 0, b.accuracyM ?? 0, NOISE_FLOOR_M) * 2 + (MOTION.STATIONARY_SPEED_KMH / 3.6) * dtS;
+      if (claimedM > 3 * (groundM + slackM)) return false;
+    }
+    return true;
   }
 
   /**
