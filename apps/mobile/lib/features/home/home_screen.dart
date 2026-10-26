@@ -638,7 +638,7 @@ class _BottomBar extends StatelessWidget {
   }
 }
 
-/// Read-only automatic indicators — no controls (except the documented emergency stop).
+/// Read-only automatic indicators — the only control on /home is the CTA in the bottom bar.
 class _AutoIndicators extends StatelessWidget {
   const _AutoIndicators({required this.home, required this.isDriver, required this.isDark});
   final HomeState home;
