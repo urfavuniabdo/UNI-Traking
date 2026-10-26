@@ -4,6 +4,7 @@ import 'package:traccer/services/motion_classifier.dart';
 
 void main() {
   DateTime t(int s) => DateTime.utc(2026, 10, 22, 6, 0, s * 5); // 5s apart (> minInterval)
+  DateTime sec(int s) => DateTime.utc(2026, 10, 22, 6, 0).add(Duration(seconds: s));
 
   group('MotionClassifier', () {
     test('bad accuracy yields UNKNOWN and does not pollute state', () {
@@ -111,6 +112,57 @@ void main() {
       // a sub-min-interval fix is never judged, so no stale speed rides along on it
       c.addSample(speedKmh: 90, accuracyM: 4, ts: t(1).add(const Duration(seconds: 1)), lat: 30.0, lng: 31.2);
       expect(c.lastRawSpeedKmh, 0);
+    });
+
+    test('a parked phone drifting 16 m at 19 m accuracy does not claim walking forever', () {
+      final MotionClassifier c = MotionClassifier();
+      c.addSample(speedKmh: 0.3, accuracyM: 19.4, ts: sec(0), lat: 30.0, lng: 31.2);
+      expect(c.state, MotionStates.stopped);
+      // today's real trace: the phone ping-pongs ±16 m — 19 km/h on paper over 3 s
+      String s = c.state;
+      for (int i = 1; i <= 24; i++) {
+        s = c.addSample(
+          speedKmh: 0.5,
+          accuracyM: 19.4,
+          ts: sec(i * 3),
+          lat: 30.0 + (i.isOdd ? 0.000144 : -0.000144),
+          lng: 31.2,
+        );
+      }
+      expect(s, MotionStates.stopped, reason: 'never leaving the circle is a fact, not an estimate');
+      expect(c.lastRawSpeedKmh, lessThan(1.0),
+          reason: 'the speed on the wire is the capped one, so the backend cannot read a '
+              'drift burst as travel');
+    });
+
+    test('he walks, then stops — the phone comes back to واقف and stops feeding the spike', () {
+      final MotionClassifier c = MotionClassifier();
+      c.addSample(speedKmh: 0.2, accuracyM: 6, ts: sec(0), lat: 30.0, lng: 31.2);
+      // ~4.8 km/h of real ground, the chip still reporting a third of that
+      String s = c.state;
+      for (int i = 1; i <= 12 && s != MotionStates.walking; i++) {
+        s = c.addSample(
+          speedKmh: 1.5,
+          accuracyM: 6,
+          ts: sec(i * 5),
+          lat: 30.0 + 0.00006 * i,
+          lng: 31.2,
+        );
+      }
+      expect(s, MotionStates.walking);
+
+      // he stands up his foot and puts the phone down; the last cached Doppler rides along
+      for (int i = 13; i <= 26; i++) {
+        s = c.addSample(
+          speedKmh: 18,
+          accuracyM: 6,
+          ts: sec(i * 5),
+          lat: 30.00072 + (i.isEven ? 0.000009 : -0.000009),
+          lng: 31.2,
+        );
+      }
+      expect(s, MotionStates.stopped, reason: 'a stale 18 km/h inside the circle cannot hold a state');
+      expect(c.lastRawSpeedKmh, lessThan(1.5));
     });
 
     test('bandFor uses the exact contract thresholds', () {

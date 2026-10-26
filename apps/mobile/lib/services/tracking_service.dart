@@ -179,18 +179,13 @@ class TrackingEngine {
       return;
     }
 
-    // Speed comes from where the fixes are, not from what the chip says it felt. A cached fix
-    // carries the Doppler speed of the moment it was taken, which is how a parked phone read
-    // 20 km/h and opened a trip; inside its own error circle the driver has not moved.
-    final bool unresolved = prev != null && stepM <= p.accuracy;
+    // The Doppler is handed over honestly and the classifier caps it against the anchor's noise
+    // circle. Zeroing it here and then promoting the raw drift step as a "speed" was how a phone
+    // lying on a desk read 19 km/h from a 16 m jitter, showed «ماشي» on screen, and uploaded that
+    // same figure next to the dashboard's «واقف».
     double deviceSpeed = p.speed * 3.6;
-    if (unresolved || deviceSpeed > Motion.maxCredibleSpeedKmh) deviceSpeed = 0;
-    double speed = deviceSpeed;
-    double bearing = p.heading;
-    if (stepKmh > speed) {
-      speed = stepKmh;
-      bearing = Geo.bearingDegrees(prev!.latitude, prev.longitude, p.latitude, p.longitude);
-    }
+    if (deviceSpeed > Motion.maxCredibleSpeedKmh) deviceSpeed = 0;
+    final double bearing = p.heading;
     _lastFix = p;
     _lastFixTs = fixTs;
 
@@ -198,12 +193,12 @@ class TrackingEngine {
       speedKmh: deviceSpeed,
       accuracyM: p.accuracy,
       ts: fixTs,
-      computedSpeedKmh: speed,
       lat: p.latitude,
       lng: p.longitude,
     );
-    // Upload the speed the classifier actually judged, capped at what the fixes can prove.
-    if (_classifier.lastRawSpeedKmh > speed) speed = _classifier.lastRawSpeedKmh;
+    // Upload the speed the classifier actually judged, so the backend reasons from the same number
+    // the phone's tag was derived from.
+    double speed = _classifier.lastRawSpeedKmh;
     if (speed > Motion.maxCredibleSpeedKmh) speed = 0;
 
     final int seq = await session.nextSeq();

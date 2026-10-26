@@ -3,28 +3,42 @@ import 'dart:math' as math;
 import '../core/geo.dart';
 import '../core/traccer_constants.dart';
 
-/// Dart port of the API/shared motion classifier (CONTRACT §5).
+/// Dart port of the API motion classifier (`MotionClassifierService`), CONTRACT §5.
 ///
-/// Behaviour (must match the backend so both sides agree on "واقف / ماشي / في رحلة"):
-///  * accuracy worse than `Motion.accuracyRejectM` (35m) ⇒ state = UNKNOWN, sample is
-///    ignored for smoothing/hysteresis (no ghost transitions from a bad fix)
-///  * speed is smoothed with an EMA:  `ema = alpha*raw + (1-alpha)*ema`, alpha = 0.35
-///  * instant band from the *smoothed* speed: STOPPED ≤1.5 · WALKING ≤7 · else RIDING
-///  * a transition only commits after `Motion.hysteresisSamples` (3) consecutive samples
-///    agree on the new band — this rejects GPS jitter around a threshold
-///  * fixes closer than `Motion.minIntervalS` (2s) apart are dropped (no double-ticks)
+/// Both sides judge the SAME way, on purpose — the phone and the dashboard have to agree, and every
+/// divergence we shipped so far came from one side trusting a number the other one caps:
+///  * accuracy worse than `Motion.accuracyRejectM` (35 m) ⇒ UNKNOWN, the sample is not judged
+///  * fixes closer than `Motion.minIntervalS` (2 s) apart are dropped
+///  * **the ground decides**: the anchor is the last position whose movement was confirmed; a fix
+///    still inside that anchor's noise circle has not gone anywhere, so whatever the chip's Doppler
+///    says, its speed is capped at `radius / time-since-anchor`. A phone lying on a desk drifts 16 m
+///    in 3 s — 19 km/h on paper — and used to read as "ماشي" here while the server said "واقف".
+///  * movement confirmed (past the circle) ⇒ the phone's reading stands, and the metres covered can
+///    raise it (a walking phone under-reports Doppler by design)
+///  * once the cap itself falls inside the stationary band, "he has not left his circle in a minute"
+///    is not an estimate any more: STOPPED commits without waiting for the hysteresis samples
+///  * otherwise a transition commits after `Motion.hysteresisSamples` (3) agreeing samples, on an
+///    EMA (`alpha` 0.35) of the judged speed; bands: STOPPED ≤1.5 · WALKING ≤7 · else RIDING
 class MotionClassifier {
   MotionClassifier({
     this.alpha = Motion.speedEmaAlpha,
     this.hysteresisSamples = Motion.hysteresisSamples,
     this.accuracyRejectM = Motion.accuracyRejectM,
     this.minIntervalS = Motion.minIntervalS,
+    this.noiseFloorM = _noiseFloorM,
+    this.driftCapM = _driftCapM,
   });
 
   final double alpha;
   final int hysteresisSamples;
   final double accuracyRejectM;
   final int minIntervalS;
+  final double noiseFloorM;
+  final double driftCapM;
+
+  /// Mirrors `NOISE_FLOOR_M` / the `accuracyDriftM` ceiling in the API's ingest path.
+  static const double _noiseFloorM = 12;
+  static const double _driftCapM = 120;
 
   double? _ema;
   String _committed = MotionStates.unknown;
@@ -32,13 +46,14 @@ class MotionClassifier {
   int _candidateCount = 0;
   DateTime? _lastTs;
   _Fix? _lastPoint;
+  _Fix? _anchor;
 
   String get state => _committed;
   double? get smoothedSpeedKmh => _ema;
 
-  /// The best speed (km/h) the classifier used for the last accepted sample — Doppler or the
-  /// metres actually covered, whichever is higher. Callers upload this so the backend judges
-  /// the same number the phone did instead of a walking phone's near-zero Doppler reading.
+  /// The speed this classifier judged for the last accepted sample — Doppler and covered metres,
+  /// capped by what the coordinates can prove. Callers upload exactly this number so the backend
+  /// reads the same figure the phone's own state was derived from.
   double get lastRawSpeedKmh => _lastRaw;
 
   double _lastRaw = 0;
@@ -50,6 +65,7 @@ class MotionClassifier {
     _candidateCount = 0;
     _lastTs = null;
     _lastPoint = null;
+    _anchor = null;
     _lastRaw = 0;
   }
 
@@ -65,7 +81,6 @@ class MotionClassifier {
     required double speedKmh,
     required double accuracyM,
     required DateTime ts,
-    double? computedSpeedKmh,
     double? lat,
     double? lng,
   }) {
@@ -82,30 +97,26 @@ class MotionClassifier {
     }
     _lastTs = ts;
 
-    // 3) EMA on the best reading of this fix. A phone carried at walking pace reports a
-    //    GPS-Doppler speed near zero, so what the fixes actually cover wins when it is larger;
-    //    a shift inside the accuracy circle is drift, not walking, so it is not counted.
-    final _Fix? prev = _lastPoint;
-    double derived = 0;
-    if (prev != null && lat != null && lng != null) {
-      final double movedM = Geo.distanceMeters(prev.lat, prev.lng, lat, lng);
-      if (movedM > accuracyM) {
-        derived = Geo.speedKmhFromFixes(
-          lat1: prev.lat,
-          lng1: prev.lng,
-          t1: prev.ts,
-          lat2: lat,
-          lng2: lng,
-          t2: ts,
-        );
-      }
-    }
-    final double raw = <double>[speedKmh, computedSpeedKmh ?? 0, derived].reduce(math.max);
-    _lastRaw = raw;
-    if (lat != null && lng != null) _lastPoint = _Fix(lat, lng, ts);
-    _ema = _ema == null ? raw : (alpha * raw + (1 - alpha) * _ema!);
+    // 3) the ground truth of this fix
+    final _Fix? point = lat != null && lng != null ? _Fix(lat, lng, ts) : null;
+    final double? judged = _judge(speedKmh: speedKmh, accuracyM: accuracyM, point: point);
+    if (point != null) _lastPoint = point;
+    _lastRaw = judged ?? 0;
 
-    // 4) candidate band + 5) hysteresis commit
+    // 4) a conclusive "he never left the circle" commit — no smoothing of a fact
+    if (_conclusiveStop) {
+      _conclusiveStop = false;
+      _ema = judged ?? 0;
+      _committed = MotionStates.stopped;
+      _candidate = MotionStates.stopped;
+      _candidateCount = 0;
+      return _committed;
+    }
+
+    if (judged == null) return _committed; // nothing to go on — keep the last committed state
+
+    // 5) EMA + 6) hysteresis commit
+    _ema = _ema == null ? judged : (alpha * judged + (1 - alpha) * _ema!);
     final String band = bandFor(_ema!);
     if (band == _committed) {
       _candidate = band;
@@ -125,13 +136,61 @@ class MotionClassifier {
     }
     return _committed;
   }
+
+  bool _conclusiveStop = false;
+
+  /// The speed the coordinates support — `groundSpeed` in the API, same arithmetic.
+  double? _judge({required double speedKmh, required double accuracyM, _Fix? point}) {
+    _anchor ??= point;
+    if (point == null || _anchor == null) return speedKmh;
+
+    final _Fix anchor = _anchor!;
+    final double noiseRadiusM = math.min(math.max(accuracyM, noiseFloorM), driftCapM);
+    final double anchorM = Geo.distanceMeters(anchor.lat, anchor.lng, point.lat, point.lng);
+    final double anchorDtS = point.differenceMs(anchor) / 1000;
+
+    // A step smaller than the noise circle is not a step: the phone ping-ponging a few metres at
+    // 25 m accuracy covers "12 km/h" on paper every 5 s while going nowhere. Only the anchor window
+    // carries the truth until he actually leaves the circle — and it still proves a real walk.
+    final double? stepDerived = _stepEvidence(point, noiseRadiusM);
+    final double? derived = _max(stepDerived, anchorDtS > 0 ? anchorM / anchorDtS * 3.6 : null);
+    final double? candidate = _max(speedKmh, derived);
+
+    if (anchorM > noiseRadiusM) {
+      // confirmed travel: the anchor moves with him
+      _anchor = point;
+      return candidate;
+    }
+    if (anchorDtS <= 0) return candidate;
+    final double cap = noiseRadiusM / anchorDtS * 3.6;
+    _conclusiveStop = cap <= Motion.stationarySpeedKmh;
+    return cap < (candidate ?? cap) ? cap : candidate;
+  }
+
+  double? _stepEvidence(_Fix point, double noiseRadiusM) {
+    final _Fix? prev = _lastPoint;
+    if (prev == null || prev == point) return null;
+    final double stepM = Geo.distanceMeters(prev.lat, prev.lng, point.lat, point.lng);
+    if (stepM <= noiseRadiusM) return null;
+    final double dtS = point.differenceMs(prev) / 1000;
+    if (dtS <= 0) return null;
+    return stepM / dtS * 3.6;
+  }
+
+  static double? _max(double? a, double? b) {
+    if (a == null || !a.isFinite) return b;
+    if (b == null || !b.isFinite) return a;
+    return math.max(a, b);
+  }
 }
 
-/// The previous fix's position and time, used to measure what the device actually covered.
+/// A fix's position and time — the unit the anchor window and the step speed are measured in.
 class _Fix {
   const _Fix(this.lat, this.lng, this.ts);
 
   final double lat;
   final double lng;
   final DateTime ts;
+
+  double differenceMs(_Fix other) => ts.difference(other.ts).inMilliseconds.toDouble();
 }
