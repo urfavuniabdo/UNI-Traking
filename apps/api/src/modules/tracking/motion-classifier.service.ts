@@ -6,6 +6,8 @@ export interface MotionTrack {
   ema: number | null;
   pending: MotionState;
   pendingCount: number;
+  /** When the coordinates first claimed a move; the state may leave STOPPED only after MOVE_CONFIRM_S. */
+  moveStartTs: number | null;
 }
 
 export interface SampleGate {
@@ -30,6 +32,16 @@ export interface GroundSpeedInput {
   netSamples: number;
   /** his own accuracy circle, floored — inside it a "move" is a guess, not a fact */
   noiseRadiusM: number;
+  /** steps/minute from the phone's motion sensor; ≥ STEPS_PER_MIN_ON_FOOT means feet, not a vehicle */
+  stepsPerMin?: number | null;
+  /**
+   * Acceleration variance (m/s²) the phone's own accelerometer measured over the last seconds.
+   * A device lying flat has ~0.02; a vehicle on any road never falls below a few tenths. Below
+   * STILL_ENERGY_MS2 nothing under the phone moved, whatever the receiver claims.
+   */
+  motionEnergyMs2?: number | null;
+  /** the speed the ground believed at the previous fix — the start point of the accel test */
+  prevKmh?: number | null;
 }
 
 export interface GroundSpeedResult {
@@ -38,6 +50,11 @@ export interface GroundSpeedResult {
   moved: boolean;
   /** true when the coordinates conclusive prove he did not move — no hysteresis needed. */
   stationary: boolean;
+  /**
+   * true when the step demanded more acceleration than grip allows. Such a reading is not a fast
+   * driver, it is a relocated or cached fix — so nothing built on it may raise an alert.
+   */
+  implausible: boolean;
 }
 
 export interface ClassifyResult {
@@ -67,7 +84,7 @@ export interface HarshResult {
 @Injectable()
 export class MotionClassifierService {
   newTrack(): MotionTrack {
-    return { state: 'UNKNOWN', ema: null, pending: 'UNKNOWN', pendingCount: 0 };
+    return { state: 'UNKNOWN', ema: null, pending: 'UNKNOWN', pendingCount: 0, moveStartTs: null };
   }
 
   /** Raw instantaneous class from a speed (km/h). No data → UNKNOWN. */
@@ -107,11 +124,16 @@ export class MotionClassifierService {
    *  - yes — the window's net displacement (mean of its older half to mean of its newer half) beat
    *    both the noise bubble, MOVED_CIRCLE_FACTOR circles — a parked phone wanders three times its
    *    own "accuracy", 40 m out and back at 5 m — and what the stationary band could drift over the
-   *    same span. Then the phone's reading stands, and the metres covered can raise it (a walking
-   *    phone under-reports Doppler by design).
+   *    same span, **and** the step is one a body could have performed. Then the coordinates vouch for
+   *    the *fact* of the travel and the device is believed on *how fast*: how far he went is the
+   *    metres he actually covered (TraceService.stepMetres), not this number.
    *  - no — his speed is the displacement left over *after* the bubble is subtracted, which inside
-   *    the bubble is nothing. "He has not left his bubble in half a minute" is not an estimate any
-   *    more: it is a fact, so STOPPED commits without waiting for the hysteresis samples.
+   *    the bubble is nothing. Here the device is NOT believed: measured on his apartment floor the
+   *    Doppler field said 136 km/h while his coordinates had carried him 24 m in 16 s. "He has not
+   *    left his bubble in half a minute" is not an estimate any more: it is a fact, so STOPPED
+   *    commits without waiting for the hysteresis samples.
+   * What the IMU adds on top is corroboration, not arithmetic: steps cap him at the walking band and
+   * a flat phone (STILL_ENERGY_MS2) puts him back in the stationary band whatever the satellites say.
    */
   groundSpeed(i: GroundSpeedInput): GroundSpeedResult {
     // A step smaller than the noise circle is not a step: the phone ping-ponging 4 m either way at
@@ -120,10 +142,12 @@ export class MotionClassifierService {
       i.stepDtS !== null && i.stepDtS > 0 && i.stepM > i.noiseRadiusM ? (i.stepM / i.stepDtS) * 3.6 : null;
     const spanS = i.anchorDtS ?? 0;
     const netKmh = spanS > 0 ? (i.anchorM / spanS) * 3.6 : null;
-    const candidate = this.resolveSpeed(i.deviceKmh, this.resolveSpeed(stepDerived, netKmh));
-    // One fix is not a window: the coordinates have no opinion yet, so the phone's reading stands and
-    // no state is confirmed either way. The next fix — seconds later for a moving device — settles it.
-    if (i.netSamples < 2) return { speedKmh: candidate, moved: false, stationary: false };
+    const reported = this.resolveSpeed(i.deviceKmh, this.resolveSpeed(stepDerived, netKmh));
+    // Fewer than MIN_WINDOW_FIXES fixes: the coordinates have no opinion yet, so the phone's reading
+    // stands and no state is confirmed either way. The next fix settles it.
+    if (i.netSamples < MOTION.MIN_WINDOW_FIXES) {
+      return { speedKmh: this.onFoot(i.stepsPerMin, reported), moved: false, stationary: false, implausible: false };
+    }
     // The bubble around the *pair of means*, not around a single fix: averaging n fixes cuts the
     // wander by √n, so the more of the window the phone has uploaded, the smaller a real
     // translation has to be before the coordinates are allowed to call it a move.
@@ -135,14 +159,97 @@ export class MotionClassifierService {
     // drift burst from a 3 km/h walk — but a car is far above the walking band, so an immature
     // window is allowed to prove a vehicle and nothing else.
     const provesVehicle = netKmh !== null && netKmh > MOTION.WALK_MAX_KMH;
-    if (spanS > 0 && i.anchorM > allowanceM && (i.netSamples >= MOTION.MIN_NET_SAMPLES || provesVehicle)) {
-      return { speedKmh: candidate, moved: true, stationary: false };
+    // What the coordinates support once the bubble is taken out: the ceiling for a driver the window
+    // never saw leave home, the floor for one it did.
+    const grounded = spanS > 0 ? (Math.max(0, i.anchorM - bubbleM) / spanS) * 3.6 : 0;
+    // The accelerometer is the witness the receiver cannot bribe. A phone lying flat in a pocket
+    // varies by ~0.02 m/s² whatever the satellites say; the 2026-10-26 ghost block claimed 137 km/h
+    // for eleven minutes over a device that had not been touched. So below STILL_ENERGY_MS2 nothing
+    // moved him, his speed is the stationary band, and STOPPED commits without an argument.
+    const still = i.motionEnergyMs2 !== null && i.motionEnergyMs2 !== undefined && i.motionEnergyMs2 < MOTION.STILL_ENERGY_MS2;
+    if (still) {
+      return {
+        speedKmh: this.onFoot(i.stepsPerMin, Math.min(grounded, MOTION.STATIONARY_SPEED_KMH)),
+        moved: false,
+        stationary: true,
+        implausible: false,
+      };
+    }
+    const moved = spanS > 0 && i.anchorM > allowanceM && (i.netSamples >= MOTION.MIN_NET_SAMPLES || provesVehicle);
+    if (!moved) {
+      // Inside his bubble the device is not believed: what the coordinates leave over is his speed.
+      const bounded = reported === null ? grounded : Math.min(reported, grounded);
+      return { speedKmh: this.onFoot(i.stepsPerMin, bounded), moved: false, stationary: grounded <= MOTION.STATIONARY_SPEED_KMH, implausible: false };
     }
 
-    // What the coordinates prove past the bubble is his speed; the part inside it is noise.
-    const bounded = spanS > 0 ? (Math.max(0, i.anchorM - bubbleM) / spanS) * 3.6 : 0;
-    const speedKmh = candidate === null ? null : Math.min(candidate, bounded);
-    return { speedKmh, moved: false, stationary: bounded <= MOTION.STATIONARY_SPEED_KMH };
+    // Kinematic plausibility, the last gate before the state changes: a body that held `prevKmh` a
+    // few seconds ago cannot be doing `claimed` now — the jump needs more grip than a tyre or a shoe
+    // has. His own upload: 0.9 → 77 → 136 → 12.9 km/h inside 16 s, which is what a phone waking from
+    // a doze with a cached fix from the other side of the block looks like, not a driver.
+    const claimed = reported ?? grounded;
+    if (!this.plausibleAccel(i.prevKmh, claimed, i.stepDtS)) {
+      // Refuse the step: nothing new is asserted about him, so he keeps the last believed speed and
+      // state, and no alert may be built on the interval. The position itself still moved, so the
+      // caller restarts the window from here rather than calling him stationary.
+      return { speedKmh: i.prevKmh ?? claimed, moved: false, stationary: false, implausible: true };
+    }
+    return { speedKmh: this.onFoot(i.stepsPerMin, claimed), moved: true, stationary: false, implausible: false };
+  }
+
+  /**
+   * Feet or wheels is not a speed question: a man striding down a corridor and a car crawling in
+   * traffic sit in the same GPS band, and every production classifier settles it from the IMU
+   * instead. At STEPS_PER_MIN_ON_FOOT or above his feet are on the ground, so the state may be
+   * WALKING and never RIDING, whatever the fix suggests.
+   */
+  onFoot(stepsPerMin: number | null | undefined, kmh: number | null): number | null {
+    if (kmh === null) return null;
+    if (stepsPerMin !== null && stepsPerMin !== undefined && stepsPerMin >= MOTION.STEPS_PER_MIN_ON_FOOT) {
+      return Math.min(kmh, MOTION.WALK_MAX_KMH);
+    }
+    return kmh;
+  }
+
+  /** Can a body actually get from `prevKmh` to `kmh` in `dtS`? No pair of numbers → nothing to test. */
+  plausibleAccel(prevKmh: number | null | undefined, kmh: number | null | undefined, dtS: number | null | undefined): boolean {
+    if (prevKmh === null || prevKmh === undefined || kmh === null || kmh === undefined) return true;
+    if (dtS === null || dtS === undefined || dtS <= 0) return true;
+    return Math.abs(kmh - prevKmh) / 3.6 / dtS <= MOTION.MAX_ACCEL_MS2;
+  }
+
+  /**
+   * A move is only a move if it **holds**. One window whose two means land a bubble apart is also
+   * exactly what a single ghost fix looks like — and his apartment produced one burst of them: 20
+   * fixes, 1.93 km of "route", a trip that never closed. Telematics rules state their conditions as
+   * durations for the same reason. So: while he is standing, a *young* window may not state him as
+   * moving until MOVE_CONFIRM_S after the coordinates first claimed it — he keeps the last speed and
+   * state the ground believed, so the chip can never claim more motion than the line does.
+   *  - a window that already averaged MIN_NET_SAMPLES fixes of one-direction travel is itself the
+   *    sustained evidence (that is what the averaging is for), and states him at once;
+   *  - a driver who is not standing still has nothing to protect — the cold start of the day and an
+   *    ongoing run are classified as they always were;
+   *  - a sample that claims nothing neither commits nor acquits him: the clock keeps running, because
+   *    a slow walker's window is exactly what produces those. Only the ground concluding he is
+   *    *stationary* clears it — he came home, so the next journey starts a fresh claim.
+   * Once the hold expires the commit is immediate: a proven move — a mature window, or a claim that
+   * held — is a stronger statement than the three disagreeing samples hysteresis would ask for.
+   */
+  confirmMove(track: MotionTrack, ts: number, speedKmh: number | null, evidence: { moved: boolean; mature: boolean }): ClassifyResult | null {
+    if (track.state !== 'STOPPED') {
+      track.moveStartTs = null;
+      return null;
+    }
+    if (!evidence.moved) return null;
+    if (!evidence.mature) {
+      if (track.moveStartTs === null) track.moveStartTs = ts;
+      if ((ts - track.moveStartTs) / 1000 < MOTION.MOVE_CONFIRM_S) {
+        return { state: track.state, ema: track.ema, changed: false, dropped: false, reason: 'MOVE_HELD' };
+      }
+    }
+    track.moveStartTs = null;
+    track.pendingCount = MOTION.HYSTERESIS_SAMPLES;
+    track.pending = this.instantState(speedKmh);
+    return null;
   }
 
   /**
@@ -155,6 +262,7 @@ export class MotionClassifierService {
     track.state = 'STOPPED';
     track.pending = 'STOPPED';
     track.pendingCount = 0;
+    track.moveStartTs = null;
     track.ema = speedKmh;
     return { state: 'STOPPED', ema: speedKmh, changed, dropped: false };
   }

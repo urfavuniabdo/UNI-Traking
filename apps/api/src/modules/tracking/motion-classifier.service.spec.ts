@@ -82,13 +82,85 @@ describe('MotionClassifierService (pure)', () => {
   });
 
   it('confirms a move the coordinates show — walking included', () => {
+    // The window proves *that* he travels; the device is believed on *how fast*, and the metres he
+    // actually covered — TraceService.stepMetres, not this number — are what the mileage counts.
     const moved = c.groundSpeed({ deviceKmh: 40, stepM: 100, stepDtS: 15, anchorM: 100, anchorDtS: 15, netSamples: 8, noiseRadiusM: 12 });
-    expect(moved).toEqual({ speedKmh: 40, moved: true, stationary: false });
-    expect(moved).toEqual({ speedKmh: 40, moved: true, stationary: false });
+    expect(moved).toEqual({ speedKmh: 40, moved: true, stationary: false, implausible: false });
     // Doppler ~0 at walking pace: the 60 m his window travelled carry him out of STOPPED
     const walking = c.groundSpeed({ deviceKmh: 0.4, stepM: 6.7, stepDtS: 5, anchorM: 60, anchorDtS: 45, netSamples: 10, noiseRadiusM: 12 });
     expect(walking.moved).toBe(true);
     expect(walking.speedKmh).toBeCloseTo(4.8, 1);
+  });
+
+  it('one fix is not a window: the coordinates have no opinion until the next one lands', () => {
+    // The day's first fix — or a phone whose fix gaps starved the window — is judged on the pair it
+    // is part of, never on its own Doppler. Before that, no state is confirmed either way.
+    const alone = c.groundSpeed({ deviceKmh: 137, stepM: 509, stepDtS: 67, anchorM: 0, anchorDtS: null, netSamples: 1, noiseRadiusM: 12 });
+    expect(alone).toEqual({ speedKmh: 137, moved: false, stationary: false, implausible: false });
+  });
+
+  it('refuses a speed change no body could have performed', () => {
+    // D0203's wake-up block, to the km/h: 0.9 km/h three seconds ago, 60 m of "ground" and a 77 km/h
+    // Doppler now. The claim needs 7 m/s²; nothing but a receiver waking up with a cached fix does.
+    const ghost = c.groundSpeed({ deviceKmh: 77, stepM: 60, stepDtS: 3, anchorM: 60, anchorDtS: 3, netSamples: 3, noiseRadiusM: 12, prevKmh: 0.9 });
+    expect(ghost.moved).toBe(false);
+    expect(ghost.stationary).toBe(false);
+    expect(ghost.implausible).toBe(true);
+    expect(ghost.speedKmh).toBe(0.9); // he keeps the last speed the ground believed
+    // a real car pulling out of a standstill at 24 km/h in 15 s is well inside the ceiling
+    const car = c.groundSpeed({ deviceKmh: 24, stepM: 100, stepDtS: 15, anchorM: 100, anchorDtS: 15, netSamples: 3, noiseRadiusM: 12, prevKmh: 0 });
+    expect(car.implausible).toBe(false);
+    expect(car.moved).toBe(true);
+  });
+
+  it('the accelerometer outrules a receiver that is internally consistent and simply fictional', () => {
+    const args = { deviceKmh: 136, stepM: 509, stepDtS: 67, anchorM: 509, anchorDtS: 67, netSamples: 8, noiseRadiusM: 12 };
+    // A phone lying flat varies by ~0.02 m/s²: nothing moved him, whatever the satellites all agree
+    // they saw.
+    expect(c.groundSpeed({ ...args, motionEnergyMs2: 0.02 })).toEqual({ speedKmh: 1.5, moved: false, stationary: true, implausible: false });
+    // a hand in a pocket on the way to the gate never goes quiet, so the ground keeps its say
+    expect(c.groundSpeed({ ...args, motionEnergyMs2: 1.4 }).moved).toBe(true);
+    // and no device that sends nothing is disbelieved — the rule degrades to coordinates alone
+    expect(c.groundSpeed(args).moved).toBe(true);
+  });
+
+  it('steps on the ground cap him at the walking band, whatever the fix suggests', () => {
+    // 4.8 km/h of net travel with a Doppler burst of 30 km/h: a man is walking past a mirror, not
+    // driving. Feet are a fact the IMU reports and the coordinates cannot contradict.
+    const onFoot = c.groundSpeed({ deviceKmh: 30, stepM: 20, stepDtS: 5, anchorM: 60, anchorDtS: 45, netSamples: 10, noiseRadiusM: 12, stepsPerMin: 96 });
+    expect(onFoot.moved).toBe(true);
+    expect(onFoot.speedKmh).toBeLessThanOrEqual(MOTION.WALK_MAX_KMH);
+    const noSteps = c.groundSpeed({ deviceKmh: 30, stepM: 20, stepDtS: 5, anchorM: 60, anchorDtS: 45, netSamples: 10, noiseRadiusM: 12 });
+    expect(noSteps.speedKmh).toBe(30);
+  });
+
+  it('a standing driver is not stated as moving on one young claim', () => {
+    const t = c.newTrack();
+    c.confirmStationary(t, 0.2);
+    const young = { moved: true, mature: false };
+    // the first claim: nothing is committed yet
+    expect(c.confirmMove(t, 1_000, 137, young)?.reason).toBe('MOVE_HELD');
+    // a sample that claims nothing does not break the run — a slow walker's window is full of them
+    expect(c.confirmMove(t, 6_000, 137, { moved: false, mature: false })).toBeNull();
+    expect(t.moveStartTs).toBe(1_000);
+    // still inside the hold: the claim has not lasted MOVE_CONFIRM_S yet
+    expect(c.confirmMove(t, 6_000, 137, young)?.reason).toBe('MOVE_HELD');
+    expect(t.pendingCount).toBe(0);
+    // once it has held, the commit is immediate: no three more samples asked for
+    expect(c.confirmMove(t, MOTION.MOVE_CONFIRM_S * 1000 + 1_000, 137, young)).toBeNull();
+    expect(t.pendingCount).toBe(MOTION.HYSTERESIS_SAMPLES);
+    expect(t.moveStartTs).toBeNull();
+
+    // a window that already averaged MIN_NET_SAMPLES fixes is itself the sustained evidence: no hold
+    const mature = c.newTrack();
+    c.confirmStationary(mature, 0.2);
+    expect(c.confirmMove(mature, 1_000, 4.8, { moved: true, mature: true })).toBeNull();
+    expect(mature.pendingCount).toBe(MOTION.HYSTERESIS_SAMPLES);
+    expect(mature.moveStartTs).toBeNull();
+
+    // and the ground putting him back in his bubble clears the clock
+    c.confirmStationary(t, 0.1);
+    expect(t.moveStartTs).toBeNull();
   });
 
   it('stops the averaging dead when the ground is conclusive', () => {
