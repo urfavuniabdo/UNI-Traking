@@ -6,6 +6,42 @@ void main() {
   DateTime t(int s) => DateTime.utc(2026, 10, 22, 6, 0, s * 5); // 5s apart (> minInterval)
   DateTime sec(int s) => DateTime.utc(2026, 10, 22, 6, 0).add(Duration(seconds: s));
 
+  // D0203's courtyard, byte for byte: [seconds, lat, lng, accuracyM]. 119 m of pacing that walked
+  // back — the phone reported a couple of km/h of Doppler the whole time.
+  const List<List<Object>> courtyardTrace = <List<Object>>[
+    <Object>[0, 30.0969929, 31.3816802, 11.7],
+    <Object>[25, 30.0970702, 31.3816164, 8.3],
+    <Object>[59, 30.0970292, 31.3817134, 8.1],
+    <Object>[78, 30.0969442, 31.3816749, 8.6],
+    <Object>[98, 30.0969868, 31.3815794, 6.1],
+    <Object>[490, 30.0970333, 31.3816817, 3.0],
+    <Object>[504, 30.0969900, 31.3815550, 5.5],
+    <Object>[507, 30.0969233, 31.3814200, 5.3],
+    <Object>[516, 30.0970432, 31.3815958, 13.3],
+    <Object>[547, 30.0969083, 31.3812100, 9.3],
+    <Object>[553, 30.0969033, 31.3813683, 7.8],
+    <Object>[565, 30.0970452, 31.3815992, 11.7],
+  ];
+
+  // The same uploads with 10 m of one-way westward travel piled onto every fix from the second
+  // cluster on — the walk the raw trace never contained.
+  List<String> feedCourtyard(MotionClassifier c, {required bool translated}) {
+    const double mPerDegLng = 96315;
+    final List<String> seen = <String>[];
+    for (int i = 0; i < courtyardTrace.length; i++) {
+      final List<Object> p = courtyardTrace[i];
+      final bool walked = translated && i >= 6;
+      seen.add(c.addSample(
+        speedKmh: (p[0] as int) > 480 ? 1.2 : 0.3, // the Doppler of a phone carried in a hand
+        accuracyM: p[3] as double,
+        ts: DateTime.utc(2026, 10, 26, 8, 22, 38).add(Duration(seconds: p[0] as int)),
+        lat: p[1] as double,
+        lng: (p[2] as double) - (walked ? 10.0 * (i - 5) / mPerDegLng : 0),
+      ));
+    }
+    return seen;
+  }
+
   group('MotionClassifier', () {
     test('bad accuracy yields UNKNOWN and does not pollute state', () {
       final MotionClassifier c = MotionClassifier();
@@ -104,13 +140,19 @@ void main() {
       final MotionClassifier c = MotionClassifier();
       c.addSample(speedKmh: 0.4, accuracyM: 4, ts: t(0), lat: 30.0, lng: 31.2);
       expect(c.lastRawSpeedKmh, 0.4);
-      // ~6.7 m in 5 s ≈ 4.8 km/h of ground covered while the phone still insists on 0.4
+      // Two fixes are not a window: 6.7 m of mean-to-mean travel is inside the wander bubble, so
+      // the phone must not put a walk on the wire until the coordinates have averaged enough.
       c.addSample(speedKmh: 0.4, accuracyM: 4, ts: t(1), lat: 30.00006, lng: 31.2);
-      expect(c.lastRawSpeedKmh, greaterThan(4),
-          reason: 'the backend derives its own state from the uploaded speed, so the '
-              'displacement has to travel with the fix');
+      expect(c.lastRawSpeedKmh, lessThan(1.5),
+          reason: 'an immature window keeps the drift inside the bubble instead of selling it as speed');
+      // ~6.7 m every 5 s keeps going, and by a minute of it the window has proved the walk: the
+      // displacement travels with the fix, because that is the number the backend's own state reads.
+      for (int i = 2; i <= 12; i++) {
+        c.addSample(speedKmh: 0.4, accuracyM: 4, ts: t(i), lat: 30.0 + 0.00006 * i, lng: 31.2);
+      }
+      expect(c.lastRawSpeedKmh, greaterThan(4));
       // a sub-min-interval fix is never judged, so no stale speed rides along on it
-      c.addSample(speedKmh: 90, accuracyM: 4, ts: t(1).add(const Duration(seconds: 1)), lat: 30.0, lng: 31.2);
+      c.addSample(speedKmh: 90, accuracyM: 4, ts: t(12).add(const Duration(seconds: 1)), lat: 30.0, lng: 31.2);
       expect(c.lastRawSpeedKmh, 0);
     });
 
@@ -165,40 +207,25 @@ void main() {
       expect(c.lastRawSpeedKmh, lessThan(1.5));
     });
 
-    test('his recorded stroll (real coordinates) leaves واقف', () {
-      // D0203, 2026-10-26 08:22→08:32 UTC: two minutes standing, then he walked — the exact
-      // coordinates the phone uploaded. The chip only ever reported a couple of km/h, which is
-      // what a hand-held phone does on foot, so the metres have to carry it.
+    test('his recorded courtyard trace (real coordinates) stays واقف', () {
+      // D0203, 2026-10-26 08:22→08:32 UTC — the exact coordinates his phone uploaded. He paced:
+      // 119 m of path that walked back, 7.5 m of net travel. The old point-to-point rule read that
+      // scatter as motion; §5 judges on the net, and a board that calls pacing «ماشي» is the board
+      // that called standing still «ماشي». Proving his steps actually moved needs the accelerometer.
       final MotionClassifier c = MotionClassifier();
-      final List<List<Object>> trace = <List<Object>>[
-        <Object>[0, 30.0969929, 31.3816802, 11.7],
-        <Object>[25, 30.0970702, 31.3816164, 8.3],
-        <Object>[59, 30.0970292, 31.3817134, 8.1],
-        <Object>[78, 30.0969442, 31.3816749, 8.6],
-        <Object>[98, 30.0969868, 31.3815794, 6.1],
-        <Object>[490, 30.0970333, 31.3816817, 3.0],
-        <Object>[504, 30.0969900, 31.3815550, 5.5],
-        <Object>[507, 30.0969233, 31.3814200, 5.3],
-        <Object>[516, 30.0970432, 31.3815958, 13.3],
-        <Object>[547, 30.0969083, 31.3812100, 9.3],
-        <Object>[553, 30.0969033, 31.3813683, 7.8],
-        <Object>[565, 30.0970452, 31.3815992, 11.7],
-      ];
-      String s = MotionStates.unknown;
-      final List<String> seen = <String>[];
-      for (final List<Object> p in trace) {
-        s = c.addSample(
-          speedKmh: (p[0] as int) > 480 ? 1.2 : 0.3, // the Doppler of a phone carried on foot
-          accuracyM: p[3] as double,
-          ts: DateTime.utc(2026, 10, 26, 8, 22, 38).add(Duration(seconds: p[0] as int)),
-          lat: p[1] as double,
-          lng: p[2] as double,
-        );
-        seen.add(s);
-      }
+      final List<String> seen = feedCourtyard(c, translated: false);
       expect(seen[5], MotionStates.stopped, reason: 'the two standing minutes must not read as motion');
-      expect(s, isNot(MotionStates.stopped),
-          reason: 'he covered 0.3 km on foot inside the window — the phone has to say so');
+      expect(seen.last, MotionStates.stopped, reason: '119 m out-and-back is not travel');
+    });
+
+    test('the same cadence translated so the metres go somewhere leaves واقف', () {
+      // The walk this trace never contained: his own scatter with 10 m of one-way westward travel
+      // added to every fix — what §5 needs to see before it lets a phone off "stopped".
+      final MotionClassifier c = MotionClassifier();
+      final List<String> seen = feedCourtyard(c, translated: true);
+      expect(seen[5], MotionStates.stopped);
+      expect(<String>[MotionStates.walking, MotionStates.riding], contains(seen.last),
+          reason: 'the coordinates prove the travel; the device only picks the band');
     });
 
     test('bandFor uses the exact contract thresholds', () {

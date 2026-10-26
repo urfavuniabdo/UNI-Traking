@@ -23,6 +23,11 @@ class Motion {
   static const int minIntervalS = 2; // min seconds between accepted fixes
   static const int maxCredibleSpeedKmh = 250; // ceiling on one GPS step; teleports count as 0 km
 
+  /// §5 net-window movement proof (mirrors MOTION in `packages/shared/src/constants.ts`).
+  static const int maxNetWindowS = 90; // the window of fixes the net displacement is measured over (a 120 s window keeps replaying old walk evidence after he stops)
+  static const double movedCircleFactor = 2; // accuracy circles the net must clear to count as a move
+  static const int minNetSamples = 6; // below this a window can only prove a vehicle, never a walk
+
   /// Golden-keyed view for the consistency test.
   static Map<String, Object> toGoldenMap() => <String, Object>{
         'STATIONARY_SPEED_KMH': stationarySpeedKmh,
@@ -32,6 +37,9 @@ class Motion {
         'ACCURACY_REJECT_M': accuracyRejectM,
         'MIN_INTERVAL_S': minIntervalS,
         'MAX_CREDIBLE_SPEED_KMH': maxCredibleSpeedKmh,
+        'MAX_NET_WINDOW_S': maxNetWindowS,
+        'MOVED_CIRCLE_FACTOR': movedCircleFactor,
+        'MIN_NET_SAMPLES': minNetSamples,
       };
 }
 
