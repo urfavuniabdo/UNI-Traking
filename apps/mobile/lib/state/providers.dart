@@ -332,7 +332,9 @@ class HomeController extends StateNotifier<HomeState> {
       final TodayState today = await _ref.read(apiClientProvider).today();
       state = state.copyWith(
         checkedIn: today.isCheckedIn,
-        shiftStart: today.record?.checkInAt,
+        // /today hands back a UTC instant; the clock label reads `.hour` off it, so without
+        // .toLocal() a 10:06 check-in shows as «07:06» after the app is restarted.
+        shiftStart: today.record?.checkInAt?.toLocal(),
         fenceName: today.fenceName ?? state.fenceName,
         insideFence: today.insideFence ?? state.insideFence,
         onLeave: today.onLeave,
