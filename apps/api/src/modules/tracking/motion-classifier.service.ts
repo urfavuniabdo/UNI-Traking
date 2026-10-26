@@ -163,11 +163,12 @@ export class MotionClassifierService {
       return { state: track.state, ema: track.ema, changed: false, dropped: false };
     }
 
-    if (instant === track.pending) track.pendingCount += 1;
-    else {
-      track.pending = instant;
-      track.pendingCount = 1;
-    }
+    // Hysteresis counts samples that disagree with the committed state — NOT samples that agree
+    // with each other. A driver on foot produces a noisy estimate (his recorded trace judged
+    // 3.4 → 18 → 8.3 → 4.7 → 9.1 → 8.2 km/h as GPS steps landed either side of the 7 km/h line),
+    // so the WALKING and RIDING candidates kept resetting one another and he never left STOPPED.
+    track.pending = instant;
+    track.pendingCount += 1;
 
     if (track.pendingCount >= MOTION.HYSTERESIS_SAMPLES) {
       track.state = instant;
