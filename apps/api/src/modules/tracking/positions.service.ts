@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { createHash } from 'node:crypto';
+import type { Prisma } from '@prisma/client';
 import type { MotionState } from '../../shared/constants';
 import { EMPLOYEE_KIND, MOTION, RULE_DEFAULTS, SEVERITY, type AlertType } from '../../shared/constants';
 import { PrismaService } from '../../common/prisma.service';
@@ -784,9 +785,36 @@ export class PositionsService {
       })
       .catch(() => undefined);
     // close any dangling stop on this trip
-    await this.prisma.stopEvent
-      .updateMany({ where: { tripId: open.id, endedAt: null }, data: { endedAt: new Date(endedAt), durationS: Math.max(0, Math.round((endedAt - startedAtMs) / 1000)) } })
-      .catch(() => undefined);
+    await this.endDanglingStops(employeeId, { tripId: open.id }, endedAt);
+  }
+
+  /**
+   * A stop nobody closed ends on **the ground's** clock, not the trip's. `fallbackEndMs` is the
+   * moment the caller believes the run ended — for an idle-closed journey that is the last step that
+   * had ground *under* it, which is before he parked, so inheriting it drew a stop that finished a
+   * minute before it began (and a check-out stamp from the server's own clock does the same when the
+   * device runs ahead of it). The day's own fixes decide it instead: the stop lasts until the last
+   * position the driver carried without a silence longer than a journey is allowed to survive, and it
+   * is never dated before the moment it opened.
+   */
+  private async endDanglingStops(employeeId: string, where: Prisma.StopEventWhereInput, fallbackEndMs: number): Promise<void> {
+    const rows = await this.prisma.stopEvent
+      .findMany({ where: { ...where, employeeId, endedAt: null }, select: { id: true, startedAt: true } })
+      .catch(() => [] as { id: string; startedAt: Date }[]);
+    for (const s of rows) {
+      const since = await this.prisma.position
+        .findMany({ where: { employeeId, clientTs: { gte: s.startedAt } }, orderBy: { clientTs: 'asc' }, select: { clientTs: true } })
+        .catch(() => [] as { clientTs: Date }[]);
+      let lastSeenMs = s.startedAt.getTime();
+      for (const f of since) {
+        if (f.clientTs.getTime() - lastSeenMs > TRIP_IDLE_MS) break;
+        lastSeenMs = f.clientTs.getTime();
+      }
+      const endedAtMs = Math.max(s.startedAt.getTime(), fallbackEndMs, lastSeenMs);
+      await this.prisma.stopEvent
+        .update({ where: { id: s.id }, data: { endedAt: new Date(endedAtMs), durationS: Math.round((endedAtMs - s.startedAt.getTime()) / 1000) } })
+        .catch(() => undefined);
+    }
   }
 
   /**
@@ -805,12 +833,7 @@ export class PositionsService {
     }
     // A stop taken with no trip open (a driver parked at the yard all day) has no trip to close it,
     // so the end of the run is what ends it.
-    const dangling = await this.prisma.stopEvent.findMany({ where: { employeeId, endedAt: null }, select: { id: true, startedAt: true } });
-    for (const s of dangling) {
-      await this.prisma.stopEvent
-        .update({ where: { id: s.id }, data: { endedAt: new Date(at), durationS: Math.max(0, Math.round((at - s.startedAt.getTime()) / 1000)) } })
-        .catch(() => undefined);
-    }
+    await this.endDanglingStops(employeeId, {}, at);
     const orphans = await this.prisma.trip.findMany({ where: { employeeId, state: 'OPEN' }, orderBy: { startedAt: 'asc' } });
     for (const t of orphans) {
       await this.closeOrphanTrip(t.employeeId, t);

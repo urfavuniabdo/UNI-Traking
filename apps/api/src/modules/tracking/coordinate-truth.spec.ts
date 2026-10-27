@@ -451,6 +451,63 @@ describe('a journey ends when the ground stops (§5)', () => {
     expect(done?.endedAt?.getTime()).toBe(t0 + 700_000);
   });
 
+  it('a stop that outlived its journey does not end before it began', async () => {
+    const { employeeId, deviceId } = await mkDriver();
+    const t0 = Date.now();
+    await positions.ingestBatch({
+      deviceId,
+      batchSeq: 1,
+      positions: [drive(t0, 0), drive(t0, 1), drive(t0, 2), drive(t0, 3)],
+    });
+    // he parks at the customer and the device keeps talking for a quarter of an hour
+    const waiting = Array.from({ length: 12 }, (_, i) => ({
+      clientTs: iso(t0 + 90_000 + i * 60_000),
+      lat: 30.0027,
+      lng: 31.2,
+      speed: 0,
+      accuracy: 8,
+    }));
+    await positions.ingestBatch({ deviceId, batchSeq: 2, positions: waiting });
+    const opened = await prisma.stopEvent.findFirst({ where: { employeeId } });
+    expect(opened).not.toBeNull();
+    expect(opened?.endedAt).toBeNull();
+
+    // then the device goes quiet and the sweep ends the run at the last step that had ground under
+    // it — a moment from the drive, BEFORE he parked. That clock is the trip's, not the stop's.
+    await positions.closeStaleTrips(t0 + 750_000 + 600_001);
+
+    const closed = await prisma.stopEvent.findFirst({ where: { employeeId } });
+    expect(closed?.endedAt).not.toBeNull();
+    expect(closed!.endedAt!.getTime()).toBeGreaterThanOrEqual(closed!.startedAt.getTime());
+    // it ends when the day last saw him standing there
+    expect(closed?.endedAt?.getTime()).toBe(t0 + 750_000);
+    expect(closed?.durationS).toBeGreaterThan(0);
+  });
+
+  it('a check-out stamped behind the phone\'s own clock cannot end a stop early', async () => {
+    const { employeeId, deviceId } = await mkDriver();
+    const t0 = Date.now();
+    // parked from the first fix of the day: a stop with no journey ever opened to close it
+    const parked = Array.from({ length: 6 }, (_, i) => ({
+      clientTs: iso(t0 + i * 60_000),
+      lat: 30.0,
+      lng: 31.2,
+      speed: 0,
+      accuracy: 8,
+    }));
+    await positions.ingestBatch({ deviceId, batchSeq: 1, positions: parked });
+    const stop = await prisma.stopEvent.findFirst({ where: { employeeId } });
+    expect(stop).not.toBeNull();
+
+    // the server's clock runs half a minute behind the device's — the end may not land before the start
+    await positions.closeOpenTrips(employeeId, stop!.startedAt.getTime() - 30_000);
+
+    const done = await prisma.stopEvent.findFirst({ where: { employeeId } });
+    expect(done?.endedAt).not.toBeNull();
+    expect(done!.endedAt!.getTime()).toBeGreaterThanOrEqual(done!.startedAt.getTime());
+    expect(done?.durationS).toBeGreaterThanOrEqual(0);
+  });
+
   it('a re-check-in on the same day cannot leave a second OPEN run behind', async () => {
     const { employeeId, deviceId } = await mkDriver();
     const t0 = Date.now();
