@@ -225,6 +225,7 @@ model Position {
   lat         Float
   lng         Float
   speedKmh    Float?
+  groundKmh   Float?   // السرعة اللي الأرض صدّقتها — اللي المشرف يشوفها (speedKmh هي ادّعاء الجهاز)
   bearing     Float?
   accuracyM   Float?
   altitudeM   Float?

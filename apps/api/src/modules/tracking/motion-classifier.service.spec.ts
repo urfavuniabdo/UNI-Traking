@@ -134,6 +134,22 @@ describe('MotionClassifierService (pure)', () => {
     expect(noSteps.speedKmh).toBe(30);
   });
 
+  it('the line\'s stand-by outranks the window — and his feet outrank the line', () => {
+    // The 2026-10-27 mounted phone: a 25 m excursion inside a 90-second slice of a cluster the day
+    // draws as one dot. To the window it is a walk; to the line it is one place, and the chip may
+    // not claim what the line refuses to draw.
+    const args = { deviceKmh: 5, stepM: 25, stepDtS: 30, anchorM: 25, anchorDtS: 60, netSamples: 10, noiseRadiusM: 12 };
+    expect(c.groundSpeed({ ...args })).toEqual({ speedKmh: 5, moved: true, stationary: false, implausible: false });
+    const vetoed = c.groundSpeed({ ...args, stay: true });
+    expect(vetoed).toMatchObject({ moved: false, stationary: true, implausible: false });
+    expect(vetoed.speedKmh).toBeLessThanOrEqual(MOTION.STATIONARY_SPEED_KMH);
+    // A phone counting gait while its cluster holds still is a man pacing a room, and no scatter of
+    // fixes inside one drift band separates that from standing — so his feet stand the veto down.
+    const pacing = c.groundSpeed({ ...args, stay: true, stepsPerMin: 96 });
+    expect(pacing.moved).toBe(true);
+    expect(pacing.speedKmh).toBeLessThanOrEqual(MOTION.WALK_MAX_KMH);
+  });
+
   it('a standing driver is not stated as moving on one young claim', () => {
     const t = c.newTrack();
     c.confirmStationary(t, 0.2);

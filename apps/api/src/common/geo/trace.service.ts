@@ -196,8 +196,20 @@ export class TraceService {
     return out;
   }
 
-  /** Does this list of fixes describe one place a driver never left? */
-  private stayedPut(run: TraceRow[]): boolean {
+  /**
+   * Does this list of fixes describe one place a driver never left? Public because the motion
+   * classifier asks it the same question the line does: a fix that still belongs to the stand-by the
+   * trace will collapse into one dot cannot be reported as travelling. Judged on the whole run, not
+   * on a 90-second slice of it — which is why a parked phone's 25 m excursion in 40 s reads as a
+   * place to the line and used to read as a walk to the state.
+   *
+   * `wanderCapS` is how long the stationary band is credited with wandering across the cluster. The
+   * line leaves it open: a phone dozing for an hour reports its stand-by minutes apart, and the
+   * collapse must not turn that silence into a route. The state's veto asks it capped — no rule in
+   * §5 is measured over more than one evidence window, and a cluster that holds a *watched* 90 s of
+   * real travel is not one the chip may be told to sit still for.
+   */
+  stayedPut(run: TraceRow[], wanderCapS = Infinity): boolean {
     const band = RULE_DEFAULTS.accuracyDriftM;
     const centre = meanOf(run);
     if (run.some((r) => this.geo.distanceM(centre, r) > band)) return false;
@@ -208,7 +220,7 @@ export class TraceService {
     const accuracy = run.reduce((s, r) => s + (r.accuracyM ?? 0), 0) / run.length;
     const noiseRadiusM = Math.min(Math.max(accuracy, NOISE_FLOOR_M), band);
     const bubbleM = (MOTION.MOVED_CIRCLE_FACTOR * noiseRadiusM * Math.sqrt(2)) / Math.sqrt(Math.max(2, run.length));
-    return netM <= Math.max(bubbleM, (MOTION.STATIONARY_SPEED_KMH / 3.6) * Math.max(0, spanS));
+    return netM <= Math.max(bubbleM, (MOTION.STATIONARY_SPEED_KMH / 3.6) * Math.min(Math.max(0, spanS), wanderCapS));
   }
 
   /** The one fix a stand-by reports: sitting at the middle of the cluster, stamped when it ended. */

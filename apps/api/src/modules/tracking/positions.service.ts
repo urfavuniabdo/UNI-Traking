@@ -5,7 +5,7 @@ import type { MotionState } from '../../shared/constants';
 import { EMPLOYEE_KIND, MOTION, RULE_DEFAULTS, SEVERITY, type AlertType } from '../../shared/constants';
 import { PrismaService } from '../../common/prisma.service';
 import { GeoService, NOISE_FLOOR_M } from '../../common/geo/geo.service';
-import { TraceService } from '../../common/geo/trace.service';
+import { TraceService, type TraceRow } from '../../common/geo/trace.service';
 import { json, parseJson, round, workDateOf, isValidLat, isValidLng } from '../../common/utils';
 import {
   ALERT_DISPATCHER,
@@ -29,6 +29,12 @@ interface Track {
    * 7 minutes and read as 6.2 km/h — so movement is judged between the means of the window's halves.
    */
   window: NetFix[];
+  /**
+   * The growing run of fixes the *line* still calls one place (`TraceService.stayedPut`), oldest
+   * first. The state may not claim a journey that the trace refuses to draw, so the live pipeline
+   * carries the same run the collapse will later eat.
+   */
+  stayRun: NetFix[];
   speedOverStreak: number;
   overRunActive: boolean;
   overSinceTs: number | null;
@@ -166,6 +172,29 @@ export class PositionsService {
   }
 
   /**
+   * The line's verdict on this fix, asked before the state is written: does it still belong to the
+   * stand-by the trace will collapse into one dot? Same growing run, same break, same restart as
+   * `TraceService.collapseStays`, but asked with the patience of one evidence window — so the chip can
+   * never claim a journey the day refuses to draw, and is never told to sit still through a watched
+   * ninety seconds that did go somewhere. Returns the run to carry forward: the stand-by grown by
+   * this fix, or the fix alone.
+   */
+  private stayOf(run: NetFix[], fix: NetFix): { stay: boolean; run: NetFix[] } {
+    const asRow = (f: NetFix): TraceRow => ({ lat: f.lat, lng: f.lng, clientTs: new Date(f.ts), accuracyM: f.noiseM });
+    const grown = [...run, fix];
+    // One fix is not a stand-by, it is no evidence at all — the veto needs a place to have been seen
+    // twice before it may overrule the window.
+    if (grown.length < 2) return { stay: false, run: grown };
+    if (!this.trace.stayedPut(grown.map(asRow), MOTION.MAX_NET_WINDOW_S)) return { stay: false, run: [fix] };
+    // A cluster younger than the window the state is measured over *is* that window's own evidence:
+    // both tests see the same fixes, so refusing there would only delay a walk starting from rest. The
+    // veto earns its place once the stand-by outlives the slice — that is when "25 m in 40 s" stops
+    // being a journey and is a phone that has not gone anywhere for twenty minutes.
+    const spanS = (grown[grown.length - 1].ts - grown[0].ts) / 1000;
+    return { stay: spanS > MOTION.MAX_NET_WINDOW_S, run: grown };
+  }
+
+  /**
    * The net-displacement evidence of a window: the mean of its older half to the mean of its newer
    * half, over the whole window. GPS wander is zero-mean noise, so it cancels out of a mean — a
    * driver standing still in a courtyard measured 21 m between the two means over 40 s while his
@@ -195,6 +224,7 @@ export class PositionsService {
       motion: this.classifier.newTrack(),
       last: null,
       window: [],
+      stayRun: [],
       speedOverStreak: 0,
       overRunActive: false,
       overSinceTs: null,
@@ -394,6 +424,8 @@ export class PositionsService {
     const noiseRadiusM = Math.min(Math.max(p.accuracyM ?? 0, NOISE_FLOOR_M), th?.accuracyDriftM ?? NOISE_FLOOR_M);
     this.pushWindow(track.window, { lat: p.lat, lng: p.lng, ts: p.ts, noiseM: noiseRadiusM });
     const net = this.netEvidence(track.window);
+    const stay = this.stayOf(track.stayRun, { lat: p.lat, lng: p.lng, ts: p.ts, noiseM: noiseRadiusM });
+    track.stayRun = stay.run;
     const ground = this.classifier.groundSpeed({
       deviceKmh: p.speedKmh,
       stepM: distanceFromLast,
@@ -401,6 +433,7 @@ export class PositionsService {
       stepsPerMin: p.stepsPerMin,
       motionEnergyMs2: p.motionEnergyMs2,
       prevKmh: track.last?.speedKmh ?? null,
+      stay: stay.stay,
       ...net,
     });
     const speed = ground.speedKmh;
@@ -410,6 +443,7 @@ export class PositionsService {
     if (th && this.classifier.isAbsurd(speed, distanceFromLast, dtS, th.accuracyDriftM)) {
       await this.prisma.position.update({ where: { id: p.id }, data: { motionState: 'UNKNOWN' } }).catch(() => undefined);
       track.window = [{ lat: p.lat, lng: p.lng, ts: p.ts, noiseM: noiseRadiusM }];
+      track.stayRun = [{ lat: p.lat, lng: p.lng, ts: p.ts, noiseM: noiseRadiusM }];
       track.last = { lat: p.lat, lng: p.lng, ts: p.ts, speedKmh: null };
       return alertsRaised;
     }
@@ -484,7 +518,12 @@ export class PositionsService {
     // The state gate is what keeps the fake runs out (a driver whose move never held stays STOPPED,
     // so he opens nothing); adding a length threshold on top only hid real short trips, the
     // 2026-10-26 ghost being a sustained 11-minute burst that no duration rule would have caught.
-    const isTravel = (state === 'RIDING' || state === 'WALKING') && ground.moved;
+    // A *duration* on the other hand is what the journey already is: one window that happens to
+    // average out of its bubble is the same two fixes a parked phone's drift produces, and §5's own
+    // MOVE_CONFIRM_S is the price the state pays for a move claimed on a young window. A journey is
+    // the same claim held past that price, so the run must prove itself for MOVE_CONFIRM_S before the
+    // board is told he went somewhere — and it is still dated from the first fix that proved it.
+    const isTravel = (state === 'RIDING' || state === 'WALKING') && ground.moved && track.moveRunSinceTs !== null && p.ts - track.moveRunSinceTs >= MOTION.MOVE_CONFIRM_S * 1000;
     if (isTravel) {
       if (!track.openTrip || track.openTrip.workDate !== workDate) {
         if (track.openTrip) await this.finalizeTrip(employeeId, track.openTrip, track.last?.ts ?? p.ts);
@@ -631,7 +670,7 @@ export class PositionsService {
     await this.prisma.position
       .update({
         where: { id: p.id },
-        data: { motionState: state, insideZone, tripId: track.openTrip?.id ?? null },
+        data: { motionState: state, groundKmh: round(speed, 1), insideZone, tripId: track.openTrip?.id ?? null },
       })
       .catch(() => undefined);
 
@@ -854,6 +893,7 @@ export class PositionsService {
     const out: ReplayPoint[] = [];
     let last: { lat: number; lng: number; ts: number; speedKmh: number | null } | null = null;
     const window: NetFix[] = [];
+    const stayRun: NetFix[] = [];
     const day = this.trace.dropSpikes(rows);
     this.trace.dropOutAndBack(day);
     day.forEach(({ row: r, credible }, i) => {
@@ -875,6 +915,9 @@ export class PositionsService {
       const deviceKmh = window.length ? r.speedKmh : (this.forwardSpeedKmh(day, i, noiseRadiusM) ?? r.speedKmh);
       this.pushWindow(window, { lat: r.lat, lng: r.lng, ts, noiseM: noiseRadiusM });
       const net = this.netEvidence(window);
+      const stay = this.stayOf(stayRun, { lat: r.lat, lng: r.lng, ts, noiseM: noiseRadiusM });
+      stayRun.length = 0;
+      stayRun.push(...stay.run);
       const ground = this.classifier.groundSpeed({
         deviceKmh,
         stepM,
@@ -882,12 +925,15 @@ export class PositionsService {
         stepsPerMin: r.stepsPerMin,
         motionEnergyMs2: r.motionEnergy,
         prevKmh: last?.speedKmh ?? null,
+        stay: stay.stay,
         ...net,
       });
       const speed = ground.speedKmh;
       if (this.classifier.isAbsurd(speed, stepM, dtS, drift)) {
         window.length = 0;
         this.pushWindow(window, { lat: r.lat, lng: r.lng, ts, noiseM: noiseRadiusM });
+        stayRun.length = 0;
+        stayRun.push({ lat: r.lat, lng: r.lng, ts, noiseM: noiseRadiusM });
         last = { lat: r.lat, lng: r.lng, ts, speedKmh: null };
         out.push({ ...r, motionState: 'UNKNOWN' as MotionState, speedKmh: round(speed, 1), credible: false });
         return;
@@ -998,6 +1044,15 @@ export class PositionsService {
     const ageS = dev?.lastSeenAt ? (Date.now() - dev.lastSeenAt.getTime()) / 1000 : null;
     const online = !!dev?.online && (ageS === null || ageS <= offlineAfterS);
     const name = meta?.name || base.name;
+    // A journey the ground stopped witnessing is not a journey. The verdict belongs to the fixes that
+    // proved it; once an *alive* device says nothing new for longer than the window those rules are
+    // measured over, the claim has no evidence left and the board may not keep it. The 2026-10-27
+    // mounted phone held «ماشي 57.9 كم/س» 42 minutes after its last fix, next to a line of 0.00 km.
+    // The live chip describes *today*, so this is the only stale thing it may rewrite: a day already
+    // behind him is reported by his route and his trips, not by what the board guesses now.
+    const silentS = (Date.now() - new Date(base.ts).getTime()) / 1000;
+    const travelling = base.motionState === 'WALKING' || base.motionState === 'RIDING';
+    const decayed = travelling && online && silentS > MOTION.MAX_NET_WINDOW_S * 2 && workDateOf(new Date(base.ts)) === workDateOf(new Date());
     return {
       // dashboard keys its live store / map by the EMPLOYEE id → id === userId === employeeId.
       id: base.employeeId,
@@ -1010,8 +1065,8 @@ export class PositionsService {
       driver: meta?.driver ?? false,
       lat: base.lat,
       lng: base.lng,
-      speedKmh: base.speedKmh,
-      motionState: base.motionState,
+      speedKmh: decayed ? 0 : base.speedKmh,
+      motionState: decayed ? ('STOPPED' as MotionState) : base.motionState,
       insideZone: base.insideZone,
       ts: base.ts,
       replayed: base.replayed,
@@ -1083,7 +1138,7 @@ export class PositionsService {
         name: p.employee?.name ?? '',
         lat: p.lat,
         lng: p.lng,
-        speedKmh: round(p.speedKmh, 1),
+        speedKmh: round(p.groundKmh ?? p.speedKmh, 1),
         motionState: (p.motionState as MotionState) ?? 'UNKNOWN',
         insideZone: p.insideZone,
         ts: p.clientTs.toISOString(),
@@ -1135,6 +1190,10 @@ export class PositionsService {
       bearing: p.bearing,
       accuracy: p.accuracyM,
       motionState: p.motionState,
+      // The phone's own witnesses, exposed so the board (and a supervisor's question "why did the
+      // ground believe that?") can be answered from the stored row instead of from guesswork.
+      stepsPerMin: p.stepsPerMin,
+      motionEnergy: p.motionEnergy,
       buffered: p.buffered,
       stale: p.stale,
       credible: p.credible,

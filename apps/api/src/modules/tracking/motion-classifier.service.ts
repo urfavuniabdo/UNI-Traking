@@ -30,6 +30,13 @@ export interface GroundSpeedInput {
   anchorDtS: number | null;
   /** fixes in the window — the more of them, the less a single wander counts against the move */
   netSamples: number;
+  /**
+   * The line's own verdict on the same fixes: `true` while this fix still belongs to the stand-by
+   * the trace collapses into one dot. A 25 m excursion in 40 s is a walk to a 90-second window and
+   * the same place to the day that draws it — and the driver's chip may not claim what his line
+   * refuses to draw (CONTRACT §5).
+   */
+  stay?: boolean;
   /** his own accuracy circle, floored — inside it a "move" is a guess, not a fact */
   noiseRadiusM: number;
   /** steps/minute from the phone's motion sensor; ≥ STEPS_PER_MIN_ON_FOOT means feet, not a vehicle */
@@ -143,11 +150,6 @@ export class MotionClassifierService {
     const spanS = i.anchorDtS ?? 0;
     const netKmh = spanS > 0 ? (i.anchorM / spanS) * 3.6 : null;
     const reported = this.resolveSpeed(i.deviceKmh, this.resolveSpeed(stepDerived, netKmh));
-    // Fewer than MIN_WINDOW_FIXES fixes: the coordinates have no opinion yet, so the phone's reading
-    // stands and no state is confirmed either way. The next fix settles it.
-    if (i.netSamples < MOTION.MIN_WINDOW_FIXES) {
-      return { speedKmh: this.onFoot(i.stepsPerMin, reported), moved: false, stationary: false, implausible: false };
-    }
     // The bubble around the *pair of means*, not around a single fix: averaging n fixes cuts the
     // wander by √n, so the more of the window the phone has uploaded, the smaller a real
     // translation has to be before the coordinates are allowed to call it a move.
@@ -175,7 +177,29 @@ export class MotionClassifierService {
         implausible: false,
       };
     }
+    // The line's verdict on the same fixes outranks the window's. While these fixes are *one place* —
+    // which is exactly what `stay` means: the arithmetic `collapseStays` will use to draw a single
+    // dot — the day cannot be reported as travelling through it, and a 90-second slice of that place
+    // cannot be allowed an opinion the whole of it refuses. The 2026-10-27 mounted phone: 22 fixes
+    // inside a 35 m bubble, 0.00 km drawn, and a chip reading «ماشي 57.9 كم/س».
+    // His feet are the one witness that beats it: a phone counting gait while its cluster holds still
+    // is a man pacing a room, which no set of fixes inside one drift band can separate from standing.
+    const pacing = i.stepsPerMin !== null && i.stepsPerMin !== undefined && i.stepsPerMin >= MOTION.STEPS_PER_MIN_ON_FOOT;
+    if (i.stay && !pacing) {
+      return {
+        speedKmh: this.onFoot(i.stepsPerMin, Math.min(grounded, MOTION.STATIONARY_SPEED_KMH)),
+        moved: false,
+        stationary: true,
+        implausible: false,
+      };
+    }
     const moved = spanS > 0 && i.anchorM > allowanceM && (i.netSamples >= MOTION.MIN_NET_SAMPLES || provesVehicle);
+    // Fewer than MIN_WINDOW_FIXES fixes: the window has averaged nothing and has no opinion to
+    // overrule, so the device keeps its say and no state is confirmed either way. The two witnesses
+    // that never needed a window — the accelerometer above and the line's stand-by — have had theirs.
+    if (i.netSamples < MOTION.MIN_WINDOW_FIXES) {
+      return { speedKmh: this.onFoot(i.stepsPerMin, reported), moved: false, stationary: false, implausible: false };
+    }
     if (!moved) {
       // Inside his bubble the device is not believed: what the coordinates leave over is his speed.
       const bounded = reported === null ? grounded : Math.min(reported, grounded);
