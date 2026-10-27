@@ -83,8 +83,8 @@ class LocationAdapter {
     }
   }
 
-  /// One-shot fix for the check-in flow: a fresh fix, retried once when it reads as
-  /// approximate, and only then the cached position so the button still works indoors.
+  /// One-shot fix for the check-in flow: a fresh cache, then one satellite attempt, then the
+  /// cache whatever its age so the button still works indoors.
   ///
   /// Android 12+ lets the user grant *approximate* location, which lands ~3 km off and
   /// silently corrupts fence validation.
@@ -92,12 +92,21 @@ class LocationAdapter {
   /// The cache is deliberately missing from the tracking path and present here: a button that
   /// cannot be pressed indoors is worse than a check-in point read one minute late. The engine's
   /// own "a fix must be newer than the last one accepted" gate is what keeps this cache out of the line.
+  ///
+  /// The cache comes **first** when it is fresh: waiting for satellites before even reading it
+  /// used to spin the button twice through `freshFix`'s full 12 s timeout on a GNSS-only phone —
+  /// half a minute of loading before the request left the device. The 45 s freshness window is
+  /// `freshFix`'s own, and `_approximateAccuracyM` keeps a Wi-Fi-grade cache out.
   static const double _approximateAccuracyM = 1000;
+  static const Duration _cacheMaxAge = Duration(seconds: 45);
 
   Future<Position?> currentFix() async {
-    final Position? first = await freshFix();
-    if (first != null && first.accuracy <= _approximateAccuracyM) return first;
-    return await freshFix() ?? await Geolocator.getLastKnownPosition();
+    final Position? cached = await Geolocator.getLastKnownPosition();
+    final bool cacheUsable = cached != null &&
+        DateTime.now().toUtc().difference(cached.timestamp.toUtc()) <= _cacheMaxAge &&
+        cached.accuracy <= _approximateAccuracyM;
+    if (cacheUsable) return cached;
+    return await freshFix() ?? cached;
   }
 }
 
