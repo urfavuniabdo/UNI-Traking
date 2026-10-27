@@ -344,14 +344,40 @@ class _Tag extends StatelessWidget {
 }
 
 /// The live status card: fence state, motion pill and the shift clock.
-class _StatusCard extends StatelessWidget {
+class _StatusCard extends StatefulWidget {
   const _StatusCard({required this.home, required this.isDark, required this.user});
   final HomeState home;
   final bool isDark;
   final String user;
 
   @override
+  State<_StatusCard> createState() => _StatusCardState();
+}
+
+class _StatusCardState extends State<_StatusCard> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    // The shift clock is derived from DateTime.now() at build time — without a tick it froze
+    // at whatever moment last rebuilt this card for as long as the day stayed quiet.
+    _ticker = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final HomeState home = widget.home;
+    final bool isDark = widget.isDark;
+    final String user = widget.user;
     final bool? insideFence = home.insideFence;
     final Color fenceColor = insideFence == null
         ? TraccerTheme.muted
