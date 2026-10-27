@@ -298,13 +298,14 @@ void main() {
 
       String s = c.state;
       for (int i = 0; i < 3; i++) {
-        // 60 m every 3 s: 72 km/h of net travel, proved by a window of three fixes
-        s = c.addSample(speedKmh: 72, accuracyM: 6, ts: sec(200 + i * 3), lat: 30.0, lng: 31.2 + 0.00062 * (i + 1));
+        // 45 m every 3 s: 54 km/h of net travel — the most a body can reach in 3 s from standstill —
+        // proved by a window of three fixes, which is younger than §5 asks for a walk.
+        s = c.addSample(speedKmh: 54, accuracyM: 6, ts: sec(200 + i * 3), lat: 30.0, lng: 31.2 + 0.000465 * (i + 1));
       }
       expect(s, MotionStates.stopped, reason: 'an immature window cannot pull him out of واقف yet');
 
       for (int i = 3; i < 12; i++) {
-        s = c.addSample(speedKmh: 72, accuracyM: 6, ts: sec(200 + i * 3), lat: 30.0, lng: 31.2 + 0.00062 * (i + 1));
+        s = c.addSample(speedKmh: 54, accuracyM: 6, ts: sec(200 + i * 3), lat: 30.0, lng: 31.2 + 0.000465 * (i + 1));
       }
       expect(s, isNot(MotionStates.stopped), reason: 'the claim held past MOVE_CONFIRM_S, so it stands');
     });
@@ -322,5 +323,119 @@ void main() {
       expect(out, MotionStates.stopped, reason: 'the step demanded grip nobody has');
       expect(c.lastRawSpeedKmh, lessThan(1.5));
     });
+
+    test('the phone\'s verdict table on a mounted day is the server\'s', () {
+      // D0203, 2026-10-27 06:27→06:51 UTC — the 22 fixes his phone uploaded while it sat mounted and
+      // nobody touched it: one ~35 m bubble, 0.00 km drawn, and a receiver reporting 24.1/15.9/16.7/
+      // 9/16.1/57.9 km/h of Doppler. This is the table the server printed for the same fixes
+      // (`mounted-phone.spec.ts`, WITHOUT WITNESS). Both sides judge the SAME way on purpose: a chip
+      // that disagrees with the board is a bug even when the chip happens to be the optimistic one.
+      final MotionClassifier bare = MotionClassifier();
+      final List<String> rows = <String>[];
+      for (final List<Object> f in mountedTrace) {
+        final String state = bare.addSample(
+          speedKmh: (f[4] as num).toDouble(),
+          accuracyM: (f[3] as num).toDouble(),
+          ts: DateTime.utc(2026, 10, 27, 6, 27).add(Duration(seconds: f[0] as int)),
+          lat: f[1] as double,
+          lng: f[2] as double,
+        );
+        rows.add('${(f[0] as int) ~/ 60}:${(f[0] as int) % 60} $state');
+      }
+      expect(rows.where((String r) => r.endsWith('WALKING')).toList(), <String>[
+        '0:48 WALKING', // 2.7 km/h of Doppler over a 12 m step, two minutes into the day
+        '0:53 WALKING',
+        '24:18 WALKING', // 16.1 km/h, 78 m from the fix before it
+        '24:23 WALKING', // 57.9 km/h back inside the bubble — the last verdict of the day
+      ], reason: 'coordinates alone leave these four to the device, on both engines');
+
+      // The accelerometer is what closes them. STILL_ENERGY_MS2 is a device nobody touched, and it
+      // needs no window to be believed: the day ends واقف at 1.5 km/h, the same verdict the server
+      // stores for these fixes with the witness on (`mounted-phone.spec.ts`, WITH WITNESS).
+      final MotionClassifier witnessed = MotionClassifier();
+      for (final List<Object> f in mountedTrace) {
+        final String state = witnessed.addSample(
+          speedKmh: (f[4] as num).toDouble(),
+          accuracyM: (f[3] as num).toDouble(),
+          ts: DateTime.utc(2026, 10, 27, 6, 27).add(Duration(seconds: f[0] as int)),
+          lat: f[1] as double,
+          lng: f[2] as double,
+          stepsPerMin: 0,
+          motionEnergyMs2: 0.02,
+        );
+        expect(state, MotionStates.stopped, reason: 'a phone nobody carried is a standing driver');
+      }
+      expect(witnessed.lastRawSpeedKmh, lessThanOrEqualTo(Motion.stationarySpeedKmh));
+    });
+
+    test('his feet stand the stand-by down — pacing a room is a walk', () {
+      // A man pacing a 40 m room: his cluster is one place, so the line's verdict sits him down — and
+      // a measured stride is the one witness that beats it. The trace is 45 s of standing and then
+      // legs of 40 m out and 40 m back at 2.4 km/h, so the coordinates do translate inside a window
+      // while the whole run stays a stand-by.
+      List<String> pace({double? steps}) {
+        final MotionClassifier c = MotionClassifier();
+        final List<String> seen = <String>[];
+        double metres = 0;
+        int t = 0;
+        for (int i = 0; i < 9; i++) {
+          seen.add(c.addSample(speedKmh: 0.2, accuracyM: 6, ts: sec(t), lat: 30.0, lng: 31.2, stepsPerMin: steps));
+          t += 5;
+        }
+        for (int cycle = 0; cycle < 2; cycle++) {
+          for (final double dir in <double>[1, -1]) {
+            for (int i = 0; i < 12; i++) {
+              metres += 3.33 * dir;
+              seen.add(c.addSample(
+                speedKmh: 2.4,
+                accuracyM: 6,
+                ts: sec(t),
+                lat: 30.0,
+                lng: 31.2 + metres / 96315,
+                stepsPerMin: steps,
+              ));
+              t += 5;
+            }
+          }
+        }
+        return seen;
+      }
+
+      // From the 90-second mark on — when the stand-by is older than the window §5 measures over —
+      // the coordinates alone are refused; his stride is not.
+      final List<String> bare = pace();
+      final List<String> gaited = pace(steps: 96);
+      expect(bare.sublist(19).every((String s) => s == MotionStates.stopped), isTrue,
+          reason: 'the line refuses a journey it will draw as one dot');
+      expect(gaited.sublist(19).contains(MotionStates.walking), isTrue,
+          reason: 'a measured stride outranks a motionless cluster');
+    });
   });
 }
+
+/// [seconds offset from 06:27:00 UTC, lat, lng, accuracyM, Doppler km/h] — the phone's own upload,
+/// pulled from GET /positions/route while it sat mounted. DO NOT EDIT.
+const List<List<Object>> mountedTrace = <List<Object>>[
+  <Object>[4, 30.097025, 31.38128833333333, 7.5, 0],
+  <Object>[13, 30.096945, 31.38135166666667, 6.6, 0],
+  <Object>[18, 30.096925, 31.381465, 6, 0],
+  <Object>[30, 30.09699166666667, 31.38154833333333, 5.5, 0.3],
+  <Object>[38, 30.097035, 31.38164333333333, 6, 1.2],
+  <Object>[48, 30.097015, 31.38153333333333, 5.7, 2.7],
+  <Object>[53, 30.09693333333333, 31.38146166666667, 6.1, 0],
+  <Object>[61, 30.096845, 31.38138833333333, 7.8, 0],
+  <Object>[66, 30.09693833333333, 31.38142666666667, 6.2, 0],
+  <Object>[676, 30.09693666666667, 31.38128833333333, 9.7, 0],
+  <Object>[681, 30.09723333333333, 31.38134833333334, 8, 24.1],
+  <Object>[686, 30.09694333333334, 31.38124, 4.8, 0],
+  <Object>[691, 30.09703, 31.38159166666667, 5.6, 0],
+  <Object>[814, 30.09693833333333, 31.38159166666667, 1.9, 0],
+  <Object>[1409, 30.09686333333333, 31.38169666666667, 2.7, 0],
+  <Object>[1414, 30.096695, 31.38173166666666, 4.7, 0],
+  <Object>[1419, 30.09685, 31.38166333333334, 5.9, 0],
+  <Object>[1424, 30.097025, 31.381555, 7, 15.9],
+  <Object>[1429, 30.09706666666667, 31.38179166666666, 7.3, 16.7],
+  <Object>[1453, 30.09755666666667, 31.38206, 9.4, 9],
+  <Object>[1458, 30.097755, 31.38202333333334, 9.9, 16.1],
+  <Object>[1463, 30.09705, 31.381835, 8.9, 57.9],
+];

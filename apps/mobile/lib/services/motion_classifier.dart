@@ -22,6 +22,12 @@ import '../core/traccer_constants.dart';
 ///  * inside the bubble his speed is what is left *after* the bubble is subtracted — which is
 ///    nothing, so "he has not left his bubble in a minute" is a fact and STOPPED commits without
 ///    waiting for the hysteresis samples
+///  * **the line has the last word**: while the fixes the phone is carrying are still one stand-by —
+///    the very cluster the trace will collapse into a single dot, older than the window §5 measures
+///    over — a 90-second slice of it may not state him as travelling. A mounted phone whose chip read
+///    57.9 km/h over a cluster that moved 0.00 km is the case this rule was written for.
+///    His feet overrule it: counted gait is a man pacing a room, which no scatter of fixes inside
+///    one drift band separates from standing.
 ///  * otherwise a transition commits after `Motion.hysteresisSamples` (3) samples that *disagree
 ///    with the committed state*, on an EMA (`alpha` 0.35) of the judged speed.
 ///    Bands: STOPPED ≤1.5 · WALKING ≤7 · else RIDING
@@ -70,6 +76,10 @@ class MotionClassifier {
   double? _prevJudgedKmh;
   final List<_Fix> _window = <_Fix>[];
 
+  /// The growing run of fixes the *line* still calls one place — `Track.stayRun` in the API. The
+  /// phone judges ahead of the server, so it has to refuse a journey its own trace won't draw.
+  final List<_Fix> _stayRun = <_Fix>[];
+
   String get state => _committed;
   double? get smoothedSpeedKmh => _ema;
 
@@ -89,6 +99,7 @@ class MotionClassifier {
     _moveStartTs = null;
     _prevJudgedKmh = null;
     _window.clear();
+    _stayRun.clear();
     _lastRaw = 0;
   }
 
@@ -221,6 +232,7 @@ class MotionClassifier {
     final double stepM = prev == null ? 0 : Geo.distanceMeters(prev.lat, prev.lng, point.lat, point.lng);
     final double? stepDtS = prev == null ? null : point.ts.difference(prev.ts).inMilliseconds / 1000.0;
     final _Net net = _netEvidence();
+    final bool stay = _stayOf(point);
 
     // A step smaller than the noise circle is not a step: the phone ping-ponging a few metres at
     // 25 m accuracy covers "12 km/h" on paper every 5 s while going nowhere.
@@ -229,11 +241,6 @@ class MotionClassifier {
     final double? netKmh = spanS > 0 ? net.anchorM / spanS * 3.6 : null;
     final double? reported = _max(speedKmh, _max(stepDerived, netKmh));
     final bool mature = net.netSamples >= Motion.minNetSamples;
-
-    // One fix is not a window: the coordinates have no opinion yet, so the phone's reading stands.
-    if (net.netSamples < Motion.minWindowFixes) {
-      return _Ground(onFoot(stepsPerMin, reported), false, false, false, mature);
-    }
 
     final double bubbleM = Motion.movedCircleFactor * net.noiseRadiusM * math.sqrt(2) / math.sqrt(math.max(2, net.netSamples));
     final double allowanceM = math.max(bubbleM, Motion.stationarySpeedKmh / 3.6 * spanS);
@@ -246,8 +253,25 @@ class MotionClassifier {
       return _Ground(onFoot(stepsPerMin, math.min(grounded, Motion.stationarySpeedKmh)), false, true, false, mature);
     }
 
+    // The line's verdict on the same fixes outranks the window's: while these fixes are one place —
+    // the cluster the trace collapses into a single dot, and one older than the window §5 measures
+    // over — a slice of it may not state him as travelling. His feet are the witness that beats it:
+    // a phone counting gait inside a motionless cluster is a man pacing a room.
+    final bool pacing = stepsPerMin != null && stepsPerMin >= Motion.stepsPerMinOnFoot;
+    if (stay && !pacing) {
+      return _Ground(onFoot(stepsPerMin, math.min(grounded, Motion.stationarySpeedKmh)), false, true, false, mature);
+    }
+
     final bool provesVehicle = netKmh != null && netKmh > Motion.walkMaxKmh;
     final bool moved = spanS > 0 && net.anchorM > allowanceM && (mature || provesVehicle);
+
+    // One fix is not a window: the coordinates have averaged nothing and have no opinion to
+    // overrule, so the phone's reading stands. The two witnesses that never needed a window — the
+    // accelerometer above and the line's stand-by — have already had their say.
+    if (net.netSamples < Motion.minWindowFixes) {
+      return _Ground(onFoot(stepsPerMin, reported), false, false, false, mature);
+    }
+
     if (!moved) {
       // Inside his bubble the device is not believed: what the coordinates leave over is his speed.
       final double bounded = reported == null ? grounded : math.min(reported, grounded);
@@ -258,9 +282,58 @@ class MotionClassifier {
     // a phone waking from doze with a cached fix, not a driver.
     final double claimed = reported ?? grounded;
     if (!plausibleAccel(_prevJudgedKmh, claimed, stepDtS)) {
+      // A relocated fix is not a place he stood in — start the stand-over from here.
+      _stayRun
+        ..clear()
+        ..add(point);
       return _Ground(_prevJudgedKmh ?? claimed, false, false, true, mature);
     }
     return _Ground(onFoot(stepsPerMin, claimed), true, false, false, mature);
+  }
+
+  /// `PositionsService.stayOf`: is this fix still part of one place the line will draw as a dot?
+  /// The run grows while it stays a cluster and restarts at the fix that left it. One fix is not a
+  /// stand-by — the veto needs a place to have been seen twice before it overrules the window — and
+  /// it only earns its place once the cluster outlives the evidence window: a young stand-by *is*
+  /// that window's own evidence, and refusing it would only delay a walk starting from rest.
+  bool _stayOf(_Fix fix) {
+    final List<_Fix> grown = <_Fix>[..._stayRun, fix];
+    if (grown.length < 2) {
+      _stayRun
+        ..clear()
+        ..addAll(grown);
+      return false;
+    }
+    if (!_stayedPut(grown, Motion.maxNetWindowS.toDouble())) {
+      _stayRun
+        ..clear()
+        ..add(fix);
+      return false;
+    }
+    final double spanS = grown.last.ts.difference(grown.first.ts).inMilliseconds / 1000.0;
+    _stayRun
+      ..clear()
+      ..addAll(grown);
+    return spanS > Motion.maxNetWindowS;
+  }
+
+  /// `TraceService.stayedPut` — the same arithmetic the day's line is drawn with, so the chip can
+  /// never claim a journey the trace refuses to draw. `wanderCapS` is how long the stationary band
+  /// is credited with wandering across the cluster: the line leaves it open, the veto asks it
+  /// capped at one evidence window.
+  bool _stayedPut(List<_Fix> run, double wanderCapS) {
+    final double band = driftCapM;
+    final _Fix centre = _mean(run);
+    if (run.any(((_Fix r) => Geo.distanceMeters(centre.lat, centre.lng, r.lat, r.lng) > band))) return false;
+    if (run.length < 2) return true;
+    final int half = (run.length / 2).ceil();
+    final _Fix older = _mean(run.sublist(0, half));
+    final _Fix newer = _mean(run.sublist(half));
+    final double netM = Geo.distanceMeters(older.lat, older.lng, newer.lat, newer.lng);
+    final double spanS = run.last.ts.difference(run.first.ts).inMilliseconds / 1000.0;
+    final double noiseRadiusM = run.map(((_Fix r) => r.noiseM)).reduce((double a, double b) => a + b) / run.length;
+    final double bubbleM = Motion.movedCircleFactor * noiseRadiusM * math.sqrt(2) / math.sqrt(math.max(2, run.length));
+    return netM <= math.max(bubbleM, Motion.stationarySpeedKmh / 3.6 * math.min(math.max(0, spanS), wanderCapS));
   }
 
   void _pushWindow(_Fix fix) {
