@@ -192,6 +192,7 @@ describe('Overspeed → SPEEDING with cooldown (§6)', () => {
 describe('STOP_EXCEEDED (§5/§6)', () => {
   it('fires exactly once when a stop run exceeds stopAlertMin', async () => {
     const { employeeId, deviceId } = await mkDriver({ lat: 30.0, lng: 30.0, radiusM: 100000 });
+    await settings.patchRules({ stopRepeatMin: 0 }, { id: 'admin', role: 'ADMIN' });
     const t0 = Date.now();
     const travel = [0, 1, 2].map((i) => ({ clientTs: iso(t0 + i * 6000), lat: 30.0 + i * 0.001, lng: 30.0, speed: 40, accuracy: 5 }));
     await positions.ingestBatch({ deviceId, batchSeq: 1, positions: travel });
@@ -227,6 +228,28 @@ describe('STOP_EXCEEDED (§5/§6)', () => {
     expect(await countByType(employeeId, 'STOP_EXCEEDED')).toBe(1);
     const alert = await prisma.alert.findFirst({ where: { employeeId, type: 'STOP_EXCEEDED' } });
     expect(JSON.parse(alert?.meta ?? '{}').threshold).toBe(5);
+  });
+
+  it('re-pages every stopRepeatMin while he keeps standing, each stating the total standing time', async () => {
+    const { employeeId, deviceId } = await mkDriver({ lat: 30.0, lng: 30.0, radiusM: 100000 });
+    await prisma.ruleOverride.create({ data: { employeeId, stopAlertMin: 2 } });
+    await settings.patchRules({ stopRepeatMin: 5 }, { id: 'admin', role: 'ADMIN' });
+    const t0 = Date.now();
+    // the parked keep-alive at 30 s: pages land at 2.5 min (threshold 2) and 7.5 min (2 + 5)
+    const parked = Array.from({ length: 16 }, (_, i) => ({
+      clientTs: iso(t0 + i * 30000),
+      lat: 30.0,
+      lng: 30.0,
+      speed: 0,
+      accuracy: 6,
+    }));
+    await positions.ingestBatch({ deviceId, batchSeq: 1, positions: parked });
+
+    const alerts = await prisma.alert.findMany({ where: { employeeId, type: 'STOP_EXCEEDED' }, orderBy: { createdAt: 'asc' } });
+    expect(alerts).toHaveLength(2);
+    expect(JSON.parse(alerts[0].meta).occurrence).toBe(1);
+    expect(JSON.parse(alerts[1].meta).occurrence).toBe(2);
+    expect(alerts[1].body).toBe('ما زال متوقفًا منذ 7 دقيقة');
   });
 });
 

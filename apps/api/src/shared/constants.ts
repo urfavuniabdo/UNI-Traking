@@ -132,6 +132,10 @@ export const MOTION = {
 export const RULE_DEFAULTS = {
   maxSpeedKmh: Number(process.env.DEFAULT_MAX_SPEED_KMH ?? 80),
   stopAlertMin: Number(process.env.STOP_ALERT_MIN ?? 30),
+  /** While the driver keeps standing, the STOP_EXCEEDED page re-fires every this-many minutes
+   *  (0 = one page per stop). Counted from the stop itself: threshold 2 + repeat 5 → pages at
+   *  2, 7, 12… each stating the total standing time. A general setting — not a per-driver one. */
+  stopRepeatMin: Number(process.env.STOP_REPEAT_MIN ?? 5),
   geofenceGraceS: Number(process.env.GEOFENCE_GRACE_S ?? 120),
   speedSamples: 3,
   speedingCriticalS: 120,

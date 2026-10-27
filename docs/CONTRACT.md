@@ -130,7 +130,8 @@ MOVE_CONFIRM_S         = 15      // الواقف ما يسيبش «واقف» غ
 MAX_ACCEL_MS2          = 6       // القفزة اللي محتاجة تمسك أكتر من كده مش سائق، دي موقع متنقل
 STEPS_PER_MIN_ON_FOOT  = 12      // فوقها رجله على الأرض: «ماشي» وممنوع «راكب»
 STILL_ENERGY_MS2       = 0.12    // تحتها مفيش حاجة لمّت الموبايل، مهما قال الريسيفر
-IDLE_ALARM_MIN         = 30      // توقف > 30 دقيقة ⇒ STOP_EXCEEDED
+IDLE_ALARM_MIN         = 30      // توقف > 30 دقيقة ⇒ STOP_EXCEEDED (override للسواق ← المنطقة ← العام)
+STOP_REPEAT_MIN        = 5       // وهو لسه واقف: الصفحة بتتكرر كل 5 د (0 = صفحة واحدة) بمجموع مدة الوقوف
 ```
 
 `STOPPED` ≤1.5 · `WALKING` 1.5–7 · `RIDING` >7 · `UNKNOWN` (دقة سيئة/لا بيانات). نقطة التحول تُخزن في `MotionSegment` وتظهر للإدارة كـ «ماشي / في رحلة / واقف».
@@ -300,7 +301,7 @@ downstream: فلاتر الطيف المستحيل، شاهد المستشعر (
 | `SPEEDING` | `speed > maxSpeedKmh` لمدة 3 عينات | WARNING→CRITICAL بعد `speedingCriticalS=120` | السواق + المشرفون |
 | `HARSH_BRAKING` | دسليرة ≤ `-2.2 m/s²` | WARNING | المشرفون + السواق |
 | `HARSH_ACCELERATION` | ≤ `2.2 m/s²`… (تسارع > `2.8 m/s²`) | INFO | المشرفون |
-| `STOP_EXCEEDED` | `STOPPED` > 30 د | CRITICAL | المشرفون + السواق |
+| `STOP_EXCEEDED` | `STOPPED` > `stopAlertMin` (override للسواق ← المنطقة ← العام = 30 د) — ووهو لسه واقف بتتكرر كل `stopRepeatMin=5` د (0 = بلا تكرار) ونص التكرار بيقول مجموع مدة الوقوف من أوله («ما زال متوقفًا منذ 7 دقيقة») | CRITICAL | المشرفون + السواق |
 | `GPS_OFF` / `DATA_OFF` / `APP_OFFLINE` | حدث من الجهاز أو فوات قلب ≥ 3 فترات — **للسواق اللي يومه مفتوح بس** (سجل حضور بلا انصراف لنفس `workDate`)؛ جهاز مسجّل وما بدءش يومه ما ينفعش يكون «متقطع». وميتمش رفع «غير متصل» لحظة وصول نبض: وصول النبض دليل الاتصال، والصمت اللي أثناء اليوم يشيله الـ heartbeat sweep | CRITICAL | المشرفون + السواق |
 | `BUFFER_REPLAYED` | وصول دفعة `buffered=true` | INFO | المشرفون |
 | `CHECK_IN_OUT_OF_FENCE` | انطباق فاشل | WARNING | الطرفين |

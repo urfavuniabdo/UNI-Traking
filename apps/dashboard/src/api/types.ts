@@ -363,6 +363,7 @@ export interface NotificationLogEntry {
 export interface RuleSettings {
   maxSpeedKmh: number;
   stopAlertMin: number;
+  stopRepeatMin: number;
   geofenceGraceS: number;
   speedingCriticalS: number;
   cooldownS: number;

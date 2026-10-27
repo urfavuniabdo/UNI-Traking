@@ -43,7 +43,7 @@ interface Track {
   outsideSinceTs: number | null;
   geofenceState: 'IN' | 'OUT' | 'UNKNOWN';
   exitRaised: boolean;
-  stopStart: { ts: number; lat: number; lng: number; stopId: string; alerted: boolean } | null;
+  stopStart: { ts: number; lat: number; lng: number; stopId: string; alerted: boolean; alerts: number } | null;
   /** clientTs of the first fix of the current unbroken run of ground-proven movement, else null. */
   moveRunSinceTs: number | null;
   openTrip:
@@ -556,22 +556,34 @@ export class PositionsService {
         data: { employeeId, tripId: track.openTrip?.id ?? null, zoneId: ctx?.zoneId ?? null, lat: p.lat, lng: p.lng, startedAt: new Date(p.ts), kind },
         select: { id: true },
       });
-      track.stopStart = { ts: p.ts, lat: p.lat, lng: p.lng, stopId: stop.id, alerted: false };
+      track.stopStart = { ts: p.ts, lat: p.lat, lng: p.lng, stopId: stop.id, alerted: false, alerts: 0 };
     } else if (state === 'STOPPED' && track.stopStart && this.dispatcher && th) {
       const durationS = (p.ts - track.stopStart.ts) / 1000;
-      if (!track.stopStart.alerted && durationS > th.stopAlertMin * 60) {
+      // The first page is the threshold breach; every later page is the SAME breach still true,
+      // re-stated on the operator's cadence (stopRepeatMin, general settings) with the total
+      // standing time in the body. The cadence is its own throttle, so repeats bypass the
+      // generic alert cooldown — otherwise cooldownS could eat a 1-minute repeat schedule.
+      const fired = track.stopStart.alerts;
+      const dueS = (th.stopAlertMin + (fired > 0 ? th.stopRepeatMin * fired : 0)) * 60;
+      if ((fired === 0 || th.stopRepeatMin > 0) && durationS > dueS) {
+        const mins = Math.floor(durationS / 60);
         const r = await this.dispatcher.raise({
           type: 'STOP_EXCEEDED' as AlertType,
           severity: SEVERITY.CRITICAL,
           employeeId,
           targetUserId: ctx?.userId ?? undefined,
           zoneId: ctx?.zoneId ?? undefined,
-          meta: { lat: p.lat, lng: p.lng, stopDurationS: Math.round(durationS), threshold: th.stopAlertMin },
+          body: fired === 0 ? undefined : `ما زال متوقفًا منذ ${mins} دقيقة`,
+          meta: { lat: p.lat, lng: p.lng, stopDurationS: Math.round(durationS), threshold: th.stopAlertMin, repeatMin: th.stopRepeatMin, occurrence: fired + 1 },
           replayed: p.buffered,
+          force: fired > 0,
         });
         if (r && !r.suppressed) alertsRaised++;
-        track.stopStart.alerted = true;
-        await this.prisma.stopEvent.update({ where: { id: track.stopStart.stopId }, data: { alerted: true } }).catch(() => undefined);
+        track.stopStart.alerts = fired + 1;
+        if (!track.stopStart.alerted) {
+          track.stopStart.alerted = true;
+          await this.prisma.stopEvent.update({ where: { id: track.stopStart.stopId }, data: { alerted: true } }).catch(() => undefined);
+        }
       }
     } else if (res.changed && state !== 'STOPPED' && track.stopStart) {
       const durationS = Math.round((p.ts - track.stopStart.ts) / 1000);

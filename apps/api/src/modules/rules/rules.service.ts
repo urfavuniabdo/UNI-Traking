@@ -9,6 +9,7 @@ import type { FenceShape } from '../../common/geo/geo.service';
 export interface EffectiveThresholds {
   maxSpeedKmh: number;
   stopAlertMin: number;
+  stopRepeatMin: number;
   geofenceGraceS: number;
   speedSamples: number;
   speedingCriticalS: number;
@@ -44,6 +45,7 @@ export interface EmployeeContext {
 export interface GlobalOverrides {
   maxSpeedKmh?: number;
   stopAlertMin?: number;
+  stopRepeatMin?: number;
   geofenceGraceS?: number;
   speedingCriticalS?: number;
   cooldownS?: number;
@@ -139,6 +141,8 @@ export class RulesService {
         asNum(zone?.stopAlertMin) ??
         asNum(g.stopAlertMin) ??
         RULE_DEFAULTS.stopAlertMin,
+      // The repeat cadence is an operator policy, not a per-driver fact — general settings only.
+      stopRepeatMin: asNum(g.stopRepeatMin) ?? RULE_DEFAULTS.stopRepeatMin,
       geofenceGraceS:
         asNum(override?.geofenceGraceS) ?? asNum(g.geofenceGraceS) ?? RULE_DEFAULTS.geofenceGraceS,
       speedSamples:

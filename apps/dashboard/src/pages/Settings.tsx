@@ -73,6 +73,7 @@ export default function SettingsPage() {
                 <>
                   <Field label="حد السرعة (كم/س)" value={rules.maxSpeedKmh} onChange={(v) => setRules({ ...rules, maxSpeedKmh: v })} />
                   <Field label="تنبيه التوقف (دقيقة)" value={rules.stopAlertMin} onChange={(v) => setRules({ ...rules, stopAlertMin: v })} />
+                  <Field label="تكرار تنبيه التوقف (دقيقة)" value={rules.stopRepeatMin} onChange={(v) => setRules({ ...rules, stopRepeatMin: v })} />
                   <Field label="سماح النطاق (ثانية)" value={rules.geofenceGraceS} onChange={(v) => setRules({ ...rules, geofenceGraceS: v })} />
                   <Field label="تحول السرعة لحرج (ثانية)" value={rules.speedingCriticalS} onChange={(v) => setRules({ ...rules, speedingCriticalS: v })} />
                   <Field label="كولداون التنبيه (ثانية)" value={rules.cooldownS} onChange={(v) => setRules({ ...rules, cooldownS: v })} />

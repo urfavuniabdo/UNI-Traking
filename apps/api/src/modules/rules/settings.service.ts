@@ -12,6 +12,7 @@ const LOG_LIMIT = 200;
 export const NUMERIC_RULE_KEYS = [
   'maxSpeedKmh',
   'stopAlertMin',
+  'stopRepeatMin',
   'geofenceGraceS',
   'speedingCriticalS',
   'cooldownS',

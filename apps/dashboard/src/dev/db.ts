@@ -323,6 +323,7 @@ export const notificationLog: NotificationLogEntry[] = [
 export const settings: RuleSettings = {
   maxSpeedKmh: 80,
   stopAlertMin: 30,
+  stopRepeatMin: 5,
   geofenceGraceS: 120,
   speedingCriticalS: 120,
   cooldownS: 180,
