@@ -120,7 +120,15 @@ class TrackingEngine {
       return;
     }
     final Position? p = await location.freshFix();
-    if (p != null) await _onFix(p);
+    if (p != null) {
+      await _onFix(p);
+      return;
+    }
+    // Indoor stillness: the provider answers nothing at all, and waiting for it would freeze
+    // the standing timeline again. The phone's own last accepted fix IS the honest "still
+    // here" — the same-place gate in _onFix stamps it with the device clock.
+    final Position? mine = _lastFix;
+    if (mine != null) await _onFix(mine);
   }
 
   Future<void> stop() async {
