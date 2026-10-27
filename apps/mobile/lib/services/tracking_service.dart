@@ -160,15 +160,26 @@ class TrackingEngine {
     _lastFixAt = DateTime.now();
 
     final DateTime now = DateTime.now().toUtc();
-    final DateTime fixTs = p.timestamp.toUtc();
+    DateTime fixTs = p.timestamp.toUtc();
     final DateTime? prevTs = _lastFixTs;
 
-    // A fix must be NEWER than the last one accepted. FusedLocation answers from its last-known
-    // cache whenever a caller did not force an update, and that cache holds the check-in point —
-    // so a phone left on a desk re-published the same coordinates for hours.
+    // A fix must be NEWER than the last one accepted — unless it confirms the same place.
+    // FusedLocation answers from its cache whenever a caller did not force an update, and
+    // indoors that cache never refreshes: the idle poll's only honest statement is "still at
+    // my spot, now", and refusing it froze the standing timeline (a stationary day shipped
+    // one point and every motion minute read 0). A cached fix at DIFFERENT coordinates is
+    // still the wake-up ghost — refused.
+    bool keepAlive = false;
     if (prevTs != null && !fixTs.isAfter(prevTs)) {
-      _emit('FIX_DROPPED', {'reason': 'stale', 'ageS': now.difference(fixTs).inSeconds});
-      return;
+      final Position? prev0 = _lastFix;
+      final double noiseM = prev0 != null && prev0.accuracy > p.accuracy ? prev0.accuracy : p.accuracy;
+      if (prev0 == null ||
+          Geo.distanceMeters(prev0.latitude, prev0.longitude, p.latitude, p.longitude) > noiseM) {
+        _emit('FIX_DROPPED', {'reason': 'stale', 'ageS': now.difference(fixTs).inSeconds});
+        return;
+      }
+      fixTs = now; // same place, phone's clock dates the confirmation
+      keepAlive = true;
     }
 
     final Position? prev = _lastFix;
@@ -192,6 +203,9 @@ class TrackingEngine {
     // same figure next to the dashboard's «واقف».
     double deviceSpeed = p.speed * 3.6;
     if (deviceSpeed > Motion.maxCredibleSpeedKmh) deviceSpeed = 0;
+    // A keep-alive re-publishes an old measurement: its Doppler belongs to the moment the fix
+    // was taken, not to now. Same place means zero net displacement — that is the honest speed.
+    if (keepAlive) deviceSpeed = 0;
     final double bearing = p.heading;
     _lastFix = p;
     _lastFixTs = fixTs;
@@ -220,9 +234,7 @@ class TrackingEngine {
     final int? batteryPct = await battery.level();
 
     final TrackPosition row = TrackPosition(
-      clientTs: p.timestamp.isUtc
-          ? p.timestamp
-          : p.timestamp.toUtc(), // capture time on the device (§4)
+      clientTs: fixTs, // capture time on the device (§4); a keep-alive carries the phone's now
       lat: p.latitude,
       lng: p.longitude,
       speedKmh: speed,
