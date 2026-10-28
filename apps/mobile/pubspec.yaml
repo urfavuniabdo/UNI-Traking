@@ -4,7 +4,7 @@ description: >-
   the driver's screen is ONLY a check-in / check-out button — tracking, buffering and
   alerting happen fully automatically in the background.
 publish_to: "none"
-version: 0.1.0+2
+version: 0.1.0+3
 
 environment:
   # Conservative pins so `flutter pub get` resolves on Flutter 3.16 / Dart 3.2.
