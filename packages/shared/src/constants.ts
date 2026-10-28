@@ -152,7 +152,7 @@ export const RULE_DEFAULTS = {
   harshAccelMs2: 2.8,
   cooldownS: Number(process.env.ALERT_COOLDOWN_S ?? 180),
   heartbeatIntervalS: Number(process.env.HEARTBEAT_INTERVAL_S ?? 300),
-  heartbeatMissedCycles: 3,
+  heartbeatMissedCycles: 2,
   gapMinMin: 10,
   replayMaxAgeHours: Number(process.env.REPLAY_MAX_AGE_HOURS ?? 72),
   shiftGraceMin: Number(process.env.SHIFT_GRACE_MIN ?? 30),

@@ -71,7 +71,7 @@ class RuleDefaults {
   static const double harshAccelMs2 = 2.8;
   static const int cooldownS = 180;
   static const int heartbeatIntervalS = 300; // device heartbeat cadence (§2)
-  static const int heartbeatMissedCycles = 3;
+  static const int heartbeatMissedCycles = 2; // two missed beats page him: ~10 min of silence (§2)
   static const int gapMinMin = 10;
   static const int replayMaxAgeHours = 72;
   static const int shiftGraceMin = 30;

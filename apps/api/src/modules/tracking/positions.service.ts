@@ -1456,10 +1456,11 @@ export class PositionsService {
   async heartbeatSweep(): Promise<void> {
     if (!this.dispatcher) return;
     let hb = 300;
-    const missed = 3;
+    let missed = RULE_DEFAULTS.heartbeatMissedCycles;
     try {
       const g = await this.rules.globalOverrides();
       hb = g.heartbeatIntervalS ?? 300;
+      missed = g.heartbeatMissedCycles ?? missed;
     } catch {
       /* defaults */
     }

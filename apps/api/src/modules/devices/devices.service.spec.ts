@@ -42,7 +42,7 @@ describe('presenceOf', () => {
     expect(presenceOf({ online: true, lastSeenAt: new Date(now.getTime() - 60_000) }, now)).toBe(true);
   });
   it('online but stale beat → absent', () => {
-    // HEARTBEAT_INTERVAL_S default 300 → window 900s
+    // HEARTBEAT_INTERVAL_S default 300 → window 600s (2 cycles, same as the offline alert)
     expect(presenceOf({ online: true, lastSeenAt: new Date(now.getTime() - 2_000_000) }, now)).toBe(false);
   });
   it('offline → absent', () => {

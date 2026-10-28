@@ -30,7 +30,7 @@
     "harshAccelMs2": 2.8,
     "cooldownS": 180,
     "heartbeatIntervalS": 300,
-    "heartbeatMissedCycles": 3,
+    "heartbeatMissedCycles": 2,
     "gapMinMin": 10,
     "replayMaxAgeHours": 72,
     "shiftGraceMin": 30,

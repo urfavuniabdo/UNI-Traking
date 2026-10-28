@@ -153,7 +153,9 @@ export const RULE_DEFAULTS = {
   harshAccelMs2: 2.8,
   cooldownS: Number(process.env.ALERT_COOLDOWN_S ?? 180),
   heartbeatIntervalS: Number(process.env.HEARTBEAT_INTERVAL_S ?? 300),
-  heartbeatMissedCycles: 3,
+  /** Two missed beats page him: a phone that lost the internet cannot announce it, so the sweep
+   *  is the only witness — 2 × 5 min puts «انقطاع اتصال التطبيق» at ~10 minutes of silence. */
+  heartbeatMissedCycles: 2,
   gapMinMin: 10,
   replayMaxAgeHours: Number(process.env.REPLAY_MAX_AGE_HOURS ?? 72),
   shiftGraceMin: Number(process.env.SHIFT_GRACE_MIN ?? 30),

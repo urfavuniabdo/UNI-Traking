@@ -17,7 +17,9 @@ import { json, workDateOf } from '../../common/utils';
 import type { RegisterDeviceDto, HeartbeatDto, ToggleEventDto } from './dto';
 
 const HEARTBEAT_INTERVAL_S = Number(process.env.HEARTBEAT_INTERVAL_S ?? 300);
-const PRESENCE_WINDOW_S = HEARTBEAT_INTERVAL_S * 3;
+/** Same arithmetic as the offline alert (2 missed beats): a device the board still calls «متصل»
+ *  must not be one the alert funnel already declared silent. */
+const PRESENCE_WINDOW_S = HEARTBEAT_INTERVAL_S * 2;
 
 export interface DevicePresenceInput {
   online: boolean;
