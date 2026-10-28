@@ -1456,7 +1456,7 @@ export class PositionsService {
   async heartbeatSweep(): Promise<void> {
     if (!this.dispatcher) return;
     let hb = 300;
-    let missed = RULE_DEFAULTS.heartbeatMissedCycles;
+    let missed: number = RULE_DEFAULTS.heartbeatMissedCycles;
     try {
       const g = await this.rules.globalOverrides();
       hb = g.heartbeatIntervalS ?? 300;

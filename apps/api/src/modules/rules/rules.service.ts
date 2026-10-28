@@ -50,6 +50,7 @@ export interface GlobalOverrides {
   speedingCriticalS?: number;
   cooldownS?: number;
   heartbeatIntervalS?: number;
+  heartbeatMissedCycles?: number;
   replayMaxAgeHours?: number;
   gapMinMin?: number;
   shiftGraceMin?: number;
