@@ -29,6 +29,7 @@ class Motion {
   static const int minNetSamples = 6; // below this a window can only prove a vehicle, never a walk
   static const int minWindowFixes = 2; // under this the coordinates have no opinion at all
   static const int moveConfirmS = 15; // a standing driver leaves «واقف» only once the move has held this long
+  static const int convergenceWarmupS = 60; // the day's first minute is receiver warm-up: stored, but not ground (server-side)
   static const double maxAccelMs2 = 6; // grip ceiling: a jump past this is a relocated fix, not a driver
 
   /// §5 the phone's own motion evidence (mirrors MOTION.STEPS_PER_MIN_ON_FOOT / STILL_ENERGY_MS2).
@@ -49,6 +50,7 @@ class Motion {
         'MIN_NET_SAMPLES': minNetSamples,
         'MIN_WINDOW_FIXES': minWindowFixes,
         'MOVE_CONFIRM_S': moveConfirmS,
+        'CONVERGENCE_WARMUP_S': convergenceWarmupS,
         'MAX_ACCEL_MS2': maxAccelMs2,
         'STEPS_PER_MIN_ON_FOOT': stepsPerMinOnFoot,
         'STILL_ENERGY_MS2': stillEnergyMs2,
@@ -61,6 +63,7 @@ class RuleDefaults {
 
   static const double maxSpeedKmh = 80;
   static const int stopAlertMin = 30;
+  static const int stopRepeatMin = 5; // a standing driver is re-paged on this cadence (§6)
   static const int geofenceGraceS = 120;
   static const int speedSamples = 3;
   static const int speedingCriticalS = 120;
@@ -79,6 +82,7 @@ class RuleDefaults {
   static Map<String, Object> toGoldenMap() => <String, Object>{
         'maxSpeedKmh': maxSpeedKmh,
         'stopAlertMin': stopAlertMin,
+        'stopRepeatMin': stopRepeatMin,
         'geofenceGraceS': geofenceGraceS,
         'speedSamples': speedSamples,
         'speedingCriticalS': speedingCriticalS,

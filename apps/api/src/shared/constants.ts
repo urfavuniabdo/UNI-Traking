@@ -102,6 +102,16 @@ export const MOTION = {
    */
   MOVE_CONFIRM_S: 15,
   /**
+   * The first minute of a tracking session is not ground. A receiver waking from cold reports a
+   * solution that is internally consistent (tight claimed accuracy, plausible Doppler, zero steps)
+   * while its positions wander — a driver standing at home since check-in produced 58 s of fixes
+   * that zig-zagged ~150 m around a spot 950 m from where he actually was, and every guard passed
+   * because the fiction never contradicted itself. The fixes stay stored and replayable, but they
+   * found no place in the trace, no line, no mileage and no stop anchor. 60 s covers a cold start;
+   * the first real fix usually lands inside it and everything after is ground as usual.
+   */
+  CONVERGENCE_WARMUP_S: 60,
+  /**
    * The largest speed change consecutive fixes may demand and still be ground. The ceiling sits at
    * 0.6 g: a real vehicle hard-braked from 50 km/h to a stop in two seconds is ~7 m/s² and every
    * telematics platform believes that, so anything below it stays his speed. What it refuses is the

@@ -50,12 +50,16 @@ function fix(atS: number, lat: number, lng: number, speed: number, witness: type
   };
 }
 
-/** 8 fixes parked on one point, then 14 of them 100 m apart every 3 s: 120 km/h the ground agrees to. */
+/** 8 fixes parked on one point through the session's warm-up minute, then 14 of them 100 m apart
+ *  every 3 s: 120 km/h the ground agrees to. The parked block sits before T0 so the drive itself
+ *  is past the receiver's warm-up window, and the device speed is flat 120 — a ramp re-starting
+ *  from a 45 s silence would read as an accel no tyre can pull, and the gate would refuse the very
+ *  burst this day is supposed to be believed on. */
 function theDay(witness: typeof STILL | null): PositionItemDto[] {
   const rows: PositionItemDto[] = [];
-  for (let i = 0; i < 8; i++) rows.push(fix(i * 5, START.lat, START.lng, 0, witness));
+  for (let i = 0; i < 8; i++) rows.push(fix(-40 + i * 5, START.lat, START.lng, 0, witness));
   for (let k = 0; k < 14; k++) {
-    rows.push(fix(40 + k * 3, START.lat + (k + 1) * STEP_LAT, START.lng, Math.min(120, 40 * (k + 1)), witness));
+    rows.push(fix(40 + k * 3, START.lat + (k + 1) * STEP_LAT, START.lng, 120, witness));
   }
   return rows;
 }

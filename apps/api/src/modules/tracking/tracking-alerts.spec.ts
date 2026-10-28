@@ -446,6 +446,10 @@ describe('GET /positions/route — dashboard envelope (rename)', () => {
   it('returns points/stops/gaps/userName/distanceKm and keeps positions/pointCount aliases', async () => {
     const { employeeId, userId, deviceId } = await mkDriver({ lat: 30.0, lng: 30.0, radiusM: 100000 });
     const t0 = Date.now();
+    // the session's warm-up minute: stored but not ground, so the two fixes below stay whole
+    await prisma.position.create({
+      data: { employeeId, clientTs: new Date(t0 - 120_000), lat: 30.0, lng: 30.0, speedKmh: 0.3, accuracyM: 5, motionState: 'STOPPED', ingestHash: 'envelope-warmup' },
+    });
     await positions.ingestBatch({
       deviceId,
       batchSeq: 1,
@@ -476,7 +480,7 @@ describe('GET /positions/route — dashboard envelope (rename)', () => {
     // kept aliases: `positions` (existing spec reads positions[].ts) + `pointCount`
     expect(Array.isArray(route.positions)).toBe(true);
     expect(route.positions[0]).toHaveProperty('ts');
-    expect(route.pointCount).toBe(2);
+    expect(route.pointCount).toBe(3); // warm-up row is stored, so it still counts here
     expect(route.employeeId).toBe(employeeId);
   });
 });

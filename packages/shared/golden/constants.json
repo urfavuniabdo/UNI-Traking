@@ -14,6 +14,7 @@
     "MIN_NET_SAMPLES": 6,
     "MIN_WINDOW_FIXES": 2,
     "MOVE_CONFIRM_S": 15,
+    "CONVERGENCE_WARMUP_S": 60,
     "MAX_ACCEL_MS2": 6,
     "STEPS_PER_MIN_ON_FOOT": 12,
     "STILL_ENERGY_MS2": 0.12
@@ -21,6 +22,7 @@
   "RULE_DEFAULTS": {
     "maxSpeedKmh": 80,
     "stopAlertMin": 30,
+    "stopRepeatMin": 5,
     "geofenceGraceS": 120,
     "speedSamples": 3,
     "speedingCriticalS": 120,

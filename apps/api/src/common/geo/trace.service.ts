@@ -52,9 +52,23 @@ export class TraceService {
     return this.collapseStays(this.dropAndClean(rows));
   }
 
+  /**
+   * The instant the day's ground may begin: the first fix's time plus the receiver's cold-start
+   * window (MOTION.CONVERGENCE_WARMUP_S). Fixes inside it are stored and replayable but found no
+   * place, no line, no mileage and no stop anchor — a converging receiver reports a self-consistent
+   * fiction, and no per-fix guard can refuse it because it never contradicts itself.
+   */
+  warmupEndMs(rows: { clientTs: Date }[]): number {
+    if (!rows.length) return 0;
+    const first = rows.reduce((min, r) => Math.min(min, r.clientTs.getTime()), Infinity);
+    return first + MOTION.CONVERGENCE_WARMUP_S * 1000;
+  }
+
   private dropAndClean<T extends TraceRow>(rows: T[]): T[] {
     const day = this.dropSpikes(rows);
     this.dropOutAndBack(day);
+    const warmEndMs = this.warmupEndMs(rows);
+    for (const d of day) if (d.credible && d.row.clientTs.getTime() < warmEndMs) d.credible = false;
     return day.filter((x) => x.credible).map((x) => x.row);
   }
 

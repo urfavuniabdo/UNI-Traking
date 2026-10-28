@@ -199,6 +199,10 @@ describe('the coordinates decide the motion state (§5)', () => {
           ingestHash: `legacy-${i}-${lat}`,
         },
       });
+    // a session opens with the receiver's warm-up minute: stored, but not ground
+    await prisma.position.create({
+      data: { employeeId, clientTs: new Date(t0 - 120_000), lat: 30.0, lng: 31.2, speedKmh: 0.3, accuracyM: 8, motionState: 'STOPPED', ingestHash: 'legacy-warmup' },
+    });
     // what the cached-fix build used to leave behind: the phone never moved, its speed said otherwise
     await store(0, 30.0, 150, 'RIDING');
     await store(1, 30.0, 155, 'RIDING');
@@ -210,9 +214,9 @@ describe('the coordinates decide the motion state (§5)', () => {
       points: { motionState: string; credible: boolean; speedKmh: number | null }[];
       geojson: { coordinates: number[][] };
     };
-    expect(route.points).toHaveLength(4);
-    expect(route.points.every((p) => p.credible)).toBe(true);
-    expect(route.points.every((p) => p.motionState === 'STOPPED')).toBe(true);
+    expect(route.points).toHaveLength(5);
+    expect(route.points.filter((p) => p.credible)).toHaveLength(4);
+    expect(route.points.filter((p) => p.credible).every((p) => p.motionState === 'STOPPED')).toBe(true);
     expect(route.distanceKm).toBe(0);
     expect(route.points.reduce((s, p) => s + (p.speedKmh ?? 0), 0)).toBeLessThan(1.5);
   });
@@ -233,6 +237,10 @@ describe('the coordinates decide the motion state (§5)', () => {
           ingestHash: `spike-${i}-${lat}`,
         },
       });
+    // a session opens with the receiver's warm-up minute: stored, but not ground
+    await prisma.position.create({
+      data: { employeeId, clientTs: new Date(t0 - 120_000), lat: 30.0, lng: 31.2, speedKmh: 0.3, accuracyM: 8, motionState: 'STOPPED', ingestHash: 'spike-warmup' },
+    });
     await store(0, 30.0);
     await store(1, 30.3); // 33 km in a minute — a re-fix, not ground
     await store(2, 30.0009);
@@ -243,7 +251,8 @@ describe('the coordinates decide the motion state (§5)', () => {
       points: { lat: number; credible: boolean }[];
       distanceKm: number;
     };
-    expect(route.rejectedPoints).toBe(1);
+    // the teleport, plus the warm-up fix that founded the session
+    expect(route.rejectedPoints).toBe(2);
     expect(route.points.find((p) => p.lat === 30.3)?.credible).toBe(false);
     expect(route.distanceKm).toBeLessThan(0.3);
   });
@@ -268,6 +277,10 @@ describe('the line answers to the state (§5)', () => {
       });
     // a day off his phone, to the metre: parked in the yard with the fix wandering 20 m around him,
     // and three positions from across the city the device published when it woke from a doze.
+    // The session's first fix is the warm-up minute: stored, but not ground.
+    await prisma.position.create({
+      data: { employeeId, clientTs: new Date(t0 - 90_000), lat: 30.0, lng: 31.2, speedKmh: 0.2, accuracyM: 8, motionState: 'STOPPED', ingestHash: 'ghost-warmup' },
+    });
     await store(0, 30.0);
     await store(30, 30.00005);
     await store(60, 30.0001);
@@ -295,7 +308,8 @@ describe('the line answers to the state (§5)', () => {
       stops: { lat: number; lng: number }[];
       geojson: { coordinates: [number, number][] };
     };
-    expect(route.rejectedPoints).toBe(5);
+    // the five ghost fixes, plus the warm-up fix that founded the session
+    expect(route.rejectedPoints).toBe(6);
     expect(route.points.filter((p) => p.credible).every((p) => p.motionState === 'STOPPED')).toBe(true);
     // 7.7 km of ghosts became the ground he stood on: nothing moved, so nothing is drawn.
     expect(route.distanceKm).toBe(0);
@@ -326,6 +340,12 @@ describe('the line answers to the state (§5)', () => {
       });
     for (let i = 0; i <= 20; i++) await step(i * 15, i);
     for (let i = 19; i >= 0; i--) await step((40 - i) * 15, i);
+    // he was parked at the yard before setting off: the session's warm-up minute, stored not ground
+    for (let i = 0; i < 3; i++) {
+      await prisma.position.create({
+        data: { employeeId, clientTs: new Date(t0 - 100_000 + i * 20_000), lat: 30.0, lng: 31.2, speedKmh: 0.2, accuracyM: 8, motionState: 'STOPPED', ingestHash: `roundtrip-warm-${i}` },
+      });
+    }
 
     const route = (await positions.route(employeeId, new Date(t0).toISOString().slice(0, 10))) as {
       distanceKm: number;
@@ -333,7 +353,8 @@ describe('the line answers to the state (§5)', () => {
       trace: unknown[];
       geojson: { coordinates: [number, number][] };
     };
-    expect(route.rejectedPoints).toBe(0);
+    // the session's warm-up minute: three parked fixes stored before the road, none of it ground
+    expect(route.rejectedPoints).toBe(3);
     expect(route.distanceKm).toBeGreaterThan(3.5);
     // a man who really travelled 2 km out and back is not a stand-by: every step is on the line
     expect(route.trace.length).toBeGreaterThan(35);
@@ -344,6 +365,10 @@ describe('a journey ends when the ground stops (§5)', () => {
   it('check-out (tracking off) closes the run with the length it actually covered', async () => {
     const { employeeId, deviceId } = await mkDriver();
     const t0 = Date.now();
+    // the session's warm-up minute: parked at the yard, stored but not ground
+    await prisma.position.create({
+      data: { employeeId, clientTs: new Date(t0 - 120_000), lat: 30.0, lng: 31.2, speedKmh: 0.3, accuracyM: 8, motionState: 'STOPPED', ingestHash: 'checkout-warmup' },
+    });
     await positions.ingestBatch({
       deviceId,
       batchSeq: 1,
@@ -423,6 +448,10 @@ describe('a journey ends when the ground stops (§5)', () => {
   it('waiting an hour at a customer keeps the run open — the phone is still talking', async () => {
     const { employeeId, deviceId } = await mkDriver();
     const t0 = Date.now();
+    // the session's warm-up minute: parked at the yard, stored but not ground
+    await prisma.position.create({
+      data: { employeeId, clientTs: new Date(t0 - 120_000), lat: 30.0, lng: 31.2, speedKmh: 0.3, accuracyM: 8, motionState: 'STOPPED', ingestHash: 'waiting-warmup' },
+    });
     await positions.ingestBatch({
       deviceId,
       batchSeq: 1,
@@ -550,6 +579,10 @@ describe('GET /positions/trails — every present driver gets his own line (§5)
   it('the line is the ground he covered: the drive is in it, the teleport is not', async () => {
     const { employeeId, deviceId } = await mkDriver();
     const t0 = Date.now();
+    // the session's warm-up minute: parked, stored but not ground — the drive itself stays whole
+    await prisma.position.create({
+      data: { employeeId, clientTs: new Date(t0 - 120_000), lat: 30.0, lng: 31.2, speedKmh: 0.3, accuracyM: 8, motionState: 'STOPPED', ingestHash: 'trail-warmup' },
+    });
     await positions.ingestBatch({
       deviceId,
       batchSeq: 1,
@@ -586,5 +619,72 @@ describe('GET /positions/trails — every present driver gets his own line (§5)
 
     await prisma.device.update({ where: { deviceId: 'ground-dev' }, data: { online: false, lastSeenAt: new Date(t0 - 4_000_000) } });
     expect(await trailOf(employeeId)).toBeUndefined();
+  });
+});
+
+/**
+ * The real day that forced the warm-up rule: on 2026-10-27 a driver standing at home since check-in
+ * produced 16 self-consistent fixes in the first 58 s of his session — tight claimed accuracy, a
+ * plausible doppler ramp, zero steps — wandering ~150 m around a spot 950 m from where he actually
+ * was. No per-fix guard could refuse them: the fiction never contradicted itself. Coordinates are
+ * the ones his phone really sent (12:07:07–12:08:05Z, then the truth at 12:08:58Z).
+ */
+describe('the first minute of a session is receiver warm-up, not ground', () => {
+  /** [dtS, lat, lng, speedKmh, accuracyM, stepsPerMin, motionEnergy, liveState] — the 2026-10-27 burst. */
+  const BURST: [number, number, number, number, number, number, number, string][] = [
+    [0, 30.103007, 31.3882148, 15.5, 10.1, 0, 0.14, 'RIDING'],
+    [3, 30.1028936, 31.3882453, 0, 9.6, 0, 0.15, 'STOPPED'],
+    [7.99, 30.1027684, 31.3882164, 33.9, 8.3, 0, 0.14, 'RIDING'],
+    [11, 30.1026226, 31.3881838, 1.5, 8.6, 0, 0.1, 'STOPPED'],
+    [14, 30.1024463, 31.3881681, 1.5, 8.6, 0, 0.06, 'STOPPED'],
+    [17, 30.1023418, 31.3881469, 1.5, 7.1, 0, 0.03, 'STOPPED'],
+    [20, 30.102227, 31.3881226, 1.5, 7.1, 0, 0.02, 'STOPPED'],
+    [29, 30.102313, 31.3881736, 1.5, 9.3, 0, 0.03, 'STOPPED'],
+    [34, 30.1021611, 31.3881312, 1.5, 9.5, 0, 0.02, 'STOPPED'],
+    [40, 30.1020107, 31.3880431, 1.5, 7.8, 0, 0.03, 'STOPPED'],
+    [44, 30.1021332, 31.3880241, 1.5, 7.7, 0, 0.03, 'STOPPED'],
+    [46.66, 30.1022639, 31.3880008, 1.5, 9.4, 0, 0.03, 'STOPPED'],
+    [49, 30.10256, 31.3880499, 1.5, 9.3, 0, 0.03, 'STOPPED'],
+    [52, 30.102665, 31.3881103, 1.5, 9.5, 0, 0.02, 'STOPPED'],
+    [55, 30.1029656, 31.3882015, 1.5, 9.6, 0, 0.02, 'STOPPED'],
+    [58, 30.103338, 31.38832, 0.2, 8, 0, 0.02, 'STOPPED'],
+  ];
+  const HOME = { lat: 30.0970471, lng: 31.3815901, acc: 26.3 };
+
+  it('the 2026-10-27 burst is stored but finds no place, no line, no mileage, no stop', async () => {
+    const { employeeId } = await mkDriver();
+    const t0 = Date.now();
+    for (const [dtS, lat, lng, speed, acc, steps, energy, state] of BURST) {
+      await prisma.position.create({
+        data: { employeeId, clientTs: new Date(t0 + dtS * 1000), lat, lng, speedKmh: speed, accuracyM: acc, stepsPerMin: steps, motionEnergy: energy, motionState: state, ingestHash: `burst-${dtS}` },
+      });
+    }
+    // the truth, the way it arrived: at 12:08:58 the receiver locked on and stayed there
+    for (let k = 0; k < 3; k++) {
+      await prisma.position.create({
+        data: { employeeId, clientTs: new Date(t0 + (111.1 + k * 120) * 1000), lat: HOME.lat, lng: HOME.lng, speedKmh: 1.5, accuracyM: HOME.acc, stepsPerMin: 0, motionEnergy: 0.02, motionState: 'STOPPED', ingestHash: `truth-${k}` },
+      });
+    }
+
+    const route = (await positions.route(employeeId, new Date(t0).toISOString().slice(0, 10))) as {
+      distanceKm: number;
+      rejectedPoints: number;
+      points: { credible: boolean }[];
+      trace: { lat: number; lng: number }[];
+      stops: unknown[];
+      geojson: { coordinates: unknown[] };
+    };
+    expect(route.points).toHaveLength(19);
+    // the burst stayed stored and readable — every one of it not ground
+    expect(route.points.slice(0, 16).every((p) => p.credible === false)).toBe(true);
+    expect(route.points[16].credible).toBe(true);
+    expect(route.rejectedPoints).toBe(16);
+    // and the board shows the day it really was: one place, no line, no kilometres
+    expect(route.distanceKm).toBe(0);
+    expect(route.trace).toHaveLength(1);
+    expect(route.trace[0].lat).toBeCloseTo(HOME.lat, 5);
+    expect(route.trace[0].lng).toBeCloseTo(HOME.lng, 5);
+    expect(route.geojson.coordinates.length).toBeLessThanOrEqual(1);
+    expect(route.stops).toHaveLength(0);
   });
 });

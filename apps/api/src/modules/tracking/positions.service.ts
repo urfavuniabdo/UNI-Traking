@@ -931,9 +931,10 @@ export class PositionsService {
     const stayRun: NetFix[] = [];
     const day = this.trace.dropSpikes(rows);
     this.trace.dropOutAndBack(day);
+    const warmEndMs = this.trace.warmupEndMs(rows);
     day.forEach(({ row: r, credible }, i) => {
       const ts = r.clientTs.getTime();
-      if (!credible) {
+      if (!credible || ts < warmEndMs) {
         out.push({ ...r, motionState: 'UNKNOWN' as MotionState, speedKmh: round(r.speedKmh, 1), credible: false });
         return;
       }
