@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { connectRealtime, on, subscribeLive } from './socket';
 import { SOCKET_EVENTS } from '@shared';
 import { useLive, useAlertFeed, useUi, usePrefs } from '@/stores/ui';
-import { browserNotify, ensureNotifyPermission, playPing } from '@/utils/sound';
+import { browserNotify, ensureNotifyPermission, playPing, startSosSiren, stopSosSiren } from '@/utils/sound';
 import type { AlertPayload, LivePosition, SocketPositionUpdate, SocketPresence } from '@/api/types';
 
 /**
@@ -37,13 +37,25 @@ export function useRealtime(): void {
         feed.addAlert(a);
         if (a.severity === 'CRITICAL') {
           const ui = useUi.getState();
-          if (ui.soundEnabled) playPing(a.type === 'HELP_REQUESTED' ? 'sos' : 'critical');
+          if (ui.soundEnabled) {
+            if (a.type === 'HELP_REQUESTED') {
+              startSosSiren();
+              ui.startSiren(a.id, `${a.userName} — ${a.body}`);
+            } else {
+              playPing('critical');
+            }
+          }
           browserNotify(a.title, `${a.userName} — ${a.body}`);
           ui.pushToast({ title: a.title, body: `${a.userName} · ${a.body}`, kind: 'alert' });
         }
       }),
       on(SOCKET_EVENTS.ALERT_UPDATED, (u: { id: string; status: AlertPayload['status']; ackBy?: string | null; ackAt?: string | null }) => {
         useAlertFeed.getState().updateAlert(u.id, { status: u.status, ackBy: u.ackBy, ackAt: u.ackAt });
+        const ui = useUi.getState();
+        if (ui.siren?.alertId === u.id && u.status !== 'OPEN') {
+          stopSosSiren();
+          ui.stopSiren();
+        }
       }),
       on(SOCKET_EVENTS.DRIVER_PRESENCE, (p: SocketPresence) => {
         useLive.getState().mergePosition(p.userId, {

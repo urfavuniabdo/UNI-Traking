@@ -16,11 +16,15 @@ interface UiState {
   soundEnabled: boolean;
   notifyPermission: NotificationPermission | 'unsupported';
   toasts: Toast[];
+  /** SOS siren currently ringing — cleared only by the stop button, an ACK, or muting. */
+  siren: { alertId: string; label: string } | null;
   setTheme: (t: 'light' | 'dark') => void;
   toggleTheme: () => void;
   setSidebarOpen: (v: boolean) => void;
   setSound: (v: boolean) => void;
   setNotifyPermission: (p: NotificationPermission | 'unsupported') => void;
+  startSiren: (alertId: string, label: string) => void;
+  stopSiren: () => void;
   pushToast: (t: Omit<Toast, 'id'>) => void;
   dismissToast: (id: string) => void;
 }
@@ -39,6 +43,9 @@ export const useUi = create<UiState>()(
       soundEnabled: true,
       notifyPermission: 'default',
       toasts: [],
+      siren: null,
+      startSiren: (alertId, label) => set({ siren: { alertId, label } }),
+      stopSiren: () => set({ siren: null }),
       setTheme: (t) => {
         applyTheme(t);
         set({ theme: t });
