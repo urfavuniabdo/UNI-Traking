@@ -37,7 +37,7 @@ export function useRealtime(): void {
         feed.addAlert(a);
         if (a.severity === 'CRITICAL') {
           const ui = useUi.getState();
-          if (ui.soundEnabled) playPing('critical');
+          if (ui.soundEnabled) playPing(a.type === 'HELP_REQUESTED' ? 'sos' : 'critical');
           browserNotify(a.title, `${a.userName} — ${a.body}`);
           ui.pushToast({ title: a.title, body: `${a.userName} · ${a.body}`, kind: 'alert' });
         }
