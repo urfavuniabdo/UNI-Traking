@@ -6,6 +6,7 @@ import type { AlertPayload, AlertsResponse, Employee, FencesResponse, LivePositi
 import { useAlertFeed, useLive } from '@/stores/ui';
 import { useAsync, useNow } from '@/hooks/useAsync';
 import { fmtTime, haversineM, timeAgo, todayISODate, waLink, telLink } from '@/utils/format';
+import { motionEmoji } from '@/utils/motion';
 import LiveMap, { type BoardTrail, type TrailLayer } from '@/components/maps/LiveMap';
 import { eventGlyph } from '@/components/maps/icons';
 import { Btn, Chip, EmptyState, ErrorState, LiveSpeed, MotionChip, Num, Select, SeverityChip, Skeleton } from '@/components/ui';
@@ -388,7 +389,7 @@ function CarDetails({
     <div className="card absolute bottom-3 end-3 z-[500] max-h-[78%] w-[320px] overflow-y-auto p-3">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="truncate font-bold" style={{ fontSize: '.92rem' }}>🚐 {name}</h3>
+          <h3 className="truncate font-bold" style={{ fontSize: '.92rem' }}><span aria-hidden="true">{motionEmoji(pos.motionState)}</span> {name}</h3>
           <div className="muted" style={{ fontSize: '.7rem' }} dir="ltr">
             {pos.externalId ? <span>{pos.externalId} · </span> : null}
             <span className="num">{pos.lat.toFixed(5)}, {pos.lng.toFixed(5)}</span>

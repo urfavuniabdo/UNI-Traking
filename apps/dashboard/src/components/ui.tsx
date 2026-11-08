@@ -1,6 +1,7 @@
 import type { HTMLAttributes, ReactNode, InputHTMLAttributes, SelectHTMLAttributes, ButtonHTMLAttributes } from 'react';
 import type { MotionState, Severity, AlertStatus } from '@/api/types';
 import { MOTION, MOTION_STATE_AR } from '@shared';
+import { motionEmoji } from '@/utils/motion';
 
 /** Renders any value LTR + tabular-nums, safe inside Arabic RTL text. */
 export function Num({ children, className = '' }: { children: ReactNode; className?: string }) {
@@ -100,7 +101,11 @@ export function motionTone(m: MotionState): 'amber' | 'blue' | 'red' | 'gray' {
 }
 
 export function MotionChip({ state }: { state: MotionState }) {
-  return <Chip tone={motionTone(state)}>{MOTION_STATE_AR[state]}</Chip>;
+  return (
+    <Chip tone={motionTone(state)}>
+      <span aria-hidden="true">{motionEmoji(state)}</span> {MOTION_STATE_AR[state]}
+    </Chip>
+  );
 }
 
 /**

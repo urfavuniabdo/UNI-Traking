@@ -9,6 +9,7 @@ import { MOTION_COLORS, eventGlyph } from '@/components/maps/icons';
 import { Btn, Chip, ErrorState, IconBtn, Num, Skeleton } from '@/components/ui';
 import { Icon } from '@/components/Icon';
 import { fmtTime, todayISODate } from '@/utils/format';
+import { motionEmoji } from '@/utils/motion';
 import { subscribeRoute } from '@/realtime/socket';
 
 const SPEEDS = [1, 2, 4, 8, 16] as const;
@@ -173,7 +174,8 @@ export default function DriverRoutePage() {
               <b className="num">{fmtTime(current.clientTs)}</b>
               <Chip tone={current.buffered ? 'violet' : 'blue'}>{current.buffered ? 'من المخزن المحلي' : 'لحظي'}</Chip>
               <span>
-                <Num>{Math.round(current.speedKmh)}</Num> كم/س — {MOTION_STATE_AR[current.motionState]}
+                <Num>{Math.round(current.speedKmh)}</Num> كم/س — <span aria-hidden="true">{motionEmoji(current.motionState)}</span>{' '}
+                {MOTION_STATE_AR[current.motionState]}
               </span>
             </div>
           </div>
@@ -251,7 +253,7 @@ export default function DriverRoutePage() {
           {(['WALKING', 'RIDING', 'STOPPED', 'UNKNOWN'] as const).map((s) => (
             <span key={s} className="flex items-center gap-1.5">
               <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: MOTION_COLORS[s] }} />
-              {MOTION_STATE_AR[s]}
+              <span aria-hidden="true">{motionEmoji(s)}</span> {MOTION_STATE_AR[s]}
             </span>
           ))}
           <span className="muted ms-auto">

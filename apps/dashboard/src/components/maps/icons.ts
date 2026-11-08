@@ -1,5 +1,6 @@
 import L from 'leaflet';
 import type { AlertType, MotionState } from '@/api/types';
+import { motionEmoji } from '@/utils/motion';
 
 export const MOTION_COLORS: Record<MotionState, string> = {
   WALKING: '#f59e0b',
@@ -20,7 +21,7 @@ export function driverIcon(motion: MotionState, opts: { offline?: boolean; selec
     className: '',
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
-    html: `<div class="driver-marker" style="background:${color};width:${size}px;height:${size}px;opacity:${opts.offline ? 0.45 : 1};${opts.selected ? 'outline:3px solid rgba(37,99,235,.5);outline-offset:2px;' : ''}">🚐</div>`,
+    html: `<div class="driver-marker" style="background:${color};width:${size}px;height:${size}px;opacity:${opts.offline ? 0.45 : 1};${opts.selected ? 'outline:3px solid rgba(37,99,235,.5);outline-offset:2px;' : ''}">${motionEmoji(motion)}</div>`,
   });
   iconCache.set(key, icon);
   return icon;
